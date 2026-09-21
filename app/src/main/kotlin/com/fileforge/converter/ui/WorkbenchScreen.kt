@@ -163,12 +163,29 @@ fun WorkbenchScreen(
                         FileRow(
                             item = item,
                             checked = item.id in state.selection,
+                            onOpen = { viewModel.openDetail(item.id) },
                             onToggle = { viewModel.toggle(item.id) },
                             onDelete = { viewModel.remove(item.id) },
                         )
                     }
                 }
             }
+        }
+    }
+
+    state.detailId?.let { id ->
+        val detail = state.detail
+        val item = state.items.firstOrNull { it.id == id }
+        if (detail != null && item != null) {
+            DetailSheet(
+                item = item,
+                detail = detail,
+                preview = state.preview,
+                selected = id in state.selection,
+                onToggleSelect = { viewModel.toggle(id) },
+                onDelete = { viewModel.remove(id) },
+                onDismiss = viewModel::closeDetail,
+            )
         }
     }
 
@@ -213,9 +230,15 @@ private fun EmptyState(onAddFiles: () -> Unit) {
 }
 
 @Composable
-private fun FileRow(item: WorkItem, checked: Boolean, onToggle: () -> Unit, onDelete: () -> Unit) {
+private fun FileRow(
+    item: WorkItem,
+    checked: Boolean,
+    onOpen: () -> Unit,
+    onToggle: () -> Unit,
+    onDelete: () -> Unit,
+) {
     Card(
-        onClick = onToggle,
+        onClick = onOpen,
         colors = CardDefaults.cardColors(containerColor = if (checked) {
             MaterialTheme.colorScheme.secondaryContainer
         } else {
