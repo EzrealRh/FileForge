@@ -1,0 +1,88 @@
+package com.fileforge.converter.engine
+
+import android.content.Context
+import com.fileforge.core.ops.Operation
+import com.fileforge.converter.data.WorkItem
+import com.fileforge.converter.data.Workspace
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
+
+/** 一批操作的结局：成功的产物和逐个失败的说明。 */
+class RunResult(val outputs: List<WorkItem>, val failures: List<Pair<String, String>>) {
+    val isEmpty: Boolean get() = outputs.isEmpty() && failures.isEmpty()
+}
+
+/**
+ * 操作入口。引擎全在 IO 线程跑；单个文件失败只记录，不中断整批。
+ * 产物先落 staging，再进工作台，所以转换结果可以立刻被再加工。
+ */
+class OperationRunner(context: Context, private val workspace: Workspace) {
+
+    private val images = ImageEngine()
+    private val gifs = GifEngine(workspace, images)
+    private val pdf = PdfEngine(context, workspace)
+    private val video = VideoEngine(workspace)
+
+    suspend fun run(
+        items: List<WorkItem>,
+        operation: Operation,
+        onProgress: (percent: Int, label: String) -> Unit,
+    ): RunResult = withContext(Dispatchers.IO) {
+        val outputs = ArrayList<EngineOutput>()
+        val failures = ArrayList<Pair<String, String>>()
+
+        fun collect(label: String, block: () -> List<EngineOutput>) {
+            runCatching { block() }
+                .onSuccess { outputs += it }
+                .onFailure { error ->
+                    if (error is kotlinx.coroutines.CancellationException) throw error
+                    failures += label to (error.message ?: error.javaClass.simpleName)
+                }
+        }
+
+        when (operation) {
+            is Operation.ConvertImage -> items.forEach { item ->
+                collect(item.name) { listOf(images.convert(item, operation, ::staging)) }
+            }
+            is Operation.CompressImage -> items.forEach { item ->
+                collect(item.name) { listOf(images.compress(item, operation, ::staging)) }
+            }
+            is Operation.ImagesToPdf -> collect("${items.size} 张图片") {
+                listOf(pdf.imagesToPdf(items, operation.paper, operation.marginDp))
+            }
+            is Operation.SplitPdfBySize -> items.forEach { item ->
+                collect(item.name) { pdf.splitBySize(item, operation.targetBytes) { onProgress(0, item.name) } }
+            }
+            is Operation.ExtractPdfPages -> items.forEach { item ->
+                collect(item.name) { listOf(pdf.extractPages(item, operation.spec)) }
+            }
+            is Operation.PdfToImages -> items.forEach { item ->
+                collect(item.name) {
+                    pdf.pagesToImages(item, operation.scale) { bitmap ->
+                        operation.format.extension to images.encode(bitmap, operation.format, operation.quality)
+                    }
+                }
+            }
+            is Operation.CompressGif -> items.forEach { item ->
+                collect(item.name) { listOf(gifs.compress(item, operation)) }
+            }
+            is Operation.VideoToGif -> items.forEach { item ->
+                collect(item.name) { listOf(gifs.fromVideo(item, operation)) }
+            }
+            is Operation.CompressVideo -> items.forEach { item ->
+                collect(item.name) {
+                    listOf(video.compress(item, operation) { percent, -> onProgress(percent, item.name) })
+                }
+            }
+        }
+
+        coroutineContext.ensureActive()
+        RunResult(
+            outputs = outputs.map { output -> workspace.adopt(output.file, output.name, output.note ?: operation.label) },
+            failures = failures,
+        )
+    }
+
+    private fun staging(extension: String): java.io.File = workspace.newStagingFile(extension)
+}
