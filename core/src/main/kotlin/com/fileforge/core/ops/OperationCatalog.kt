@@ -12,7 +12,8 @@ enum class OperationKind(val label: String, val hint: String) {
     PdfToImages("PDF 每页导出图片", "页转 JPG / PNG / WebP"),
     CompressGif("压缩 GIF", "降尺寸、降帧、减色"),
     VideoToGif("视频转 GIF", "支持 MP4 / WebM"),
-    CompressVideo("压缩视频", "硬件转码压码率"),
+    CompressVideo("压缩视频", "硬件转码，可按目标体积反推码率"),
+    MergePdfs("合并 PDF", "按选中顺序拼成一份"),
     ;
 
     companion object {
@@ -30,6 +31,7 @@ enum class OperationKind(val label: String, val hint: String) {
             CompressGif -> fileKind == FileKind.Gif
             VideoToGif -> fileKind.isVideo
             CompressVideo -> fileKind.isVideo
+            MergePdfs -> fileKind == FileKind.Pdf
         }
     }
 }

@@ -54,6 +54,7 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
             is Operation.SplitPdfBySize -> items.forEach { item ->
                 collect(item.name) { pdf.splitBySize(item, operation.targetBytes) { onProgress(0, item.name) } }
             }
+            is Operation.MergePdfs -> collect("${items.size} 份 PDF") { listOf(pdf.merge(items)) }
             is Operation.ExtractPdfPages -> items.forEach { item ->
                 collect(item.name) { listOf(pdf.extractPages(item, operation.spec)) }
             }

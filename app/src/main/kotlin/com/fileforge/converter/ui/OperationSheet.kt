@@ -176,6 +176,10 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
                         "文件名按 part01、part02… 编号" } ?: "",
                 )
             }
+            OperationKind.MergePdfs -> {
+                items.forEachIndexed { index, item -> Summary("${index + 1}. ${item.name} · ${item.sizeLabel}") }
+                Summary("按上面的顺序拼成一份，页码连续排。")
+            }
             OperationKind.ExtractPdfPages -> {
                 OutlinedTextField(
                     value = pageSpec,
@@ -241,6 +245,7 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
             OperationKind.ImagesToPdf -> Operation.ImagesToPdf(paper, margin.toInt())
             OperationKind.SplitPdfBySize -> Operation.SplitPdfBySize(targetBytes ?: SizeInput.MEGA * 10)
             OperationKind.ExtractPdfPages -> Operation.ExtractPdfPages(pageSpec)
+            OperationKind.MergePdfs -> Operation.MergePdfs
             OperationKind.PdfToImages -> Operation.PdfToImages(imageFormat, pdfScale, quality.toInt())
             OperationKind.CompressGif -> Operation.CompressGif(maxEdge.toInt(), gifFps.toInt(), gifColors.toInt())
             OperationKind.VideoToGif -> Operation.VideoToGif(gifFps.toInt(), maxEdge.toInt(), startSecond.toDouble(), durationSecond.toDouble())
