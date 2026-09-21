@@ -65,7 +65,33 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
         }
     }
 
-        fun pageCount(item: WorkItem): Int = loadForReading(item.file).use { it.numberOfPages }
+        /** 按选中顺序把多份 PDF 拼成一份。 */
+    fun merge(items: List<WorkItem>): EngineOutput {
+        require(items.size >= 2) { "合并 PDF 至少选两个文件" }
+        val document = PDDocument()
+        val output = workspace.newStagingFile("pdf")
+        var pages = 0
+        try {
+            items.forEach { item ->
+                loadForReading(item.file).use { source ->
+                    for (index in 0 until source.numberOfPages) {
+                        document.importPage(source.getPage(index))
+                    }
+                    pages += source.numberOfPages
+                }
+            }
+            document.save(output)
+        } finally {
+            runCatching { document.close() }
+        }
+        return EngineOutput(
+            OutputNaming.tagged(items.first().name, "合并${items.size}份", "pdf"),
+            output,
+            "共 $pages 页",
+        )
+    }
+
+    fun pageCount(item: WorkItem): Int = loadForReading(item.file).use { it.numberOfPages }
 
     fun imagesToPdf(items: List<WorkItem>, paper: PdfPaper, marginDp: Int): EngineOutput {
         require(items.isNotEmpty()) { "没有图片可选" }

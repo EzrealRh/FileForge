@@ -82,14 +82,23 @@ sealed interface Operation {
         override val label get() = "转为 GIF"
     }
 
-    /** 视频压缩：硬件编解码直接转码，不做 CPU 重绘除非需要缩尺寸。 */
+    /**
+     * 视频压缩：硬件编解码直接转码。给了 targetBytes 就按时长反推视频码率
+     * （见 [com.fileforge.core.video.VideoBitratePlan]），否则用固定码率。
+     */
     data class CompressVideo(
         val format: VideoFormat = VideoFormat.Mp4,
         val videoBitrateKbps: Int = 2500,
         val maxEdge: Int = 0,
         val audioBitrateKbps: Int = 96,
+        val targetBytes: Long? = null,
     ) : Operation {
-        override val label get() = "压缩视频"
+        override val label get() = if (targetBytes != null) "压到 ${targetLabel(targetBytes)} 以内" else "压缩视频"
+    }
+
+    /** 多份 PDF 按选中顺序合成一份。 */
+    data object MergePdfs : Operation {
+        override val label get() = "合并 PDF"
     }
 }
 

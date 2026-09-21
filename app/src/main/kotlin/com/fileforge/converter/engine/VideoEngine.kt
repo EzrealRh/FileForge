@@ -12,6 +12,7 @@ import com.fileforge.core.naming.OutputNaming
 import com.fileforge.core.ops.Operation
 import com.fileforge.core.ops.VideoFormat
 import com.fileforge.core.util.SizeInput
+import com.fileforge.core.video.VideoBitratePlan
 import com.fileforge.converter.data.WorkItem
 import com.fileforge.converter.data.Workspace
 import java.nio.ByteBuffer
@@ -55,10 +56,33 @@ class VideoEngine(private val workspace: Workspace) {
             }
             if (operation.format == VideoFormat.WebM) notes += "WebM 输出不带音轨"
 
+            val keepAudio = operation.format == VideoFormat.Mp4
+            if (keepAudio) audioExtractor.setDataSource(item.file.absolutePath)
+            val audioTrack = if (keepAudio) audioExtractor.selectFirst("audio/") else -1
+            if (keepAudio && audioTrack < 0) notes += "没有音轨可保留"
+            if (audioTrack >= 0) audioExtractor.selectTrack(audioTrack)
+            // 音轨是原样搬运不重编码的，所以预留体积要按源音轨的真实码率算
+            val audioBitsPerSecond = if (audioTrack < 0) {
+                0
+            } else {
+                audioExtractor.getTrackFormat(audioTrack).integer(MediaFormat.KEY_BIT_RATE)
+                    ?.coerceIn(32_000, 320_000) ?: 128_000
+            }
+
+            val durationUs = sourceFormat.long(MediaFormat.KEY_DURATION) ?: 0L
+            val fromTarget = operation.targetBytes?.let { wanted ->
+                VideoBitratePlan.videoBitrateBps(wanted, durationUs, audioBitsPerSecond)
+                    ?.also { notes += "按 ${SizeInput.format(wanted)} 目标算出 ${it / 1000} kbps（音轨占 ${audioBitsPerSecond / 1000} kbps）" }
+            }
+            if (operation.targetBytes != null && fromTarget == null) {
+                notes += "目标体积算不出码率（时长读不到或比音轨还小），改用 ${operation.videoBitrateKbps} kbps"
+            }
+            val videoBitsPerSecond = (fromTarget ?: operation.videoBitrateKbps * 1000).coerceIn(150_000, 80_000_000)
+
             val encoder = MediaCodec.createEncoderByType(mime).apply {
                 configure(
                     MediaFormat.createVideoFormat(mime, target.first, target.second).apply {
-                        setInteger(MediaFormat.KEY_BIT_RATE, (operation.videoBitrateKbps * 1000).coerceIn(150_000, 80_000_000))
+                        setInteger(MediaFormat.KEY_BIT_RATE, videoBitsPerSecond)
                         setInteger(MediaFormat.KEY_FRAME_RATE, sourceFormat.integer(MediaFormat.KEY_FRAME_RATE)?.coerceIn(1, 120) ?: 30)
                         setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 2)
                         setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
@@ -79,12 +103,6 @@ class VideoEngine(private val workspace: Workspace) {
                 throw IllegalStateException("这台设备解不了这个视频的编码格式：${error.message}", error)
             }
 
-            val keepAudio = operation.format == VideoFormat.Mp4
-            if (keepAudio) audioExtractor.setDataSource(item.file.absolutePath)
-            val audioTrack = if (keepAudio) audioExtractor.selectFirst("audio/") else -1
-            if (keepAudio && audioTrack < 0) notes += "没有音轨可保留"
-            if (audioTrack >= 0) audioExtractor.selectTrack(audioTrack)
-
             job = Transcode(
                 decoder = decoder,
                 encoder = encoder,
@@ -96,7 +114,6 @@ class VideoEngine(private val workspace: Workspace) {
                 audioTrackIndex = audioTrack,
             )
 
-            val durationUs = sourceFormat.long(MediaFormat.KEY_DURATION) ?: 0L
             var decoded = false
             while (!job.encodeDone) {
                 if (!decoded) job.feedDecoder()
