@@ -10,7 +10,9 @@ import com.fileforge.core.model.FileKind
 import com.fileforge.core.ops.Operation
 import com.fileforge.converter.data.WorkItem
 import com.fileforge.converter.data.Workspace
+import com.fileforge.converter.engine.MetaReader
 import com.fileforge.converter.engine.OperationRunner
+import com.fileforge.converter.engine.FileDetail
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -31,6 +33,9 @@ data class WorkbenchState(
     val running: Running? = null,
     val notice: String? = null,
     val sheetOpen: Boolean = false,
+    val detailId: Long? = null,
+    val detail: FileDetail? = null,
+    val preview: android.graphics.Bitmap? = null,
 ) {
     val selected: List<WorkItem> get() = items.filter { it.id in selection }
     val visible: List<WorkItem> get() = items.filter { filter.matches(it.kind) }
@@ -41,6 +46,7 @@ class WorkbenchViewModel(app: Application) : AndroidViewModel(app) {
 
     private val workspace = Workspace(app)
     private val runner = OperationRunner(app, workspace)
+    private val meta = MetaReader()
     private val _state = MutableStateFlow(WorkbenchState(items = workspace.list()))
     val state = _state.asStateFlow()
 
@@ -86,6 +92,41 @@ class WorkbenchViewModel(app: Application) : AndroidViewModel(app) {
 
     fun openSheet(open: Boolean) {
         _state.value = _state.value.copy(sheetOpen = open)
+    }
+
+    /** 详情和预览图都要读文件，放 IO 线程做，别卡住列表。 */
+    fun openDetail(id: Long) {
+        val item = _state.value.find(id) ?: return
+        recyclePreview()
+        _state.value = _state.value.copy(
+            detailId = id,
+            detail = FileDetail(item.name, "", item.sizeLabel, "", item.fromOperation, emptyList(), null),
+            preview = null,
+        )
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val detail = runCatching { meta.read(item) }.getOrElse { error ->
+                FileDetail(item.name, "读取失败", item.sizeLabel, "", item.fromOperation, emptyList(), error.message)
+            }
+            val preview = if (item.kind.isImage || item.kind.isVideo || item.kind == com.fileforge.core.model.FileKind.Pdf) {
+                meta.preview(item)
+            } else {
+                null
+            }
+            if (_state.value.detailId == id) {
+                _state.value = _state.value.copy(detail = detail, preview = preview)
+            } else {
+                preview?.recycle()
+            }
+        }
+    }
+
+    fun closeDetail() {
+        recyclePreview()
+        _state.value = _state.value.copy(detailId = null, detail = null, preview = null)
+    }
+
+    private fun recyclePreview() {
+        _state.value.preview?.takeIf { !it.isRecycled }?.recycle()
     }
 
     fun consumeNotice() {
