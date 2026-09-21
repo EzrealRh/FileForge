@@ -1,0 +1,187 @@
+package com.fileforge.core
+
+import com.fileforge.core.naming.OutputNaming
+import com.fileforge.core.pdf.PageRangeException
+import com.fileforge.core.pdf.PageRangeParser
+import com.fileforge.core.pdf.SplitPlanner
+import com.fileforge.core.util.SizeInput
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Test
+
+class SizeInputTest {
+
+    @Test
+    fun `无单位按 MB 解析`() {
+        assertEquals(10L * SizeInput.MEGA, SizeInput.parse("10"))
+        assertEquals(1536L * SizeInput.KILO, SizeInput.parse("1.5MB"))
+        assertEquals(500L * SizeInput.KILO, SizeInput.parse(" 500k "))
+        assertEquals(2L * SizeInput.GIGA, SizeInput.parse("2G"))
+        assertEquals(3L * SizeInput.MEGA, SizeInput.parse("3兆"))
+    }
+
+    @Test
+    fun `非法输入返回 null 而不是崩`() {
+        assertNull(SizeInput.parse(""))
+        assertNull(SizeInput.parse("abc"))
+        assertNull(SizeInput.parse("0"))
+        assertNull(SizeInput.parse("-5"))
+        assertNull(SizeInput.parse("10X"))
+    }
+
+    @Test
+    fun `格式化给人看`() {
+        assertEquals("512 B", SizeInput.format(512))
+        assertEquals("1 KB", SizeInput.format(1024))
+        assertEquals("1.5 MB", SizeInput.format(1536 * 1024))
+    }
+}
+
+class PageRangeParserTest {
+
+    private fun pages(spec: String, total: Int) = PageRangeParser.toPageIndices(PageRangeParser.parse(spec), total)
+
+    @Test
+    fun `多段范围按用户给的顺序展开成 0-based 页索引`() {
+        assertEquals(listOf(99, 100, 199), pages("100-101,200", 300))
+    }
+
+    @Test
+    fun `各种分隔符都认`() {
+        val expected = listOf(0, 1, 2, 9)
+        assertEquals(expected, pages("1-3,10", 10))
+        assertEquals(expected, pages("1-3，10", 10))
+        assertEquals(expected, pages("1-3; 10", 10))
+        assertEquals(expected, pages("1-3、10", 10))
+        assertEquals(expected, pages("1-3 10", 10))
+    }
+
+    @Test
+    fun `开放端点贴到文档首尾`() {
+        assertEquals(listOf(9, 10, 11), pages("10-", 12))
+        assertEquals(listOf(0, 1, 2), pages("-3", 12))
+    }
+
+    @Test
+    fun `倒着写就是倒序取页`() {
+        assertEquals(listOf(2, 1, 0), pages("3-1", 5))
+    }
+
+    @Test
+    fun `重复写几遍就重复出几页`() {
+        assertEquals(listOf(0, 4, 0), pages("1,5,1", 5))
+    }
+
+    @Test
+    fun `越界直接报错不悄悄裁剪`() {
+        val error = assertThrows(PageRangeException::class.java) { pages("100-150", 120) }
+        assertTrue(error.message!!.contains("150"), error.message)
+    }
+
+    @Test
+    fun `非数字报错并指出是哪一段`() {
+        val error = assertThrows(PageRangeException::class.java) { pages("10-abc", 120) }
+        assertTrue(error.message!!.contains("abc"), error.message)
+    }
+
+    @Test
+    fun `空输入报错`() {
+        assertThrows(PageRangeException::class.java) { pages("   ", 120) }
+    }
+}
+
+class SplitPlannerTest {
+
+    private class Probe(private val pageBytes: Long) {
+        var calls = 0
+        fun measure(pages: List<Int>): Long {
+            calls++
+            check(pages.isNotEmpty())
+            return pages.size * pageBytes
+        }
+    }
+
+    @Test
+    fun `每组都不超目标体积`() {
+        val probe = Probe(1_000_000L)
+        val groups = SplitPlanner(10_000_000L, probe::measure).plan(95)
+        assertEquals(10, groups.size)
+        assertTrue(groups.all { it.size * 1_000_000L <= 10_000_000L })
+        assertEquals((0 until 95).toList(), groups.flatten())
+    }
+
+    @Test
+    fun `尾部不足目标体积的剩余页单独成文件`() {
+        val probe = Probe(1_000_000L)
+        val groups = SplitPlanner(10_000_000L, probe::measure).plan(23)
+        assertEquals(listOf(10, 10, 3), groups.map { it.size })
+    }
+
+    @Test
+    fun `页数正好整除时不会多出一个空文件`() {
+        val probe = Probe(1_000_000L)
+        val groups = SplitPlanner(10_000_000L, probe::measure).plan(20)
+        assertEquals(listOf(10, 10), groups.map { it.size })
+    }
+
+    @Test
+    fun `单页本身就超标时只能自己一份`() {
+        val probe = Probe(30_000_000L)
+        val groups = SplitPlanner(10_000_000L, probe::measure).plan(3)
+        assertEquals(listOf(listOf(0), listOf(1), listOf(2)), groups)
+    }
+
+    @Test
+    fun `只有一页时输出一份`() {
+        val probe = Probe(1L)
+        assertEquals(listOf(listOf(0)), SplitPlanner(10_000_000L, probe::measure).plan(1))
+    }
+
+    @Test
+    fun `用指数扩张加二分 试探次数远小于页数`() {
+        val probe = Probe(1_000_000L)
+        val groups = SplitPlanner(100_000_000L, probe::measure).plan(1000)
+        assertEquals(10, groups.size)
+        assertTrue(probe.calls < 300, "measure 调用了 ${probe.calls} 次")
+    }
+
+    @Test
+    fun `页面大小不均时也按实际体积切`() {
+        val sizes = listOf(5L, 1L, 1L, 8L, 2L, 2L, 2L, 9L)
+        val groups = SplitPlanner(10L) { pages -> pages.sumOf { sizes[it] } }.plan(sizes.size)
+        assertEquals(listOf(listOf(0, 1, 2), listOf(3, 4), listOf(5, 6), listOf(7)), groups)
+        assertTrue(groups.all { it.sumOf { sizes[it] } <= 10L })
+    }
+}
+
+class OutputNamingTest {
+
+    @Test
+    fun `分割件按总份数决定补零宽度`() {
+        assertEquals("报告_part01.pdf", OutputNaming.part("报告.pdf", 1, 9, "pdf"))
+        assertEquals("报告_part009.pdf", OutputNaming.part("报告.pdf", 9, 100, "pdf"))
+        assertEquals("报告_part100.pdf", OutputNaming.part("报告.pdf", 100, 100, "pdf"))
+    }
+
+    @Test
+    fun `重名时补序号`() {
+        assertEquals("a (2).jpg", OutputNaming.unique("a.jpg", setOf("a.jpg")))
+        assertEquals("a (3).jpg", OutputNaming.unique("a.jpg", setOf("a.jpg", "a (2).jpg")))
+        assertEquals("b.jpg", OutputNaming.unique("b.jpg", setOf("a.jpg")))
+    }
+
+    @Test
+    fun `去掉文件系统不允许的字符但保留中文`() {
+        assertEquals("报告1", OutputNaming.sanitize("报告/1<>:\"|?*"))
+        assertEquals("file", OutputNaming.sanitize("***"))
+    }
+
+    @Test
+    fun `取名字主干和扩展名`() {
+        assertEquals("photo", OutputNaming.stem("photo.JPG"))
+        assertEquals("tar", OutputNaming.extension("a.tar"))
+        assertEquals("pdf", OutputNaming.extension("noext"))
+    }
+}
