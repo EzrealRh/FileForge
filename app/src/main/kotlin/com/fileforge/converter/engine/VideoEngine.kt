@@ -67,9 +67,10 @@ class VideoEngine(private val workspace: Workspace) {
                     null,
                     MediaCodec.CONFIGURE_FLAG_ENCODE,
                 )
+                // createInputSurface() 只在 Configured 状态有效，必须在 start() 之前取
+                surface = createInputSurface()
                 start()
             }
-            surface = encoder.createInputSurface()
             val decoder = MediaCodec.createDecoderByType(sourceFormat.string(MediaFormat.KEY_MIME) ?: "")
             try {
                 decoder.configure(sourceFormat, surface, null, 0)
@@ -148,6 +149,7 @@ class VideoEngine(private val workspace: Workspace) {
         var decodeDone = false
         var encodeDone = false
         var eosSent = false
+        private var streamEndQueued = false
         var lastPtsUs = 0L
 
         private var videoTrack = -1
@@ -164,7 +166,10 @@ class VideoEngine(private val workspace: Workspace) {
             val target = decoder.getInputBuffer(index) ?: return
             val size = videoExtractor.readSampleData(target, 0)
             if (size < 0) {
-                decoder.queueInputBuffer(index, 0, 0, lastPtsUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                if (!streamEndQueued) {
+                    decoder.queueInputBuffer(index, 0, 0, lastPtsUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                    streamEndQueued = true
+                }
             } else {
                 lastPtsUs = videoExtractor.sampleTime
                 decoder.queueInputBuffer(index, 0, size, videoExtractor.sampleTime, 0)
