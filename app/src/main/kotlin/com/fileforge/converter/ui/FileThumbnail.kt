@@ -47,7 +47,7 @@ fun FileThumbnail(item: WorkItem, modifier: Modifier = Modifier) {
 
 @Composable
 private fun produceImage(file: File, item: WorkItem): ImageBitmap? {
-    val needsPixel = (item.kind.isImage && item.kind != FileKind.Gif) || item.kind.isVideo
+    val needsPixel = item.kind.isImage || item.kind.isVideo
     if (!needsPixel) return null
     return produceState<ImageBitmap?>(initialValue = null, file.absolutePath, file.length()) {
         value = runCatching {

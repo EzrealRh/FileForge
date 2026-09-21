@@ -1,5 +1,6 @@
 package com.fileforge.converter.ui
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Delete
@@ -132,19 +134,25 @@ fun WorkbenchScreen(
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    KindFilter.entries.forEach { filter ->
-                        androidx.compose.material3.FilterChip(
-                            selected = state.filter == filter,
-                            onClick = { viewModel.filter(filter) },
-                            label = { Text(filter.label) },
-                        )
+                    // 筛选条横向滚，否则四个 chip 会把「添加」挤成两行
+                    Row(
+                        Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        KindFilter.entries.forEach { filter ->
+                            androidx.compose.material3.FilterChip(
+                                selected = state.filter == filter,
+                                onClick = { viewModel.filter(filter) },
+                                label = { Text(filter.label, maxLines = 1) },
+                            )
+                        }
                     }
-                    Spacer(Modifier.weight(1f))
                     Button(onClick = onAddFiles, enabled = !state.busy) {
-                        Icon(Icons.Outlined.Add, contentDescription = null)
-                        Spacer(Modifier.width(6.dp))
-                        Text("添加")
+                        Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("添加", maxLines = 1)
                     }
                 }
                 LazyColumn(
