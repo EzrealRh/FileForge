@@ -17,14 +17,21 @@ class GifEncoder(
     fun encode(frames: List<GifFrame>): ByteArray {
         require(frames.isNotEmpty()) { "没有帧可编码" }
         require(width in 1..65535 && height in 1..65535) { "尺寸超出 GIF 上限" }
+        // 像素数不够时下面会静默按透明补，等于在画面上挖洞，必须在入口就挡住
+        val pixelCount = width * height
+        frames.forEachIndexed { index, frame ->
+            require(frame.argb.size == pixelCount) {
+                "第 ${index + 1} 帧有 ${frame.argb.size} 个像素，画布需要 $pixelCount 个"
+            }
+        }
 
         val sample = sampleColors(frames)
         val needsTransparency = sample.sawTransparent
+        val offset = if (needsTransparency) 1 else 0
         val candidates = MedianCut.build(
             sample.colors,
-            if (needsTransparency) maxColors - 1 else maxColors,
+            minOf(maxColors, MAX_PALETTE - offset).coerceAtLeast(1),
         ).let { if (it.isEmpty()) intArrayOf(BLACK) else it }
-        val offset = if (needsTransparency) 1 else 0
 
         val indexBits = colorTableBits(candidates.size + offset)
         val entries = 1 shl indexBits
@@ -47,21 +54,16 @@ class GifEncoder(
         }
         writeLoopExtension(out, loopCount)
 
-        val pixelCount = width * height
         val indices = IntArray(pixelCount)
         for (frame in frames) {
-            var frameHasTransparency = false
             for (i in 0 until pixelCount) {
                 val pixel = frame.argb.getOrElse(i) { 0 }
-                if (pixel == 0) {
-                    frameHasTransparency = needsTransparency
-                    indices[i] = 0
-                } else {
-                    indices[i] = lookup.indexOf(pixel)
-                }
+                indices[i] = if (pixel == 0) 0 else lookup.indexOf(pixel)
             }
 
-            writeGraphicControl(out, frame.delayCs, frameHasTransparency)
+            // 透明槽是整段动画的属性：0 号位被让给透明后就不可能再表示真颜色，
+            // 所以每帧都要带上标志位，否则"擦回背景"会把背景槽当黑色画出来。
+            writeGraphicControl(out, frame.delayCs, needsTransparency)
             out.write(0x2C)
             out.le16(0)
             out.le16(0)
@@ -100,8 +102,9 @@ class GifEncoder(
         out.write(0x21)
         out.write(0xF9)
         out.write(0x04)
-        // 位 2-4 是 disposal=2（画完恢复背景），位 0 是透明标志
-        out.write(if (transparent) 0x09 else 0x04)
+        // 位 2-4 是 disposal=2（画完恢复背景），位 0 是透明标志。
+        // 每帧都是完整画布，所以一律 disposal=2：否则下一帧的镂空处会透出这一帧的画面。
+        out.write(if (transparent) 0x09 else 0x08)
         out.le16(delayCs.coerceIn(0, 65535))
         out.write(0x00)
         out.write(0x00)
@@ -130,6 +133,7 @@ class GifEncoder(
 
     companion object {
         private const val BLACK = 0x000000
+        private const val MAX_PALETTE = 256
         private const val SAMPLE_BUDGET = 120_000
 
         /** 调色板项数必须是 2 的幂，且至少 4 项（LZW 初始码长最小为 2）。 */

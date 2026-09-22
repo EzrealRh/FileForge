@@ -32,9 +32,10 @@ object SizeInput {
     fun format(bytes: Long): String {
         if (bytes < KILO) return "$bytes B"
         val kb = bytes.toDouble() / KILO
-        if (kb < KILO) return trim(kb) + " KB"
+        // 先按档位取值再判断，否则 1023.6KB 会被印成 "1024 KB"
+        if (trim(kb).toDouble() < KILO) return trim(kb) + " KB"
         val mb = kb / KILO
-        if (mb < KILO) return trim(mb) + " MB"
+        if (trim(mb).toDouble() < KILO) return trim(mb) + " MB"
         return trim(mb / KILO) + " GB"
     }
 
