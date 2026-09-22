@@ -17,6 +17,7 @@ import com.fileforge.core.util.SizeInput
 import android.graphics.pdf.PdfRenderer
 import com.fileforge.converter.data.WorkItem
 import com.fileforge.converter.data.Workspace
+import com.tom_roush.pdfbox.cos.COSBase
 import com.tom_roush.pdfbox.cos.COSName
 import com.tom_roush.pdfbox.cos.COSObject
 import com.tom_roush.pdfbox.cos.COSStream
@@ -28,6 +29,7 @@ import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
 import com.tom_roush.pdfbox.pdmodel.common.PDRectangle
 import com.tom_roush.pdfbox.pdmodel.common.PDStream
 import com.tom_roush.pdfbox.pdmodel.graphics.image.JPEGFactory
+import com.tom_roush.pdfbox.pdmodel.encryption.InvalidPasswordException
 import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject
 import com.tom_roush.pdfbox.text.PDFTextStripper
 import java.io.File
@@ -123,11 +125,11 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
             else PageRangeParser.toPageIndices(PageRangeParser.parse(spec), total).toSet()
             require(targets.isNotEmpty()) { "没有页可旋转" }
             val output = workspace.newStagingFile("pdf")
-            copyPages(source, (0 until total).toList(), output) { position, from, to ->
-                if (position in targets) to.rotation = ((from.rotation + degrees) % 360 + 360) % 360
+            copyPages(source, (0 until total).toList(), output) { index, from, to ->
+                if (index in targets) to.rotation = ((from.rotation + degrees) % 360 + 360) % 360
             }
             return EngineOutput(
-                OutputNaming.tagged(item.name, "转${degrees}", "pdf"),
+                OutputNaming.tagged(item.name, rotationTag(degrees), "pdf"),
                 output,
                 "转了 ${targets.size} 页，共 $total 页",
             )
@@ -184,9 +186,25 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
             } else {
                 candidate.delete()
             }
+            // 一张图都没得换就别再往下一档白跑一遍（每档都是整份读+整份写）
+            if (stat.images == 0) break
             if (targetBytes == null || size <= targetBytes || stat.memoryLimited) break
         }
-        val output = best?.first ?: error("压缩没出结果")
+        val (output, stat) = best ?: error("压缩没出结果")
+        if (stat.replaced == 0) {
+            output.file.delete()
+            error(
+                when {
+                    stat.images == 0 -> "这份 PDF 没有内嵌图片，压不动（文字和矢量不归这个操作管）"
+                    stat.skipped > 0 -> "图片都不适合重编（带透明掩膜或 1 位扫描图），没出新文件"
+                    else -> "图片重编后反而更大，原样已经够紧凑，没出新文件"
+                },
+            )
+        }
+        if (output.file.length() >= original) {
+            output.file.delete()
+            error("压完没比原文件小（${SizeInput.format(original)}）：这份的大头不在图片上，没出新文件")
+        }
         return if (targetBytes != null && output.file.length() > targetBytes) {
             output.copy(note = "${output.note}；还没到 ${SizeInput.format(targetBytes)}，文字和矢量部分压不动")
         } else {
@@ -197,16 +215,24 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
     private class CompressStat {
         var images = 0
         var replaced = 0
-        var skipped = 0
         var kept = 0
         var memoryLimited = false
+        private val reasons = LinkedHashMap<String, Int>()
+
+        fun skip(reason: String) {
+            reasons[reason] = (reasons[reason] ?: 0) + 1
+        }
+
+        val skipped: Int get() = reasons.values.sum()
 
         fun note(original: Long, size: Long, tier: PdfTier): String {
             val parts = ArrayList<String>()
             parts += "${SizeInput.format(original)} → ${SizeInput.format(size)}"
             parts += "重编 $replaced/$images 张图"
             if (kept > 0) parts += "$kept 张重编更大已留原图"
-            if (skipped > 0) parts += "$skipped 张没动（透明通道或特殊色彩空间）"
+            if (reasons.isNotEmpty()) {
+                parts += "跳过 $skipped 张（" + reasons.entries.joinToString("、") { "${it.key} ${it.value} 张" } + "）"
+            }
             if (memoryLimited) parts += "内存吃紧，后面的图没再处理"
             parts += "用档 ${tier.label}"
             return parts.joinToString("，")
@@ -221,10 +247,10 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
             stat.images = images.size
             for ((position, reference) in images.withIndex()) {
                 onProgress((position + 1) * 100 / images.size)
-                when (shrinkOne(document, reference, tier)) {
+                when (shrinkOne(document, reference, tier, stat)) {
                     Shrink.Replaced -> stat.replaced++
                     Shrink.Kept -> stat.kept++
-                    Shrink.Skipped -> stat.skipped++
+                    Shrink.Skipped -> Unit
                     Shrink.NoRoom -> stat.memoryLimited = true
                 }
                 if (stat.memoryLimited) break
@@ -238,22 +264,43 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
 
     private enum class Shrink { Replaced, Kept, Skipped, NoRoom }
 
+    /**
+     * 文档里所有图片对象。软掩膜本身也是一张 /Subtype /Image 的灰度图，得先认出来排掉：
+     * 把它当普通图重编成 JPEG 就变成「RGB 图 /SMask 指向一张 RGB 图」，规范不允许，安卓侧渲染会坏。
+     */
     private fun imageObjects(document: PDDocument): List<COSObject> {
         val found = ArrayList<COSObject>()
+        val masks = HashSet<COSBase>()
         for (reference in document.document.objects) {
             val stream = runCatching { reference.getObject() }.getOrNull() as? COSStream ?: continue
             val subtype = stream.getDictionaryObject(COSName.SUBTYPE) as? COSName ?: continue
-            if (subtype.name == COSName.IMAGE.name) found += reference
+            if (subtype.name != COSName.IMAGE.name) continue
+            found += reference
+            // 掩膜既可能是间接对象也可能是内联的，两种引用形式都记下来
+            stream.getItem(COSName.SMASK)?.let { mask ->
+                masks += mask
+                if (mask is COSObject) runCatching { mask.getObject() }.getOrNull()?.let { masks += it }
+            }
         }
-        return found
+        return found.filterNot { it in masks || it.getObject() in masks }
     }
 
-    private fun shrinkOne(document: PDDocument, reference: COSObject, tier: PdfTier): Shrink {
+    private fun shrinkOne(
+        document: PDDocument,
+        reference: COSObject,
+        tier: PdfTier,
+        stat: CompressStat,
+    ): Shrink {
         val stream = reference.getObject() as? COSStream ?: return Shrink.Skipped
         val image = PDImageXObject(PDStream(stream), null)
-        if (skipReason(stream, image) != null) return Shrink.Skipped
-        val pixels = image.width.toLong() * image.height
-        if (pixels > MAX_IMAGE_PIXELS) return Shrink.Skipped
+        skipReason(stream, image)?.let {
+            stat.skip(it)
+            return Shrink.Skipped
+        }
+        if (image.width.toLong() * image.height > MAX_IMAGE_PIXELS) {
+            stat.skip("单张超 ${MAX_IMAGE_PIXELS / 1_000_000}M 像素")
+            return Shrink.Skipped
+        }
         val originalBytes = stream.length
         val raw = try {
             image.image
@@ -273,6 +320,7 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
         } catch (error: OutOfMemoryError) {
             Shrink.NoRoom
         } catch (error: Exception) {
+            stat.skip("重编失败")
             Shrink.Skipped
         } finally {
             scaled?.recycle()
@@ -281,10 +329,18 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
     }
 
     private fun skipReason(stream: COSStream, image: PDImageXObject): String? = when {
-        stream.getItem(COSName.SMASK) != null -> "带透明通道，重编会丢"
-        stream.getBoolean(COSName.IMAGE_MASK.name, false) -> "1 位掩膜图，重编会糊"
-        runCatching { image.colorSpace?.name }.getOrNull() !in PROCESSABLE -> "色彩空间不适合重编"
+        stream.getItem(COSName.SMASK) != null -> "带透明掩膜"
+        stream.getBoolean(COSName.IMAGE_MASK.name, false) -> "1 位掩膜图"
+        stream.getInt(COSName.BITS_PER_COMPONENT, 8) == 1 -> "1 位扫描图"
+        runCatching { image.colorSpace?.name }.getOrNull() !in PROCESSABLE -> "色彩空间不合适"
         else -> null
+    }
+
+    /** 文件名里的旋转说法要跟界面对得上：270 就是逆时针 90。 */
+    private fun rotationTag(degrees: Int): String = when (((degrees % 360) + 360) % 360) {
+        90 -> "右旋90"
+        270 -> "左旋90"
+        else -> "转${degrees}"
     }
 
     /** 降采样并铺白底：JPEG 不接受透明通道，也不接受 ARGB 之外的位图配置。 */
@@ -308,21 +364,28 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
             val pages = if (spec.isBlank()) (0 until total).toList()
             else PageRangeParser.toPageIndices(PageRangeParser.parse(spec), total)
             val builder = StringBuilder()
+            var found = 0
             pages.forEach { index ->
                 val stripper = PDFTextStripper()
                 stripper.setSortByPosition(true)
                 stripper.setStartPage(index + 1)
                 stripper.setEndPage(index + 1)
+                val text = stripper.getText(document).trim()
+                if (text.isEmpty()) return@forEach
+                found++
                 if (pages.size > 1) builder.append("── 第 ${index + 1} 页 ──\n")
-                builder.append(stripper.getText(document).trim()).append('\n')
+                builder.append(text).append('\n')
             }
-            if (builder.isBlank()) error("这份 PDF 没有文字层，可能是扫描件；试试「每页导出图片」")
+            if (found == 0) error("这份 PDF 没有文字层（扫描件就是这样），要留档就走「每页导出图片」")
             val text = builder.toString()
             val output = workspace.newStagingFile("txt").apply { writeBytes(text.toByteArray()) }
+            val silent = pages.size - found
             return EngineOutput(
                 OutputNaming.tagged(item.name, "文字", "txt"),
                 output,
-                "${pages.size} 页，${SizeInput.format(output.length())}",
+                "${found} 页有文字" +
+                    (if (silent > 0) "，$silent 页抽不出字（扫描页？）" else "") +
+                    "，${SizeInput.format(output.length())}",
             )
         } finally {
             runCatching { document.close() }
@@ -407,15 +470,16 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
         source: PDDocument,
         pages: List<Int>,
         target: File,
-        tweak: (position: Int, from: PDPage, to: PDPage) -> Unit = { _, _, _ -> },
+        /** tweak 收到的是原文件里的页号，不是本次复制列表里的下标。 */
+        tweak: (pageIndex: Int, from: PDPage, to: PDPage) -> Unit = { _, _, _ -> },
     ): Long {
         val document = PDDocument(scratchSetting())
         try {
-            pages.forEachIndexed { position, index ->
+            pages.forEach { index ->
                 val from = source.getPage(index)
                 val to = document.importPage(from)
                 from.resources?.let { to.resources = it }
-                tweak(position, from, to)
+                tweak(index, from, to)
             }
             document.save(target)
         } finally {
@@ -434,18 +498,17 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
     /** 读源文件；有密码的 PDF 在这里就换成人话提示，不往下抛一堆术语。 */
     private fun loadForReading(file: File): PDDocument = runCatching {
         PDDocument.load(file, scratchSetting())
-    }.getOrElse { throw IllegalArgumentException(readFailureMessage(file), it) }
-
-    private fun readFailureMessage(file: File): String {
-        val emptyPassword = runCatching {
-            PDDocument.load(file, "", scratchSetting()).also { runCatching { it.close() } }
-        }.isSuccess
-        return if (emptyPassword) "这份 PDF 读不了，可能已损坏" else "这份 PDF 有密码保护，先去掉密码再来"
+    }.getOrElse { error ->
+        val needsPassword = generateSequence<Throwable>(error) { it.cause }.any { it is InvalidPasswordException }
+        throw IllegalArgumentException(
+            if (needsPassword) "这份 PDF 有密码保护，先去掉密码再来"
+            else "这份 PDF 读不了，可能已损坏：${error.message ?: error.javaClass.simpleName}",
+        )
     }
 
     /** 大文档别压 Java 堆：PDFBox 的中间对象全部落到应用缓存目录。 */
     private fun scratchSetting(): MemoryUsageSetting =
-        MemoryUsageSetting.setupTempFileOnly().setTempDir(File(context.cacheDir, "pdf").apply { mkdirs() })
+        MemoryUsageSetting.setupTempFileOnly().setTempDir(workspace.pdfScratch)
 
     private companion object {
         const val MAX_IMAGE_PIXELS = 12_000_000L

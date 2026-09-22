@@ -4,7 +4,9 @@ import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import org.apache.pdfbox.cos.COSBase;
 import org.apache.pdfbox.cos.COSDictionary;
 import org.apache.pdfbox.cos.COSName;
@@ -19,6 +21,7 @@ import org.apache.pdfbox.pdmodel.common.PDStream;
 import org.apache.pdfbox.pdmodel.font.PDType1Font;
 import org.apache.pdfbox.pdmodel.graphics.color.PDColorSpace;
 import org.apache.pdfbox.pdmodel.graphics.image.JPEGFactory;
+import org.apache.pdfbox.pdmodel.graphics.image.LosslessFactory;
 import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
 import org.apache.pdfbox.rendering.PDFRenderer;
 import org.apache.pdfbox.text.PDFTextStripper;
@@ -33,6 +36,7 @@ public final class PdfProbe {
     public static void main(String[] args) throws Exception {
         switch (args[0]) {
             case "make-inherited" -> makeInherited(new File(args[1]));
+            case "make-smask" -> makeSmask(new File(args[1]));
             case "make-images" -> makeImages(new File(args[1]), Integer.parseInt(args[2]));
             case "copy" -> copy(new File(args[1]), new File(args[2]), parsePages(args[3]), args[4].equals("fix"));
             case "compress" -> compress(new File(args[1]), new File(args[2]),
@@ -140,6 +144,20 @@ public final class PdfProbe {
             expect(Math.abs(after[i] - before[i]) < 2.0, "第 " + (i + 1) + " 页压完还是那张图（" + before[i] + "→" + after[i] + "）");
         }
         expect(textOf(packed).contains("PAGE1"), "文字层不能丢");
+
+        File masked = new File(dir, "smask.pdf");
+        makeSmask(masked);
+        File maskedPacked = new File(dir, "smask-compressed.pdf");
+        compress(masked, maskedPacked, 300, 0.5f);
+        try (PDDocument doc = PDDocument.load(maskedPacked)) {
+            PDImageXObject kept = firstImage(doc);
+            PDImageXObject soft = kept.getSoftMask();
+            expect(soft != null, "压缩不能把透明掩膜弄丢");
+            expect("DeviceGray".equals(soft.getColorSpace().getName()),
+                    "掩膜必须还是单通道灰度（规范硬要求），实际 " + soft.getColorSpace().getName());
+            expect(kept.getWidth() == soft.getWidth() && kept.getHeight() == soft.getHeight(),
+                    "掩膜尺寸要跟图一致：" + kept.getWidth() + "x" + kept.getHeight() + " vs " + soft.getWidth() + "x" + soft.getHeight());
+        }
         System.out.println("verify PASS");
     }
 
@@ -224,6 +242,50 @@ public final class PdfProbe {
         System.out.println("make-inherited " + out + "：第1页资源搬到 /Pages 根节点，第3页改为完全靠继承");
     }
 
+    /** 造一张带软掩膜的图：掩膜本身也是 /Subtype /Image 的 DeviceGray 图，压缩时最容易顺手被重编坏掉。 */
+    private static void makeSmask(File out) throws Exception {
+        try (PDDocument doc = new PDDocument()) {
+            PDPage page = new PDPage(new PDRectangle(300, 220));
+            doc.addPage(page);
+            BufferedImage body = picture(600, 440, 9);
+            BufferedImage alpha = new BufferedImage(600, 440, BufferedImage.TYPE_BYTE_GRAY);
+            for (int y = 0; y < 440; y++) {
+                for (int x = 0; x < 600; x++) {
+                    // 起伏大的掩膜：Flate 压不动，才可能被重编成 JPEG 而被换掉（平掩膜不会走到那条路）
+                    int v = (x * 3 + y * 5 + ((x * y) % 31) * 4) & 0xFF;
+                    alpha.setRGB(x, y, (v << 16) | (v << 8) | v);
+                }
+            }
+            PDImageXObject image = LosslessFactory.createFromImage(doc, body);
+            PDImageXObject mask = LosslessFactory.createFromImage(doc, alpha);
+            image.getCOSObject().setItem(COSName.SMASK, new COSObject(mask.getCOSObject()));
+            try (PDPageContentStream stream = new PDPageContentStream(doc, page)) {
+                stream.drawImage(image, 20, 20, 260, 180);
+                stream.beginText();
+                stream.setFont(PDType1Font.HELVETICA, 14);
+                stream.newLineAtOffset(20, 12);
+                stream.showText("MASKED");
+                stream.endText();
+            }
+            doc.save(out);
+        }
+        try (PDDocument doc = PDDocument.load(out)) {
+            PDImageXObject first = firstImage(doc);
+            PDImageXObject soft = first.getSoftMask();
+            System.out.println("make-smask " + out + "：图 " + first.getWidth() + "x" + first.getHeight()
+                    + " 色彩 " + first.getColorSpace().getName()
+                    + "，掩膜 " + (soft == null ? "没挂上" : soft.getWidth() + "x" + soft.getHeight() + " " + soft.getColorSpace().getName()));
+        }
+    }
+
+    private static PDImageXObject firstImage(PDDocument doc) throws IOException {
+        for (COSObject reference : doc.getDocument().getObjects()) {
+            if (!(reference.getObject() instanceof COSStream stream)) continue;
+            if (stream.getDictionaryObject(COSName.SUBTYPE) == COSName.IMAGE) return new PDImageXObject(new PDStream(stream), null);
+        }
+        throw new IllegalStateException("文件里没有图片");
+    }
+
     /** 造一份图片很多的文件：每页一张不同的大图，外加一张全篇共用的图，用来测压缩比与共享对象。 */
     private static void makeImages(File out, int pages) throws Exception {
         try (PDDocument doc = new PDDocument()) {
@@ -304,9 +366,8 @@ public final class PdfProbe {
         int keptBecauseBigger = 0;
         List<String> skipped = new ArrayList<>();
         try (PDDocument doc = PDDocument.load(source)) {
-            for (COSObject object : doc.getDocument().getObjects()) {
-                if (!(object.getObject() instanceof COSStream stream)) continue;
-                if (stream.getDictionaryObject(COSName.SUBTYPE) != COSName.IMAGE) continue;
+            for (COSObject reference : imageObjects(doc)) {
+                COSStream stream = (COSStream) reference.getObject();
                 PDImageXObject image = new PDImageXObject(new PDStream(stream), null);
                 String reason = skipReason(image);
                 if (reason != null) {
@@ -321,7 +382,7 @@ public final class PdfProbe {
                     keptBecauseBigger++;
                     continue;
                 }
-                object.setObject(fresh.getCOSObject());
+                reference.setObject(fresh.getCOSObject());
                 replaced++;
                 saved += original - smaller;
             }
@@ -334,10 +395,40 @@ public final class PdfProbe {
         for (String reason : skipped) System.out.println("  跳过：" + reason);
     }
 
+    /** 和 PdfEngine.imageObjects 同一条逻辑：软掩膜本身也是图片对象，得先排掉再谈重编。 */
+    private static List<COSObject> imageObjects(PDDocument doc) throws IOException {
+        List<COSObject> found = new ArrayList<>();
+        Set<COSBase> masks = new HashSet<>();
+        for (COSObject reference : doc.getDocument().getObjects()) {
+            COSBase base;
+            try {
+                base = reference.getObject();
+            } catch (Exception error) {
+                continue;
+            }
+            if (!(base instanceof COSStream stream)) continue;
+            COSName subtype = stream.getDictionaryObject(COSName.SUBTYPE) instanceof COSName name ? name : null;
+            if (subtype == null || !subtype.getName().equals(COSName.IMAGE.getName())) continue;
+            found.add(reference);
+            COSBase mask = stream.getItem(COSName.SMASK);
+            if (mask != null) {
+                masks.add(mask);
+                if (mask instanceof COSObject object) masks.add(object.getObject());
+            }
+        }
+        List<COSObject> kept = new ArrayList<>();
+        for (COSObject reference : found) {
+            if (masks.contains(reference) || masks.contains(reference.getObject())) continue;
+            kept.add(reference);
+        }
+        return kept;
+    }
+
     private static String skipReason(PDImageXObject image) throws IOException {
         COSDictionary dict = image.getCOSObject();
         if (dict.getItem(COSName.SMASK) != null) return "带透明通道，重编会丢";
         if (dict.getBoolean(COSName.IMAGE_MASK.getName(), false)) return "1 位掩膜图，重编会糊";
+        if (dict.getInt(COSName.BITS_PER_COMPONENT, 8) == 1) return "1 位扫描图，重编会糊";
         PDColorSpace space = image.getColorSpace();
         String name = space == null ? "未知" : space.getName();
         if (!name.equals("DeviceRGB") && !name.equals("DeviceGray")) return "色彩空间 " + name + " 不重编";

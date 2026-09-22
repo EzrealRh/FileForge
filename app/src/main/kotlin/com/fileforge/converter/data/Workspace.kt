@@ -34,6 +34,9 @@ class Workspace(context: Context) {
 
     private val root = File(context.filesDir, "workspace").apply { mkdirs() }
     private val staging = File(context.cacheDir, "staging").apply { mkdirs() }
+
+    /** PDFBox 的中间对象落这里；进程被杀掉时它自己不清，所以启动时跟着 staging 一起扫。 */
+    val pdfScratch = File(context.cacheDir, "pdf").apply { mkdirs() }
     private val ids = AtomicLong(0)
 
     /** 内存里这份表就是工作台的真相，id 必须稳定，否则选中状态会错位。 */
@@ -103,6 +106,7 @@ class Workspace(context: Context) {
     /** 失败或中断留下的临时文件，启动时清一次就够，不用每次操作都扫。 */
     fun purgeStaging() {
         staging.listFiles()?.forEach { it.delete() }
+        pdfScratch.listFiles()?.forEach { it.delete() }
     }
 
     fun clearAll() {

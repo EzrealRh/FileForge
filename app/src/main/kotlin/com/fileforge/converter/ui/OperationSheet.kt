@@ -201,7 +201,7 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
             OperationKind.SplitPdfIntoParts -> {
                 IntSlider("拆成几份", parts, 2f..12f, { "%.0f 份".format(it) }) { parts = it }
                 items.forEach { Summary("${it.name} · ${it.sizeLabel}") }
-                Summary("按页数均分，前面的份多一页；只管页数不看体积。")
+                Summary("按页数均分，前面的份多一页；只管页数不看体积。份数超不过页数，超了就按页数出。")
             }
             OperationKind.MergePdfs -> {
                 items.forEachIndexed { index, item -> Summary("${index + 1}. ${item.name} · ${item.sizeLabel}") }
