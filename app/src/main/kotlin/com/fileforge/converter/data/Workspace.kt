@@ -118,13 +118,6 @@ class Workspace(context: Context) {
         pdfScratch.listFiles()?.forEach { it.delete() }
     }
 
-    fun clearAll() {
-        synchronized(items) {
-            items.values.forEach { it.file.delete() }
-            items.clear()
-        }
-    }
-
     fun namesInUse(): Set<String> = list().map { it.name }.toSet()
 
     fun usedSpace(): Long = list().sumOf { it.size }
