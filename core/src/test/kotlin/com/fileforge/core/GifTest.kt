@@ -164,3 +164,90 @@ class MedianCutTest {
         assertEquals(0, MedianCut.build(IntArray(0), 16).size)
     }
 }
+
+/**
+ * 编码产物的字节级体检。自家解码器和自家编码器可能一起错，所以这里不看解码结果，
+ * 直接在字节里找时长和循环标记；顺带把一份「视频转 GIF」形状的产物写到 build/gif-probe/，
+ * 方便拿 Pillow / 浏览器这类第三方实现交叉核对。
+ */
+class GifEncoderBytesTest {
+
+    private fun stripe(color: Int) = GifFrame(
+        IntArray(16 * 16) { index -> if ((index / 16) % 2 == 0) color else 0xFFFFFFFF.toInt() },
+        12,
+    )
+
+    private fun asciiSpan(bytes: ByteArray, text: String): Int {
+        val needle = text.toByteArray(Charsets.ISO_8859_1)
+        outer@ for (start in 0..bytes.size - needle.size) {
+            for (offset in needle.indices) if (bytes[start + offset] != needle[offset]) continue@outer
+            return start
+        }
+        return -1
+    }
+
+    /** 图形控制扩展：21 F9 04 <打包字节> <延迟小端> <透明索引> 00。 */
+    private fun delays(bytes: ByteArray): List<Int> {
+        val found = ArrayList<Int>()
+        var p = 0
+        while (p <= bytes.size - 6) {
+            if (bytes[p].toInt() and 0xFF == 0x21 && bytes[p + 1].toInt() and 0xFF == 0xF9 &&
+                bytes[p + 2].toInt() and 0xFF == 0x04
+            ) {
+                found += (bytes[p + 4].toInt() and 0xFF) or ((bytes[p + 5].toInt() and 0xFF) shl 8)
+                p += 6
+            } else {
+                p++
+            }
+        }
+        return found
+    }
+
+    private fun hex(bytes: ByteArray): String = bytes.joinToString(" ") { "%02X".format(it) }
+
+    @Test
+    fun `每帧时长和无限循环标记都在字节里`() {
+        val bytes = GifEncoder(16, 16, maxColors = 4)
+            .encode(listOf(stripe(0xFFFFFF00.toInt()), stripe(0xFF0000FF.toInt())))
+
+        val marker = "NETSCAPE2.0"
+        val loop = asciiSpan(bytes, marker)
+        assertTrue(loop > 0, "缺 NETSCAPE2.0 应用扩展，播放器只会放一遍")
+        // 21 FF 0B "NETSCAPE2.0" 03 01 <循环次数小端> 00，这段布局是 hexdump 实测过的
+        assertEquals(
+            "21 FF 0B 4E 45 54 53 43 41 50 45 32 2E 30 03 01 00 00 00",
+            hex(bytes.copyOfRange(loop - 3, loop + marker.length + 5)),
+        )
+        assertEquals(listOf(12, 12), delays(bytes), "两帧都该写 12cs（120 毫秒）")
+    }
+
+    @Test
+    fun `指定循环次数会照写进字节`() {
+        val bytes = GifEncoder(16, 16, maxColors = 4, loopCount = 3).encode(listOf(stripe(0xFFFFFF00.toInt())))
+        val marker = "NETSCAPE2.0"
+        val loop = asciiSpan(bytes, marker)
+        assertTrue(loop > 0)
+        val base = loop + marker.length
+        assertEquals(3, bytes[base + 2].toInt() and 0xFF, "循环次数低字节")
+        assertEquals(0, bytes[base + 3].toInt() and 0xFF, "循环次数高字节")
+    }
+
+    @Test
+    fun `样品文件写到build目录供第三方解码器核对`() {
+        val frames = (0 until 29).map { step ->
+            GifFrame(
+                IntArray(480 * 360) { index ->
+                    val x = index % 480
+                    val y = index / 480
+                    (0xFF shl 24) or (((x + step * 7) and 0xFF) shl 16) or ((y and 0xFF) shl 8) or (step and 0xFF)
+                },
+                10,
+            )
+        }
+        val bytes = GifEncoder(480, 360, maxColors = 128).encode(frames)
+        val dir = java.io.File("build/gif-probe").apply { mkdirs() }
+        java.io.File(dir, "from-core.gif").writeBytes(bytes)
+        assertEquals(29, GifDecoder.decode(bytes).frames.size)
+        assertEquals(290, GifDecoder.decode(bytes).totalDurationCs)
+    }
+}

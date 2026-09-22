@@ -1,5 +1,8 @@
 package com.fileforge.converter.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.graphics.Bitmap
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -25,8 +28,13 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -90,6 +98,8 @@ fun DetailSheet(
                     }
                 }
             }
+            Spacer(Modifier.height(10.dp))
+            LocationRow(item.file.absolutePath)
             Spacer(Modifier.height(14.dp))
             HorizontalDivider()
 
@@ -140,5 +150,37 @@ fun DetailSheet(
             }
             Spacer(Modifier.height(20.dp))
         }
+    }
+}
+
+/** 文件现在的位置：给全路径 + 一键复制，并说清这是应用私有目录（系统文件管理器看不到）。 */
+@Composable
+private fun LocationRow(path: String) {
+    val context = LocalContext.current
+    var copied by remember { mutableStateOf(false) }
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("位置", style = MaterialTheme.typography.labelLarge, modifier = Modifier.width(56.dp))
+            Text(
+                path,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = {
+                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText("文件位置", path))
+                copied = true
+            }) {
+                Text(if (copied) "已复制" else "复制", style = MaterialTheme.typography.labelMedium)
+            }
+        }
+        Text(
+            "这份文件存在应用自己的目录里，系统文件管理器看不到。要落到手机里：顶栏「存到相册」（图片视频）或右上角「导出」选个文件夹。",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.outline,
+        )
     }
 }
