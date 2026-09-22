@@ -14,6 +14,8 @@ data class GifImage(
     val height: Int,
     val frames: List<GifFrame>,
     val loopCount: Int,
+    /** 超过 pixelBudget 时后面的帧被丢掉，调用方要如实告诉用户只处理了前面一部分。 */
+    val truncated: Boolean = false,
 ) {
     val totalDurationCs: Int get() = frames.sumOf { it.delayCs }
     val averageFps: Float get() = if (totalDurationCs <= 0) 0f else frames.size * 100f / totalDurationCs
@@ -32,7 +34,11 @@ object GifDecoder {
     private val interlaceStarts = intArrayOf(0, 4, 2, 1)
     private val interlaceSteps = intArrayOf(8, 8, 4, 2)
 
-    fun decode(bytes: ByteArray): GifImage {
+    /**
+     * 每帧都是一整张画布，帧数 x 像素数直接决定内存。用 [pixelBudget] 限制总量，
+     * 超了就停在已解出的帧上，避免"打开一个 200 帧的 GIF 就把应用撑爆"。
+     */
+    fun decode(bytes: ByteArray, pixelBudget: Int = Int.MAX_VALUE): GifImage {
         if (bytes.size < 13) throw GifException("文件太小，不像 GIF")
         val magic = String(bytes, 0, 6, Charsets.ISO_8859_1)
         if (magic != "GIF87a" && magic != "GIF89a") throw GifException("GIF 头不对：$magic")
@@ -55,6 +61,8 @@ object GifDecoder {
         }
 
         var loopCount = 1
+        var truncated = false
+        val canvasPixels = width * height
         var delayCs = 0
         var disposal = 0
         var transparentIndex = -1
@@ -124,6 +132,11 @@ object GifDecoder {
                         argb[i] = if (index == transparentIndex) 0 else 0xFF000000.toInt() or table[index]
                     }
                     composite(canvas, width, height, left, top, frameWidth, frameHeight, argb, flags and 0x40 != 0)
+                    if ((frames.size + 1) * canvasPixels > pixelBudget) {
+                        truncated = true
+                        p = bytes.size
+                        break
+                    }
                     frames += GifFrame(canvas.copyOf(), delayCs.coerceAtLeast(2))
                     if (disposal == 2) erase(canvas, width, height, left, top, frameWidth, frameHeight, background)
 
@@ -138,7 +151,7 @@ object GifDecoder {
         }
 
         if (frames.isEmpty()) throw GifException("这个 GIF 里没有帧")
-        return GifImage(width, height, frames, loopCount)
+        return GifImage(width, height, frames, loopCount, truncated)
     }
 
     /** 帧画布左上角对齐，透明像素保留画布已有内容，结果写回画布。 */

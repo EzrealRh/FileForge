@@ -16,6 +16,7 @@ import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.PDPage
 import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
 import com.tom_roush.pdfbox.pdmodel.common.PDRectangle
+import com.tom_roush.pdfbox.multipdf.PDFMergerUtility
 import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject
 import java.io.File
 
@@ -35,7 +36,7 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
         try {
             val total = source.numberOfPages
             val groups = SplitPlanner(targetBytes) { pages ->
-                onProgress(pages.lastOrNull()?.plus(1) ?: 0)
+                onProgress(((pages.lastOrNull() ?: 0) + 1) * 100 / total)
                 buildInto(source, pages, scratch)
             }.plan(total)
 
@@ -65,25 +66,22 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
         }
     }
 
-        /** 按选中顺序把多份 PDF 拼成一份。 */
+        /**
+     * 按选中顺序把多份 PDF 拼成一份。
+     *
+     * 用 PDFBox 的 PDFMergerUtility 而不是手写 importPage：后者只浅拷贝页字典，
+     * 字体/图片/注释仍指向源文档对象，源一关就 save 出空白或损坏的文件。
+     */
     fun merge(items: List<WorkItem>): EngineOutput {
         require(items.size >= 2) { "合并 PDF 至少选两个文件" }
-        val document = PDDocument()
         val output = workspace.newStagingFile("pdf")
         var pages = 0
-        try {
-            items.forEach { item ->
-                loadForReading(item.file).use { source ->
-                    for (index in 0 until source.numberOfPages) {
-                        document.importPage(source.getPage(index))
-                    }
-                    pages += source.numberOfPages
-                }
-            }
-            document.save(output)
-        } finally {
-            runCatching { document.close() }
+        val merger = PDFMergerUtility().apply { destinationFileName = output.absolutePath }
+        items.forEach { item ->
+            merger.addSource(item.file)
+            pages += pageCount(item)
         }
+        merger.mergeDocuments(MemoryUsageSetting.setupTempFileOnly())
         return EngineOutput(
             OutputNaming.tagged(items.first().name, "合并${items.size}份", "pdf"),
             output,
@@ -130,7 +128,8 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
     /** 框架自带的 PdfRenderer 走系统解码，比 PDFBox 光栅化快得多。 */
     fun pagesToImages(item: WorkItem, scale: Float, encode: (Bitmap) -> Pair<String, ByteArray>): List<EngineOutput> {
         val descriptor = ParcelFileDescriptor.open(item.file, ParcelFileDescriptor.MODE_READ_ONLY)
-        val renderer = PdfRenderer(descriptor)
+        val renderer = runCatching { PdfRenderer(descriptor) }
+            .getOrElse { runCatching { descriptor.close() }; throw IllegalArgumentException("这份 PDF 打不开或已加密") }
         val outputs = ArrayList<EngineOutput>()
         try {
             for (index in 0 until renderer.pageCount) {

@@ -27,7 +27,7 @@ class GifEngine(private val workspace: Workspace, private val images: ImageEngin
     }
 
     fun compress(item: WorkItem, operation: Operation.CompressGif): EngineOutput {
-        val source = GifDecoder.decode(item.file.readBytes())
+        val source = GifDecoder.decode(item.file.readBytes(), pixelBudget = PIXEL_BUDGET)
         val requestedEdge = operation.maxEdge.takeIf { it > 0 } ?: max(source.width, source.height)
         val edgeAllowedByMemory = sqrt(PIXEL_BUDGET / max(1, source.frames.size).toDouble()).toInt()
         val edge = minOf(requestedEdge, max(16, edgeAllowedByMemory))
@@ -42,6 +42,7 @@ class GifEngine(private val workspace: Workspace, private val images: ImageEngin
         ).encode(thinned.frames)
 
         val notes = ArrayList<String>()
+        if (source.truncated) notes += "帧太多，只处理了前 ${source.frames.size} 帧"
         if (edge < max(source.width, source.height)) notes += "边长→$edge"
         if (thinned.frames.size < source.frames.size) notes += "帧 ${source.frames.size}→${thinned.frames.size}"
         notes += "色→${operation.colors.coerceIn(2, 256)}"
@@ -82,12 +83,7 @@ class GifEngine(private val workspace: Workspace, private val images: ImageEngin
         try {
             retriever.setDataSource(item.file.absolutePath)
             for (index in 0 until frames) {
-                val bitmap = retriever.getScaledFrameAtTime(
-                    startUs + index * stepUs,
-                    MediaMetadataRetriever.OPTION_CLOSEST,
-                    targetWidth,
-                    targetHeight,
-                ) ?: break
+                val bitmap = retriever.frameAt(startUs + index * stepUs, targetWidth, targetHeight) ?: break
                 val pixels = IntArray(bitmap.width * bitmap.height)
                 bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
                 bitmap.recycle()

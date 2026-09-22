@@ -71,14 +71,16 @@ class Workspace(context: Context) {
 
     /** 把 staging 里的成品挪进工作台并登记。 */
     fun adopt(source: File, name: String, fromOperation: String?): WorkItem {
-        val target = File(root, name)
+        // 重名必须避让：POSIX rename 会静默覆盖，两个条目指向同一个文件就全乱了
+        val finalName = OutputNaming.unique(name, namesInUse())
+        val target = File(root, finalName)
         if (!source.renameTo(target)) {
             source.copyTo(target, overwrite = true)
             source.delete()
         }
         val item = WorkItem(
             id = ids.incrementAndGet(),
-            name = name,
+            name = finalName,
             file = target,
             kind = sniff(target),
             size = target.length(),
@@ -96,6 +98,11 @@ class Workspace(context: Context) {
     fun remove(item: WorkItem) {
         synchronized(items) { items.remove(item.id) }
         item.file.delete()
+    }
+
+    /** 失败或中断留下的临时文件，启动时清一次就够，不用每次操作都扫。 */
+    fun purgeStaging() {
+        staging.listFiles()?.forEach { it.delete() }
     }
 
     fun clearAll() {
