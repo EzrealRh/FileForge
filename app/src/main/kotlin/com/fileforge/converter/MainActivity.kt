@@ -25,6 +25,15 @@ class MainActivity : ComponentActivity() {
         uri?.let(viewModel::publish)
     }
 
+    private val askMediaAccess = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
+        if (granted.values.any { it }) viewModel.openMediaPicker() else viewModel.mediaPermissionDenied()
+    }
+
+    /** 先要权限再开相册选择器；已经给过就直接开。 */
+    private fun pickFromGallery() {
+        if (viewModel.hasMediaPermission()) viewModel.openMediaPicker() else askMediaAccess.launch(viewModel.mediaPermissions())
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
@@ -34,6 +43,7 @@ class MainActivity : ComponentActivity() {
                         viewModel = viewModel,
                         onAddFiles = { pickFiles.launch(arrayOf("*/*")) },
                         onExport = { pickFolder.launch(null) },
+                        onPickFromGallery = this::pickFromGallery,
                         onSaveToGallery = {
                             // 系统太老没有分区存储写法时，直接回落到选文件夹
                             if (viewModel.gallerySupported) viewModel.saveToGallery() else pickFolder.launch(null)

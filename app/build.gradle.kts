@@ -1,3 +1,5 @@
+val appVersion = "0.2.2"
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -12,8 +14,8 @@ android {
         applicationId = "com.fileforge.converter"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "0.2.1"
+        versionCode = 6
+        versionName = appVersion
         resourceConfigurations += listOf("zh", "en")
     }
 
@@ -44,6 +46,15 @@ android {
 
     packaging {
         resources.excludes += setOf("META-INF/DEPENDENCIES", "META-INF/LICENSE*", "META-INF/NOTICE*")
+    }
+
+    // 产物名带版本号，从 Release 下载时不用靠目录区分是哪一版
+    applicationVariants.all {
+        outputs.forEach { output ->
+            if (output is com.android.build.gradle.internal.api.BaseVariantOutputImpl) {
+                output.outputFileName = "fileforge-v$appVersion-${buildType.name}.apk"
+            }
+        }
     }
 }
 
