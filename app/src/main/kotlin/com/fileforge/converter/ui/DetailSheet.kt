@@ -54,6 +54,7 @@ fun DetailSheet(
     loading: Boolean,
     selected: Boolean,
     onToggleSelect: () -> Unit,
+    onShare: () -> Unit,
     onConvert: () -> Unit,
     onDelete: () -> Unit,
     onDismiss: () -> Unit,
@@ -145,6 +146,7 @@ fun DetailSheet(
                 Button(onClick = onToggleSelect, modifier = Modifier.weight(1f)) {
                     Text(if (selected) "取消选中" else "选中它")
                 }
+                OutlinedButton(onClick = onShare) { Text("分享") }
                 OutlinedButton(onClick = { onDelete(); onDismiss() }) { Text("删除") }
                 TextButton(onClick = onDismiss) { Text("关闭") }
             }

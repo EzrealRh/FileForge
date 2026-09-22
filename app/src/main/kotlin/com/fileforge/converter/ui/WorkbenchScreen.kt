@@ -1,5 +1,6 @@
 package com.fileforge.converter.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -23,6 +24,7 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.PhotoAlbum
 import androidx.compose.material.icons.outlined.RuleFolder
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -54,7 +56,7 @@ import com.fileforge.core.model.FileKind
 import com.fileforge.core.util.SizeInput
 import com.fileforge.converter.data.WorkItem
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun WorkbenchScreen(
     viewModel: WorkbenchViewModel,
@@ -96,6 +98,19 @@ fun WorkbenchScreen(
                     }
                     IconButton(onClick = onExport, enabled = state.items.isNotEmpty()) {
                         Icon(Icons.Outlined.FolderOpen, contentDescription = "导出到文件夹")
+                    }
+                    IconButton(
+                        onClick = { viewModel.share(state.selected) },
+                        enabled = state.selected.isNotEmpty(),
+                    ) {
+                        Icon(
+                            Icons.Outlined.Share,
+                            contentDescription = if (state.selection.isEmpty()) {
+                                "先选中要分享的文件"
+                            } else {
+                                "分享选中的 ${state.selection.size} 个"
+                            },
+                        )
                     }
                     IconButton(onClick = viewModel::askDelete, enabled = state.items.isNotEmpty() && !state.busy) {
                         Icon(
@@ -162,6 +177,11 @@ fun WorkbenchScreen(
                                 label = { Text(filter.label, maxLines = 1) },
                             )
                         }
+                        androidx.compose.material3.FilterChip(
+                            selected = state.groupByDate,
+                            onClick = viewModel::toggleDateGroup,
+                            label = { Text("按日期", maxLines = 1) },
+                        )
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = onPickPdf, enabled = !state.busy) {
@@ -186,15 +206,41 @@ fun WorkbenchScreen(
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    items(state.visible, key = { it.id }) { item ->
-                        FileRow(
-                            item = item,
-                            checked = item.id in state.selection,
-                            busy = state.busy,
-                            onToggle = { viewModel.toggle(item.id) },
-                            onOpen = { viewModel.openDetail(item.id) },
-                            onDelete = { viewModel.remove(item.id) },
-                        )
+                    if (state.groupByDate) {
+                        // 组头跟着滚动停在顶上，一眼看清哪堆是今天的
+                        state.groupedByDate(System.currentTimeMillis()).forEach { (group, list) ->
+                            stickyHeader(key = group) {
+                                Text(
+                                    "${group.label} · ${list.size} 个",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.fillMaxWidth()
+                                        .background(MaterialTheme.colorScheme.surface)
+                                        .padding(vertical = 6.dp),
+                                )
+                            }
+                            items(list, key = { it.id }) { item ->
+                                FileRow(
+                                    item = item,
+                                    checked = item.id in state.selection,
+                                    busy = state.busy,
+                                    onToggle = { viewModel.toggle(item.id) },
+                                    onOpen = { viewModel.openDetail(item.id) },
+                                    onDelete = { viewModel.remove(item.id) },
+                                )
+                            }
+                        }
+                    } else {
+                        items(state.visible, key = { it.id }) { item ->
+                            FileRow(
+                                item = item,
+                                checked = item.id in state.selection,
+                                busy = state.busy,
+                                onToggle = { viewModel.toggle(item.id) },
+                                onOpen = { viewModel.openDetail(item.id) },
+                                onDelete = { viewModel.remove(item.id) },
+                            )
+                        }
                     }
                 }
             }
@@ -209,6 +255,7 @@ fun WorkbenchScreen(
                 item = item,
                 detail = detail,
                 preview = state.preview,
+                onShare = { viewModel.share(listOf(item)) },
                 loading = state.detailLoading,
                 selected = id in state.selection,
                 onToggleSelect = { viewModel.toggle(id) },

@@ -1,5 +1,6 @@
 package com.fileforge.core
 
+import com.fileforge.core.model.DayGroup
 import com.fileforge.core.naming.OutputNaming
 import com.fileforge.core.pdf.PageGroups
 import com.fileforge.core.pdf.PageRangeException
@@ -246,5 +247,46 @@ class PdfCompressPlanTest {
     fun `档位号越界只夹到两端不抛异常`() {
         assertEquals(PdfCompressPlan.ladder.first(), PdfCompressPlan.tier(-5))
         assertEquals(PdfCompressPlan.ladder.last(), PdfCompressPlan.tier(99))
+    }
+}
+
+class DayGroupTest {
+
+    private fun at(text: String): Long =
+        java.time.LocalDateTime.parse(text).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+
+    @Test
+    fun `今天昨天按自然日算不是按24小时`() {
+        val now = at("2026-09-22T08:00:00")
+        assertEquals(DayGroup.Today, DayGroup.of(at("2026-09-22T00:05:00"), now))
+        assertEquals(DayGroup.Yesterday, DayGroup.of(at("2026-09-21T23:55:00"), now))
+        // 24 小时之内但跨了天，也要算昨天
+        assertEquals(DayGroup.Yesterday, DayGroup.of(at("2026-09-21T09:00:00"), now))
+    }
+
+    @Test
+    fun `本周从周一算起，但今天昨天优先于本周`() {
+        // 2026-09-21 是周一、09-22 是周二：同属本周，但"昨天"更精确，所以先归昨天
+        val tuesday = at("2026-09-22T12:00:00")
+        assertEquals(DayGroup.Yesterday, DayGroup.of(at("2026-09-21T08:00:00"), tuesday))
+        // 上周日已经出周了
+        assertEquals(DayGroup.Earlier, DayGroup.of(at("2026-09-20T08:00:00"), tuesday))
+        // 2026-09-25 是周五，本周二是"本周"（既不是今天也不是昨天）
+        val friday = at("2026-09-25T12:00:00")
+        assertEquals(DayGroup.Week, DayGroup.of(at("2026-09-22T08:00:00"), friday))
+        // 周一也在这一周内，所以它才是本周；上周五才算更早
+        assertEquals(DayGroup.Week, DayGroup.of(at("2026-09-21T08:00:00"), friday))
+        assertEquals(DayGroup.Earlier, DayGroup.of(at("2026-09-18T08:00:00"), friday))
+        // 2026-09-20 是周日：本周只有它自己，前一天就出周了
+        val sunday = at("2026-09-20T12:00:00")
+        assertEquals(DayGroup.Today, DayGroup.of(at("2026-09-20T01:00:00"), sunday))
+        assertEquals(DayGroup.Yesterday, DayGroup.of(at("2026-09-19T01:00:00"), sunday))
+    }
+
+    @Test
+    fun `时间倒挂或同一天都算今天`() {
+        val now = at("2026-09-22T12:00:00")
+        assertEquals(DayGroup.Today, DayGroup.of(now, now))
+        assertEquals(DayGroup.Today, DayGroup.of(at("2026-09-25T12:00:00"), now))
     }
 }

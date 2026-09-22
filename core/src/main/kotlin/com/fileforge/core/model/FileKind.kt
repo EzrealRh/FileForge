@@ -7,6 +7,24 @@ enum class FileKind {
     val isImage: Boolean get() = this in IMAGE_KINDS
     val isVideo: Boolean get() = this in VIDEO_KINDS
 
+    /** 分享和写 MediaStore 都要用；认不出的一律按二进制流给。 */
+    val mimeType: String get() = when (this) {
+        Pdf -> "application/pdf"
+        Png -> "image/png"
+        Jpeg -> "image/jpeg"
+        Gif -> "image/gif"
+        WebP -> "image/webp"
+        Bmp -> "image/bmp"
+        Heic -> "image/heic"
+        Avif -> "image/avif"
+        Mp4 -> "video/mp4"
+        WebM -> "video/webm"
+        Mkv -> "video/x-matroska"
+        QuickTime -> "video/quicktime"
+        Zip -> "application/zip"
+        Unknown -> "application/octet-stream"
+    }
+
     companion object {
         val IMAGE_KINDS = setOf(Png, Jpeg, Gif, WebP, Bmp, Heic, Avif)
         val VIDEO_KINDS = setOf(Mp4, WebM, Mkv, QuickTime)

@@ -7,7 +7,6 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
-import com.fileforge.core.model.FileKind
 
 /**
  * 把工作台里的成品写进手机存储（分区存储写法，不需要运行时权限），落在
@@ -45,7 +44,7 @@ class MediaStorePublisher(private val context: Context) {
         for (directory in listOf(PRIMARY_DIR, FALLBACK_DIR)) {
             val values = ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, item.name)
-                put(MediaStore.MediaColumns.MIME_TYPE, mimeOf(item))
+                put(MediaStore.MediaColumns.MIME_TYPE, item.kind.mimeType)
                 put(MediaStore.MediaColumns.RELATIVE_PATH, directory)
                 put(MediaStore.MediaColumns.IS_PENDING, 1)
             }
@@ -80,22 +79,6 @@ class MediaStorePublisher(private val context: Context) {
         }
     }.getOrNull()
 
-    private fun mimeOf(item: WorkItem): String = when (item.kind) {
-        FileKind.Pdf -> "application/pdf"
-        FileKind.Gif -> "image/gif"
-        FileKind.Png -> "image/png"
-        FileKind.Jpeg -> "image/jpeg"
-        FileKind.WebP -> "image/webp"
-        FileKind.Bmp -> "image/bmp"
-        FileKind.Heic -> "image/heic"
-        FileKind.Avif -> "image/avif"
-        FileKind.Mp4 -> "video/mp4"
-        FileKind.WebM -> "video/webm"
-        FileKind.Mkv -> "video/x-matroska"
-        FileKind.QuickTime -> "video/quicktime"
-        FileKind.Zip -> "application/zip"
-        FileKind.Unknown -> "application/octet-stream"
-    }
 
     /** 给用户看的落点说明。 */
     val locationLabel: String get() = "$EXTERNAL_ROOT/${PRIMARY_DIR.trimEnd('/')}"
