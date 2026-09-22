@@ -60,6 +60,7 @@ fun WorkbenchScreen(
     onAddFiles: () -> Unit,
     onExport: () -> Unit,
     onSaveToGallery: () -> Unit,
+    onPickFromGallery: () -> Unit,
 ) {
     val state by viewModel.state.collectAsState()
     val snackbar = remember { SnackbarHostState() }
@@ -137,7 +138,7 @@ fun WorkbenchScreen(
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
             if (state.items.isEmpty()) {
-                EmptyState(onAddFiles)
+                EmptyState(onPickFromGallery, onAddFiles)
             } else {
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 16.dp),
@@ -157,10 +158,10 @@ fun WorkbenchScreen(
                             )
                         }
                     }
-                    Button(onClick = onAddFiles, enabled = !state.busy) {
+                    Button(onClick = onPickFromGallery, enabled = !state.busy) {
                         Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text("添加", maxLines = 1)
+                        Text("从相册", maxLines = 1)
                     }
                 }
                 Text(
@@ -218,6 +219,20 @@ fun WorkbenchScreen(
         )
     }
 
+    if (state.mediaPickerOpen) {
+        MediaPickerSheet(
+            state = state.media,
+            thumbnail = viewModel::mediaThumbnail,
+            onConfirm = { entries ->
+                viewModel.closeMediaPicker()
+                viewModel.import(entries.map { it.uri })
+            },
+            onPickOtherFiles = { viewModel.closeMediaPicker(); onAddFiles() },
+            onRequestPermission = onPickFromGallery,
+            onDismiss = viewModel::closeMediaPicker,
+        )
+    }
+
     if (state.sheetOpen) {
         OperationSheet(
             items = state.selected,
@@ -228,7 +243,7 @@ fun WorkbenchScreen(
 }
 
 @Composable
-private fun EmptyState(onAddFiles: () -> Unit) {
+private fun EmptyState(onPickFromGallery: () -> Unit, onAddFiles: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth().padding(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
@@ -249,10 +264,14 @@ private fun EmptyState(onAddFiles: () -> Unit) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(20.dp))
-            Button(onClick = onAddFiles, modifier = Modifier.fillMaxWidth()) {
+            Button(onClick = onPickFromGallery, modifier = Modifier.fillMaxWidth()) {
                 Icon(Icons.Outlined.Add, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
-                Text("添加文件")
+                Text("从相册选")
+            }
+            Spacer(Modifier.height(8.dp))
+            FilledTonalButton(onClick = onAddFiles, modifier = Modifier.fillMaxWidth()) {
+                Text("从文件管理器选（PDF 等其他类型）")
             }
         }
     }

@@ -9,6 +9,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.fileforge.core.model.FileKind
 import com.fileforge.core.ops.Operation
+import com.fileforge.converter.data.MediaEntry
+import com.fileforge.converter.data.MediaLibrary
 import com.fileforge.converter.data.MediaStorePublisher
 import com.fileforge.converter.data.WorkItem
 import com.fileforge.converter.data.Workspace
@@ -20,6 +22,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 enum class KindFilter(val label: String, val matches: (FileKind) -> Boolean) {
     All("全部", { true }),
@@ -29,6 +32,15 @@ enum class KindFilter(val label: String, val matches: (FileKind) -> Boolean) {
 }
 
 data class Running(val title: String, val percent: Int, val current: String)
+
+/** 相册选择器的状态。partialAccess 表示系统只给了"部分照片"，只能看到用户挑过的那些。 */
+sealed interface MediaUi {
+    data object Idle : MediaUi
+    data object Loading : MediaUi
+    data class Ready(val entries: List<MediaEntry>, val partialAccess: Boolean) : MediaUi
+    data class Empty(val partialAccess: Boolean) : MediaUi
+    data class Denied(val message: String) : MediaUi
+}
 
 /** 带序号的提示：否则连着两条同文案的会被 Snackbar 吞掉，用户以为没执行。 */
 data class Notice(val text: String, val seq: Int)
@@ -45,6 +57,8 @@ data class WorkbenchState(
     val detailLoading: Boolean = false,
     val preview: Bitmap? = null,
     val confirmClear: Boolean = false,
+    val mediaPickerOpen: Boolean = false,
+    val media: MediaUi = MediaUi.Idle,
 ) {
     val selected: List<WorkItem> get() = items.filter { it.id in selection }
     val visible: List<WorkItem> get() = items.filter { filter.matches(it.kind) }
@@ -58,6 +72,7 @@ class WorkbenchViewModel(app: Application) : AndroidViewModel(app) {
     private val runner = OperationRunner(app, workspace)
     private val meta = MetaReader()
     private val gallery = MediaStorePublisher(app)
+    private val mediaLibrary = MediaLibrary(app)
     private var noticeSeq = 0
 
     init {
@@ -89,6 +104,76 @@ class WorkbenchViewModel(app: Application) : AndroidViewModel(app) {
             val picked = current.selection
             current.copy(selection = if (id in picked) picked - id else picked + id)
         }
+    }
+
+    /** 33+ 用细分媒体权限，32 及以下只有 READ_EXTERNAL_STORAGE。 */
+    fun mediaPermissions(): Array<String> = when {
+        android.os.Build.VERSION.SDK_INT >= 34 -> arrayOf(
+            android.Manifest.permission.READ_MEDIA_IMAGES,
+            android.Manifest.permission.READ_MEDIA_VIDEO,
+            android.Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED,
+        )
+        android.os.Build.VERSION.SDK_INT >= 33 -> arrayOf(
+            android.Manifest.permission.READ_MEDIA_IMAGES,
+            android.Manifest.permission.READ_MEDIA_VIDEO,
+        )
+        else -> arrayOf(android.Manifest.permission.READ_EXTERNAL_STORAGE)
+    }
+
+    fun hasMediaPermission(): Boolean = mediaPermissions().any {
+        androidx.core.content.ContextCompat.checkSelfPermission(getApplication(), it) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+    }
+
+    fun mediaPermissionDenied() {
+        _state.update {
+            it.copy(media = MediaUi.Denied("没有读到媒体库的权限，所以列不出相册。"))
+        }
+    }
+
+    fun openMediaPicker() {
+        _state.update { it.copy(mediaPickerOpen = true, media = MediaUi.Loading) }
+        viewModelScope.launch(Dispatchers.IO) {
+            val entries = runCatching { mediaLibrary.load() }.getOrElse { error ->
+                _state.update { current ->
+                    if (current.mediaPickerOpen) {
+                        current.copy(media = MediaUi.Denied("读媒体库失败：${error.message ?: error.javaClass.simpleName}"))
+                    } else {
+                        current
+                    }
+                }
+                return@launch
+            }
+            val partial = partialAccessOnly()
+            _state.update { current ->
+                if (!current.mediaPickerOpen) {
+                    current
+                } else if (entries.isEmpty()) {
+                    current.copy(media = MediaUi.Empty(partial))
+                } else {
+                    current.copy(media = MediaUi.Ready(entries, partial))
+                }
+            }
+        }
+    }
+
+    fun closeMediaPicker() {
+        _state.update { it.copy(mediaPickerOpen = false) }
+    }
+
+    suspend fun mediaThumbnail(entry: MediaEntry): android.graphics.Bitmap? =
+        withContext(Dispatchers.IO) { mediaLibrary.thumbnail(entry) }
+
+    /** Android 14 的"部分照片"模式：只给了 USER_SELECTED，没给整库读权限。 */
+    private fun partialAccessOnly(): Boolean {
+        if (android.os.Build.VERSION.SDK_INT < 34) return false
+        val app = getApplication<Application>()
+        val all = androidx.core.content.ContextCompat.checkSelfPermission(app, android.Manifest.permission.READ_MEDIA_IMAGES) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        val selected = androidx.core.content.ContextCompat.checkSelfPermission(
+            app, android.Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED,
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        return !all && selected
     }
 
     /** 已经全选就清空，否则全选当前筛出来的。 */
