@@ -54,7 +54,7 @@ class GifEngine(private val workspace: Workspace, private val images: ImageEngin
         )
     }
 
-    fun fromVideo(item: WorkItem, operation: Operation.VideoToGif): EngineOutput {
+    fun fromVideo(item: WorkItem, operation: Operation.VideoToGif, onProgress: (Int) -> Unit = {}): EngineOutput {
         val meta = videoMeta(item)
         val fps = operation.fps.coerceIn(1, 25)
         var frames = (meta.durationUs / 1_000_000.0 * fps).toInt().coerceIn(1, MAX_FRAMES)
@@ -78,31 +78,40 @@ class GifEngine(private val workspace: Workspace, private val images: ImageEngin
         val targetWidth = if (scaleDown < 1f) (meta.width * scaleDown).roundToInt().coerceAtLeast(16) else meta.width
         val targetHeight = if (scaleDown < 1f) (meta.height * scaleDown).roundToInt().coerceAtLeast(16) else meta.height
 
-        val retriever = MediaMetadataRetriever()
+        // 顺序解码抽帧：MediaMetadataRetriever 按时间取帧在部分机型上对 WebM 只回关键帧，
+        // 转出来的 GIF 就是几十张同一画面（用户看到的「不动」就是这个）。
+        val taken = VideoFrameSequence.extract(
+            file = item.file,
+            startUs = startUs,
+            windowUs = windowUs,
+            frameCount = frames,
+            stepUs = stepUs,
+            targetWidth = targetWidth,
+            targetHeight = targetHeight,
+            rotation = meta.rotation,
+            onProgress = onProgress,
+        )
         val collected = ArrayList<GifFrame>()
-        try {
-            retriever.setDataSource(item.file.absolutePath)
-            for (index in 0 until frames) {
-                val bitmap = retriever.frameAt(startUs + index * stepUs, targetWidth, targetHeight) ?: break
-                val pixels = IntArray(bitmap.width * bitmap.height)
-                bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
-                bitmap.recycle()
-                collected += GifFrame(pixels, (stepUs / 10_000L).toInt().coerceAtLeast(2))
-            }
-        } finally {
-            runCatching { retriever.release() }
+        taken.bitmaps.forEachIndexed { index, bitmap ->
+            val pixels = IntArray(bitmap.width * bitmap.height)
+            bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+            bitmap.recycle()
+            collected += GifFrame(pixels, (taken.durationsMs[index] / 10).toInt().coerceAtLeast(2))
         }
-        require(collected.isNotEmpty()) { "一帧都没解出来，可能是不支持的编码格式" }
+        require(collected.size > 1) {
+            "这台设备从这个视频里只解出一张画面（抽了 $frames 帧全是同一张），换 MP4 或缩短片段再试"
+        }
 
         val bytes = GifEncoder(targetWidth, targetHeight, 0, 256).encode(collected)
+        val merged = if (taken.bitmaps.size == frames) "" else "，合并了 ${frames - taken.bitmaps.size} 张重复画面"
         return EngineOutput(
             OutputNaming.tagged(item.name, "gif", "gif"),
             workspace.newStagingFile("gif").apply { writeBytes(bytes) },
-            "${collected.size} 帧 ${targetWidth}x$targetHeight，${SizeInput.format(bytes.size.toLong())}",
+            "${collected.size} 帧 ${targetWidth}x$targetHeight$merged，${SizeInput.format(bytes.size.toLong())}",
         )
     }
 
-    private class VideoMeta(val width: Int, val height: Int, val durationUs: Long)
+    private class VideoMeta(val width: Int, val height: Int, val durationUs: Long, val rotation: Int)
 
     private fun videoMeta(item: WorkItem): VideoMeta {
         val retriever = MediaMetadataRetriever()
@@ -118,6 +127,7 @@ class GifEngine(private val workspace: Workspace, private val images: ImageEngin
                 if (swapped) rawHeight else rawWidth,
                 if (swapped) rawWidth else rawHeight,
                 durationMs * 1000,
+                rotation,
             )
         } finally {
             runCatching { retriever.release() }

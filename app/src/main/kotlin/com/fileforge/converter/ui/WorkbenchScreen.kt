@@ -61,7 +61,7 @@ fun WorkbenchScreen(
     onAddFiles: () -> Unit,
     onPickPdf: () -> Unit,
     onExport: () -> Unit,
-    onSaveToGallery: () -> Unit,
+    onSaveToPhone: () -> Unit,
     onPickFromGallery: () -> Unit,
 ) {
     val state by viewModel.state.collectAsState()
@@ -91,8 +91,8 @@ fun WorkbenchScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = onSaveToGallery, enabled = state.items.isNotEmpty()) {
-                        Icon(Icons.Outlined.PhotoAlbum, contentDescription = "存到相册")
+                    IconButton(onClick = onSaveToPhone, enabled = state.items.isNotEmpty()) {
+                        Icon(Icons.Outlined.PhotoAlbum, contentDescription = "存到手机 Download/文件工坊")
                     }
                     IconButton(onClick = onExport, enabled = state.items.isNotEmpty()) {
                         Icon(Icons.Outlined.FolderOpen, contentDescription = "导出到文件夹")

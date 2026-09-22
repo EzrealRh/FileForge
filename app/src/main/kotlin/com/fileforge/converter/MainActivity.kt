@@ -45,9 +45,9 @@ class MainActivity : ComponentActivity() {
                         onPickPdf = { pickFiles.launch(arrayOf("application/pdf")) },
                         onExport = { pickFolder.launch(null) },
                         onPickFromGallery = this::pickFromGallery,
-                        onSaveToGallery = {
+                        onSaveToPhone = {
                             // 系统太老没有分区存储写法时，直接回落到选文件夹
-                            if (viewModel.gallerySupported) viewModel.saveToGallery() else pickFolder.launch(null)
+                            if (viewModel.phoneSaveSupported) viewModel.saveToPhone() else pickFolder.launch(null)
                         },
                     )
                 }
