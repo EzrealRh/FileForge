@@ -56,7 +56,8 @@ data class WorkbenchState(
     val detail: FileDetail? = null,
     val detailLoading: Boolean = false,
     val preview: Bitmap? = null,
-    val confirmClear: Boolean = false,
+    /** 右上角删除要干掉的那些 id；空集表示当前没有待确认的删除。 */
+    val pendingDelete: Set<Long> = emptySet(),
     val mediaPickerOpen: Boolean = false,
     val media: MediaUi = MediaUi.Idle,
 ) {
@@ -185,26 +186,40 @@ class WorkbenchViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun askClear() {
+    /** 右上角删除：有选中就只删选中，一个都没选就是清空整个工作台。 */
+    fun askDelete() {
         if (_state.value.busy) {
             notify("正在处理，先等这一批跑完")
             return
         }
-        _state.update { it.copy(confirmClear = true) }
+        val state = _state.value
+        val targets = state.selection.ifEmpty { state.items.map { it.id }.toSet() }
+        if (targets.isEmpty()) {
+            notify("工作台已经是空的了")
+            return
+        }
+        _state.update { it.copy(pendingDelete = targets) }
     }
 
-    fun dismissClear() {
-        _state.update { it.copy(confirmClear = false) }
+    fun dismissDelete() {
+        _state.update { it.copy(pendingDelete = emptySet()) }
     }
 
-    fun clearAll() {
-        if (_state.value.busy) {
+    fun confirmDelete() {
+        val state = _state.value
+        val ids = state.pendingDelete
+        if (ids.isEmpty()) return
+        if (state.busy) {
             notify("正在处理，先等这一批跑完")
             return
         }
         recyclePreview()
-        workspace.clearAll()
-        _state.update { WorkbenchState() }
+        val doomed = state.items.filter { it.id in ids }
+        doomed.forEach { workspace.remove(it) }
+        _state.update { current ->
+            current.refreshed().copy(pendingDelete = emptySet(), selection = current.selection - ids)
+        }
+        notify("删掉 ${doomed.size} 个")
     }
 
     fun remove(id: Long) {

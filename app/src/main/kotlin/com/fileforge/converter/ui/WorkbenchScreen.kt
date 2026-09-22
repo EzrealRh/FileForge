@@ -97,8 +97,11 @@ fun WorkbenchScreen(
                     IconButton(onClick = onExport, enabled = state.items.isNotEmpty()) {
                         Icon(Icons.Outlined.FolderOpen, contentDescription = "导出到文件夹")
                     }
-                    IconButton(onClick = viewModel::askClear, enabled = state.items.isNotEmpty() && !state.busy) {
-                        Icon(Icons.Outlined.Delete, contentDescription = "清空工作台")
+                    IconButton(onClick = viewModel::askDelete, enabled = state.items.isNotEmpty() && !state.busy) {
+                        Icon(
+                            Icons.Outlined.Delete,
+                            contentDescription = if (state.selection.isEmpty()) "清空工作台" else "删除选中的 ${state.selection.size} 个",
+                        )
                     }
                 },
             )
@@ -216,15 +219,23 @@ fun WorkbenchScreen(
         }
     }
 
-    if (state.confirmClear) {
+    if (state.pendingDelete.isNotEmpty()) {
+        val onlySelected = state.selection.isNotEmpty()
         AlertDialog(
-            onDismissRequest = viewModel::dismissClear,
-            title = { Text("清空工作台？") },
-            text = { Text("工作台里的 ${state.items.size} 个文件（含转换结果）会被删掉，本机原文件不受影响。已经导出到相册或文件夹的也没了。") },
-            confirmButton = {
-                TextButton(onClick = { viewModel.dismissClear(); viewModel.clearAll() }) { Text("清空") }
+            onDismissRequest = viewModel::dismissDelete,
+            title = {
+                Text(if (onlySelected) "删除选中的 ${state.pendingDelete.size} 个？" else "清空工作台（${state.pendingDelete.size} 个文件）？")
             },
-            dismissButton = { TextButton(onClick = viewModel::dismissClear) { Text("取消") } },
+            text = {
+                Text(
+                    "删的是工作台里这份；之前自动复制到手机存储「文件工坊」的那份不会被删。" +
+                        "你导入进来的原件本来就在原处，也不受影响。",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = viewModel::confirmDelete) { Text(if (onlySelected) "删除" else "全部删除") }
+            },
+            dismissButton = { TextButton(onClick = viewModel::dismissDelete) { Text("取消") } },
         )
     }
 
