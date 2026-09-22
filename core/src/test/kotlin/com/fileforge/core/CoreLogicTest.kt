@@ -1,7 +1,9 @@
 package com.fileforge.core
 
 import com.fileforge.core.naming.OutputNaming
+import com.fileforge.core.pdf.PageGroups
 import com.fileforge.core.pdf.PageRangeException
+import com.fileforge.core.pdf.PdfCompressPlan
 import com.fileforge.core.pdf.PageRangeParser
 import com.fileforge.core.pdf.SplitPlanner
 import com.fileforge.core.util.SizeInput
@@ -183,5 +185,66 @@ class OutputNamingTest {
         assertEquals("photo", OutputNaming.stem("photo.JPG"))
         assertEquals("tar", OutputNaming.extension("a.tar"))
         assertEquals("pdf", OutputNaming.extension("noext"))
+    }
+}
+
+class PageGroupsTest {
+
+    @Test
+    fun `十页拆三份是四三三`() {
+        assertEquals(
+            listOf(listOf(0, 1, 2, 3), listOf(4, 5, 6), listOf(7, 8, 9)),
+            PageGroups.evenSized(10, 3),
+        )
+    }
+
+    @Test
+    fun `份数比页数多就自动降到页数`() {
+        assertEquals(listOf(listOf(0), listOf(1), listOf(2)), PageGroups.evenSized(3, 5))
+    }
+
+    @Test
+    fun `一页的文档拆不出多份`() {
+        assertEquals(listOf(listOf(0)), PageGroups.evenSized(1, 4))
+    }
+
+    @Test
+    fun `任何份数都不重不漏按顺序覆盖全部页`() {
+        for (total in 1..23) {
+            for (parts in 1..12) {
+                val groups = PageGroups.evenSized(total, parts)
+                assertEquals((0 until total).toList(), groups.flatten(), "总页数 $total 拆 $parts 份")
+                assertTrue(groups.all { it.isNotEmpty() }, "不该有空份：$groups")
+                assertTrue(groups.zipWithNext().all { (a, b) -> a.last() + 1 == b.first() }, "份之间要连着：$groups")
+            }
+        }
+    }
+
+    @Test
+    fun `非法输入直接拒绝`() {
+        assertThrows(IllegalArgumentException::class.java) { PageGroups.evenSized(0, 2) }
+        assertThrows(IllegalArgumentException::class.java) { PageGroups.evenSized(10, 0) }
+    }
+}
+
+class PdfCompressPlanTest {
+
+    @Test
+    fun `档位越靠后越紧`() {
+        val ladder = PdfCompressPlan.ladder
+        assertTrue(ladder.zipWithNext().all { (lo, hi) -> hi.maxEdge < lo.maxEdge && hi.quality < lo.quality })
+    }
+
+    @Test
+    fun `按目标体积时从所选档往下走到底`() {
+        assertEquals(4, PdfCompressPlan.tiersFrom(0).size)
+        assertEquals(listOf(1000, 700), PdfCompressPlan.tiersFrom(2).map { it.maxEdge })
+        assertEquals(1, PdfCompressPlan.tiersFrom(3).size)
+    }
+
+    @Test
+    fun `档位号越界只夹到两端不抛异常`() {
+        assertEquals(PdfCompressPlan.ladder.first(), PdfCompressPlan.tier(-5))
+        assertEquals(PdfCompressPlan.ladder.last(), PdfCompressPlan.tier(99))
     }
 }

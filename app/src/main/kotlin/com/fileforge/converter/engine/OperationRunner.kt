@@ -58,6 +58,27 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
             is Operation.ExtractPdfPages -> items.forEach { item ->
                 collect(item.name) { listOf(pdf.extractPages(item, operation.spec)) }
             }
+            is Operation.RemovePdfPages -> items.forEach { item ->
+                collect(item.name) { listOf(pdf.removePages(item, operation.spec)) }
+            }
+            is Operation.RotatePdfPages -> items.forEach { item ->
+                collect(item.name) { listOf(pdf.rotatePages(item, operation.spec, operation.degrees)) }
+            }
+            is Operation.SplitPdfIntoParts -> items.forEach { item ->
+                collect(item.name) { pdf.splitIntoParts(item, operation.parts) }
+            }
+            is Operation.CompressPdf -> items.forEach { item ->
+                collect(item.name) {
+                    listOf(
+                        pdf.compress(item, operation.level, operation.targetBytes) { percent, label ->
+                            onProgress(percent, label)
+                        },
+                    )
+                }
+            }
+            is Operation.PdfToText -> items.forEach { item ->
+                collect(item.name) { listOf(pdf.toText(item, operation.spec)) }
+            }
             is Operation.PdfToImages -> items.forEach { item ->
                 collect(item.name) {
                     pdf.pagesToImages(item, operation.scale) { bitmap ->

@@ -154,6 +154,10 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
     var bitrate by mutableStateOf(2500f)
     var startSecondText by mutableStateOf("")
     var durationSecondText by mutableStateOf("")
+    var pdfLevel by mutableStateOf(1f)
+    var pdfByTarget by mutableStateOf(false)
+    var parts by mutableStateOf(2f)
+    var rotateIndex by mutableStateOf(0)
 
     @Composable
     fun Content() {
@@ -179,6 +183,13 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
                 IntSlider("页边距", margin, 0f..60f, { if (it == 0f) "无边距" else "%.0f dp".format(it) }) { margin = it }
                 Summary("${items.size} 张图，按选择顺序一页一张")
             }
+            OperationKind.CompressPdf -> {
+                Segmented("档位", listOf("清晰", "标准", "紧凑"), pdfLevel.roundToInt()) { pdfLevel = it.toFloat() }
+                Segmented("压法", listOf("只按档位", "目标体积"), if (pdfByTarget) 1 else 0) { pdfByTarget = it == 1 }
+                if (pdfByTarget) SizeField("目标体积 MB", targetSizeText) { targetSizeText = it }
+                Summary("只重编内嵌图片（降采样 + JPEG），文字和矢量原样保留；按目标体积时会一档一档往下试。")
+                Summary("带透明通道的图、1 位掩膜和非 RGB 的图不动，结果里会说明跳了几张。合计 ${sizeOf(items)}")
+            }
             OperationKind.SplitPdfBySize -> {
                 SizeField("每份目标体积 MB", targetSizeText) { targetSizeText = it }
                 Summary(
@@ -187,20 +198,29 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
                     } ?: "",
                 )
             }
+            OperationKind.SplitPdfIntoParts -> {
+                IntSlider("拆成几份", parts, 2f..12f, { "%.0f 份".format(it) }) { parts = it }
+                items.forEach { Summary("${it.name} · ${it.sizeLabel}") }
+                Summary("按页数均分，前面的份多一页；只管页数不看体积。")
+            }
             OperationKind.MergePdfs -> {
                 items.forEachIndexed { index, item -> Summary("${index + 1}. ${item.name} · ${item.sizeLabel}") }
                 Summary("按上面的顺序拼成一份，页码连续排。")
             }
             OperationKind.ExtractPdfPages -> {
-                OutlinedTextField(
-                    value = pageSpec,
-                    onValueChange = { pageSpec = it },
-                    label = { Text("页码范围，例：100-150,200-250") },
-                    singleLine = true,
-                    supportingText = { Text("逗号/空格分隔多段；写 150-100 即倒序取页") },
-                    isError = pageSpec.isNotBlank() && validation() != null,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                PageSpecField("页码范围，例：100-150,200-250", "逗号/空格分隔多段；写 150-100 即倒序取页")
+                items.forEach { Summary("${it.name} · ${it.sizeLabel}") }
+            }
+            OperationKind.RemovePdfPages -> {
+                PageSpecField("要删掉的页，例：1-3,7", "逗号/空格分隔多段；其余页原样保留，页码连着排")
+                items.forEach { Summary("${it.name} · ${it.sizeLabel}") }
+            }
+            OperationKind.RotatePdfPages -> {
+                Segmented("转多少", ROTATE_OPTIONS.map { it.first }, rotateIndex) { rotateIndex = it }
+                PageSpecField("留空=所有页；也可只转几页，例：1-3,7", "没点到的页原样带过去，转的方向是在原角度上加")
+            }
+            OperationKind.PdfToText -> {
+                PageSpecField("留空=全文；也可只要几页，例：1-3,7", "只抽文字层；扫描件没有文字层，得走「每页导出图片」")
                 items.forEach { Summary("${it.name} · ${it.sizeLabel}") }
             }
             OperationKind.PdfToImages -> {
@@ -241,13 +261,28 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
         }
     }
 
+    @Composable
+    private fun PageSpecField(label: String, support: String) {
+        OutlinedTextField(
+            value = pageSpec,
+            onValueChange = { pageSpec = it },
+            label = { Text(label) },
+            singleLine = true,
+            supportingText = { Text(support) },
+            isError = pageSpec.isNotBlank() && validation() != null,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+
     /** 参数当前能不能提交；返回 null 表示没问题。 */
     fun validation(): String? {
         val needsTarget = kind == OperationKind.SplitPdfBySize ||
             (kind == OperationKind.CompressImage && targetSizeText.isNotBlank()) ||
-            (kind == OperationKind.CompressVideo && videoByTarget)
+            (kind == OperationKind.CompressVideo && videoByTarget) ||
+            (kind == OperationKind.CompressPdf && pdfByTarget)
         if (needsTarget && SizeInput.parse(targetSizeText) == null) return "目标体积写成 10 或 1.5MB 这样"
         if (kind == OperationKind.ExtractPdfPages && pageSpec.isBlank()) return "先写要取哪些页"
+        if (kind == OperationKind.RemovePdfPages && pageSpec.isBlank()) return "先写要删哪些页"
         if (kind == OperationKind.MergePdfs && items.size < 2) return "合并 PDF 至少选两个文件"
         if (startSecondText.isNotBlank() && startSecondText.toFloatOrNull() == null) return "开始秒数不是数字"
         if (durationSecondText.isNotBlank() && durationSecondText.toFloatOrNull() == null) return "取多少秒不是数字"
@@ -265,7 +300,14 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
             )
             OperationKind.ImagesToPdf -> Operation.ImagesToPdf(paper, margin.roundToInt())
             OperationKind.SplitPdfBySize -> Operation.SplitPdfBySize(targetBytes ?: SizeInput.MEGA * 10)
+            OperationKind.SplitPdfIntoParts -> Operation.SplitPdfIntoParts(parts.roundToInt())
+            OperationKind.CompressPdf -> Operation.CompressPdf(
+                pdfLevel.roundToInt(), if (pdfByTarget) targetBytes else null,
+            )
             OperationKind.ExtractPdfPages -> Operation.ExtractPdfPages(pageSpec)
+            OperationKind.RemovePdfPages -> Operation.RemovePdfPages(pageSpec)
+            OperationKind.RotatePdfPages -> Operation.RotatePdfPages(pageSpec.trim(), ROTATE_OPTIONS[rotateIndex].second)
+            OperationKind.PdfToText -> Operation.PdfToText(pageSpec.trim())
             OperationKind.MergePdfs -> Operation.MergePdfs
             OperationKind.PdfToImages -> Operation.PdfToImages(imageFormat, pdfScale.roundToInt().toFloat(), quality.roundToInt())
             OperationKind.CompressGif -> Operation.CompressGif(maxEdge.roundToInt(), gifFps.roundToInt(), gifColors.roundToInt())
@@ -281,6 +323,8 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
         }
     }
 }
+
+private val ROTATE_OPTIONS = listOf("顺时针 90°" to 90, "180°" to 180, "逆时针 90°" to 270)
 
 private fun edgeLabel(edge: Float): String = if (edge == 0f) "不改" else "%.0f px".format(edge)
 

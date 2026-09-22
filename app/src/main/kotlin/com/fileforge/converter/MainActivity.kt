@@ -42,6 +42,7 @@ class MainActivity : ComponentActivity() {
                     WorkbenchScreen(
                         viewModel = viewModel,
                         onAddFiles = { pickFiles.launch(arrayOf("*/*")) },
+                        onPickPdf = { pickFiles.launch(arrayOf("application/pdf")) },
                         onExport = { pickFolder.launch(null) },
                         onPickFromGallery = this::pickFromGallery,
                         onSaveToGallery = {
