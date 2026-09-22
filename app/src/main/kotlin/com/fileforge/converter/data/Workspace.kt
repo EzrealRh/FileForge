@@ -24,6 +24,8 @@ data class WorkItem(
     val addedAt: Long,
     /** 这份结果是哪个操作产出的，界面上用来标记，也用于链式操作时提示来源。 */
     val fromOperation: String? = null,
+    /** 已经复制到手机共享存储（/storage/emulated/0/文件工坊）后的真实位置；null 表示还没放出去。 */
+    val sharedPath: String? = null,
 ) {
     val sizeLabel: String get() = SizeInput.format(size)
     val extension: String get() = OutputNaming.extension(name, kind.name.lowercase())
@@ -97,6 +99,13 @@ class Workspace(context: Context) {
     /** 给引擎一个还没登记的临时落盘位置，写完再由 [adopt] 收进工作台。 */
     fun newStagingFile(suffix: String): File =
         File(staging, "out-${System.nanoTime()}-${ids.incrementAndGet()}.$suffix")
+
+    /** 记一下这份成品在共享存储里的位置，只改内存表，不动文件。 */
+    fun markShared(item: WorkItem, path: String): WorkItem {
+        val updated = item.copy(sharedPath = path)
+        synchronized(items) { if (items.containsKey(item.id)) items[item.id] = updated }
+        return updated
+    }
 
     fun remove(item: WorkItem) {
         synchronized(items) { items.remove(item.id) }

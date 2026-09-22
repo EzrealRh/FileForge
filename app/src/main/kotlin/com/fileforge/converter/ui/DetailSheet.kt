@@ -99,7 +99,7 @@ fun DetailSheet(
                 }
             }
             Spacer(Modifier.height(10.dp))
-            LocationRow(item.file.absolutePath)
+            LocationRow(item.sharedPath, item.file.absolutePath)
             Spacer(Modifier.height(14.dp))
             HorizontalDivider()
 
@@ -153,9 +153,13 @@ fun DetailSheet(
     }
 }
 
-/** 文件现在的位置：给全路径 + 一键复制，并说清这是应用私有目录（系统文件管理器看不到）。 */
+/**
+ * 文件现在的位置：优先给手机存储里那份的真实路径（转换一完成就自动放过去），
+ * 还没有的话说明清楚为什么。整行可一键复制。
+ */
 @Composable
-private fun LocationRow(path: String) {
+private fun LocationRow(shared: String?, local: String) {
+    val path = shared ?: local
     val context = LocalContext.current
     var copied by remember { mutableStateOf(false) }
     Column {
@@ -178,8 +182,11 @@ private fun LocationRow(path: String) {
             }
         }
         Text(
-            "文件都留在应用自己的目录里，不乱写系统文件夹。要拿出去用：顶栏的下载图标统一存到 Download/文件工坊；" +
-                "右上角「导出」才需要你现选文件夹。",
+            if (shared != null) {
+                "这份已经放在手机存储里，文件管理器和其它 App 都能直接看到；工作台里另留一份是为了能接着再加工。"
+            } else {
+                "这份还留在应用自己的目录里（导入的原件在原来的地方没动）。要拿出去用：顶栏「存到手机」会复制到手机存储的 文件工坊 目录。"
+            },
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.outline,
         )
