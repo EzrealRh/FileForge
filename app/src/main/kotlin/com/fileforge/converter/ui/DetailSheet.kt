@@ -73,19 +73,21 @@ fun DetailSheet(
                     .background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(14.dp)),
                 contentAlignment = Alignment.Center,
             ) {
-                when {
-                    preview != null && !preview.isRecycled -> Image(
-                        bitmap = preview.asImageBitmap(),
-                        contentDescription = item.name,
-                        modifier = Modifier.fillMaxWidth().padding(6.dp),
-                        contentScale = ContentScale.Fit,
-                    )
-                    loading -> Text("正在读取…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
-                    else -> Text(
-                        detail.previewError ?: "这类文件没有可显示的预览",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.outline,
-                    )
+                MotionPreview(item, Modifier.matchParentSize()) {
+                    when {
+                        preview != null && !preview.isRecycled -> Image(
+                            bitmap = preview.asImageBitmap(),
+                            contentDescription = item.name,
+                            modifier = Modifier.fillMaxWidth().padding(6.dp),
+                            contentScale = ContentScale.Fit,
+                        )
+                        loading -> Text("正在读取…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+                        else -> Text(
+                            detail.previewError ?: "这类文件没有可显示的预览",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.outline,
+                        )
+                    }
                 }
             }
             Spacer(Modifier.height(14.dp))
