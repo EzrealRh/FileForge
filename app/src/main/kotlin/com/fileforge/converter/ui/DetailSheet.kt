@@ -178,7 +178,8 @@ private fun LocationRow(path: String) {
             }
         }
         Text(
-            "这份文件存在应用自己的目录里，系统文件管理器看不到。要落到手机里：顶栏「存到相册」（图片视频）或右上角「导出」选个文件夹。",
+            "文件都留在应用自己的目录里，不乱写系统文件夹。要拿出去用：顶栏的下载图标统一存到 Download/文件工坊；" +
+                "右上角「导出」才需要你现选文件夹。",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.outline,
         )

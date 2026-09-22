@@ -82,7 +82,7 @@ class WorkbenchViewModel(app: Application) : AndroidViewModel(app) {
     private val _state = MutableStateFlow(WorkbenchState(items = workspace.list()))
     val state = _state.asStateFlow()
 
-    val gallerySupported: Boolean get() = gallery.supported
+    val phoneSaveSupported: Boolean get() = gallery.supported
 
     fun import(uris: List<Uri>) = viewModelScope.launch(Dispatchers.IO) {
         val added = ArrayList<WorkItem>()
@@ -308,14 +308,15 @@ class WorkbenchViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** 直接存进相册/文档目录，微信小红书选图页马上能挑到。 */
-    fun saveToGallery() = viewModelScope.launch(Dispatchers.IO) {
+    /** 一键把成品落到 Download/文件工坊，不再按类型散进相册各个目录。 */
+    fun saveToPhone() = viewModelScope.launch(Dispatchers.IO) {
         val source = _state.value.selected.ifEmpty { _state.value.items }
         if (source.isEmpty()) {
             notify("工作台里还没有文件")
             return@launch
         }
         if (!gallery.supported) {
-            notify("这台系统的存储接口太老，改用右上角文件夹导出")
+            notify("这台系统的存储接口太老，改用右上角「导出」选文件夹")
             return@launch
         }
         val result = runCatching { gallery.save(source) }.getOrElse { error ->
@@ -324,8 +325,8 @@ class WorkbenchViewModel(app: Application) : AndroidViewModel(app) {
         }
         notify(
             when {
-                result.failures.isEmpty() -> "已存进相册/文档目录 ${result.saved} 个"
-                else -> "存进相册 ${result.saved} 个，失败 ${result.failures.size} 个：" + summarize(result.failures)
+                result.failures.isEmpty() -> "已存到 ${gallery.locationLabel}，共 ${result.saved} 个"
+                else -> "存到 ${gallery.locationLabel} ${result.saved} 个，失败 ${result.failures.size} 个：" + summarize(result.failures)
             },
         )
     }

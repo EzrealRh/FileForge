@@ -90,7 +90,9 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
                 collect(item.name) { listOf(gifs.compress(item, operation)) }
             }
             is Operation.VideoToGif -> items.forEach { item ->
-                collect(item.name) { listOf(gifs.fromVideo(item, operation)) }
+                collect(item.name) {
+                    listOf(gifs.fromVideo(item, operation) { percent -> onProgress(percent, item.name) })
+                }
             }
             is Operation.CompressVideo -> items.forEach { item ->
                 collect(item.name) {
