@@ -31,6 +31,9 @@ object GifDecoder {
     private const val IMAGE = 0x2C
     private const val TRAILER = 0x3B
 
+    /** 单帧像素上限，防畸形文件把数组开爆。 */
+    private const val MAX_FRAME_PIXELS = 64L * 1024 * 1024
+
     private val interlaceStarts = intArrayOf(0, 4, 2, 1)
     private val interlaceSteps = intArrayOf(8, 8, 4, 2)
 
@@ -62,7 +65,7 @@ object GifDecoder {
 
         var loopCount = 1
         var truncated = false
-        val canvasPixels = width * height
+        val canvasPixels = width.toLong() * height.toLong()
         var delayCs = 0
         var disposal = 0
         var transparentIndex = -1
@@ -122,23 +125,32 @@ object GifDecoder {
                         globalTable ?: throw GifException("帧没有局部调色板，而全局调色板缺失")
                     }
                     if (frameWidth <= 0 || frameHeight <= 0) throw GifException("帧尺寸异常")
+                    val framePixels = frameWidth.toLong() * frameHeight.toLong()
+                    if (framePixels > Int.MAX_VALUE || framePixels > MAX_FRAME_PIXELS) {
+                        throw GifException("帧尺寸异常 ${frameWidth}x$frameHeight")
+                    }
 
-                    val indices = Lzw.minDecode(bytes, q, frameWidth * frameHeight)
+                    val indices = Lzw.minDecode(bytes, q, framePixels.toInt())
                     q = skipSubBlocks(bytes, q + 1 + compressedLength(bytes, q + 1))
 
-                    val argb = IntArray(frameWidth * frameHeight)
+                    val argb = IntArray(framePixels.toInt())
                     for (i in indices.indices) {
                         val index = indices[i]
+                        if (index !in table.indices) throw GifException("索引 $index 超出调色板 ${table.size} 项")
                         argb[i] = if (index == transparentIndex) 0 else 0xFF000000.toInt() or table[index]
                     }
                     composite(canvas, width, height, left, top, frameWidth, frameHeight, argb, flags and 0x40 != 0)
-                    if ((frames.size + 1) * canvasPixels > pixelBudget) {
+                    if ((frames.size + 1).toLong() * canvasPixels > pixelBudget) {
                         truncated = true
                         p = bytes.size
                         break
                     }
-                    frames += GifFrame(canvas.copyOf(), delayCs.coerceAtLeast(2))
-                    if (disposal == 2) erase(canvas, width, height, left, top, frameWidth, frameHeight, background)
+                    frames += GifFrame(canvas.copyOf(), delayCs)
+                    val previous = if (disposal == 3) canvas.copyOf() else null
+                    when (disposal) {
+                        2 -> erase(canvas, width, height, left, top, frameWidth, frameHeight, backgroundPixel(globalTable, background, transparentIndex))
+                        3 -> previous?.copyInto(canvas)
+                    }
 
                     delayCs = 0
                     disposal = 0
@@ -176,6 +188,12 @@ object GifDecoder {
         }
     }
 
+    /** 背景索引查全局调色板得到颜色；它正好是透明槽时保持透明。 */
+    private fun backgroundPixel(globalTable: IntArray?, background: Int, transparentIndex: Int): Int {
+        if (background == transparentIndex) return 0
+        return globalTable?.getOrNull(background)?.let { 0xFF000000.toInt() or it } ?: 0
+    }
+
     private fun erase(
         canvas: IntArray,
         width: Int,
@@ -184,9 +202,8 @@ object GifDecoder {
         top: Int,
         frameWidth: Int,
         frameHeight: Int,
-        background: Int,
+        clearColor: Int,
     ) {
-        val clearColor = 0xFF000000.toInt() or background
         for (y in 0 until frameHeight) {
             val row = top + y
             if (row !in 0 until height) continue
@@ -386,7 +403,8 @@ internal object Lzw {
         var current = indices[0] and 0xFF
         var shift = 1
         while (shift < indexCount) {
-            val next = indices[shift] and 0xFF
+            val next = indices[shift]
+            require(next in 0 until (1 shl minCodeSize)) { "索引 $next 超出 $minCodeSize 位调色板" }
             val key = (current.toLong() shl 8) or next.toLong()
             val found = table[key]
             if (found != null) {
@@ -394,6 +412,7 @@ internal object Lzw {
                 shift++
                 continue
             }
+            require(current < nextCode) { "待编码的码字 $current 还没进字典" }
             bits.put(current, codeSize)
             if (nextCode == 4096) {
                 // 表满了：先按当前码宽发清码，再从头开始。这一对的映射丢弃即可。

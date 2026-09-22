@@ -2,6 +2,7 @@ package com.fileforge.core
 
 import com.fileforge.core.util.SizeInput
 import com.fileforge.core.video.VideoBitratePlan
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -30,16 +31,15 @@ class VideoBitratePlanTest {
     }
 
     @Test
-    fun `算出的码率夹在编码器能接受的区间里`() {
-        assertTrue(VideoBitratePlan.videoBitrateBps(2L * SizeInput.MEGA, 600 * seconds, 1_000)!! >= VideoBitratePlan.MIN_BPS)
-        assertTrue(VideoBitratePlan.videoBitrateBps(500L * SizeInput.MEGA, 10 * seconds, 96_000)!! <= VideoBitratePlan.MAX_BPS)
+    fun `算出的码率低于编码器下限时不反抬，直接放弃目标体积`() {
+        // 4MB / 200 秒：反推只有 160kbps，低于编码器下限。
+        // 抬到下限会让成品接近目标的两倍，等于违背用户写下的体积承诺。
+        assertNull(VideoBitratePlan.videoBitrateBps(4L * SizeInput.MEGA, 200 * seconds, 128_000))
     }
 
     @Test
-    fun `按码率反推体积和给的目标基本吻合`() {
-        val bps = VideoBitratePlan.videoBitrateBps(10L * SizeInput.MEGA, 30 * seconds, 96_000)!!
-        val estimated = VideoBitratePlan.estimateBytes(bps, 96_000, 30 * seconds)
-        assertTrue(estimated <= 10L * SizeInput.MEGA, "反推 $estimated 超过目标")
-        assertTrue(estimated >= 8L * SizeInput.MEGA, "反推 $estimated 浪费太多空间")
+    fun `上限仍然夹住，超长视频不会算出离谱码率`() {
+        val bps = VideoBitratePlan.videoBitrateBps(500L * SizeInput.MEGA, 10 * seconds, 0)!!
+        assertEquals(VideoBitratePlan.MAX_BPS, bps)
     }
 }

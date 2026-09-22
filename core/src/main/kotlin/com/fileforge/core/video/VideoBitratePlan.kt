@@ -26,13 +26,8 @@ object VideoBitratePlan {
         val usable = (totalBits * SAFETY_RATIO).toLong() - audioBits
         if (usable <= 0) return null
         val bps = usable * 1_000_000L / durationUs
-        return bps.coerceIn(minBps.toLong(), maxBps.toLong()).toInt()
-    }
-
-    /** 按这个码率压，最后大概能落在多少字节（用于界面上先给用户看预期）。 */
-    fun estimateBytes(videoBitrateBps: Int, audioBitrateBps: Int, durationUs: Long): Long {
-        if (durationUs <= 0) return 0L
-        val bits = (videoBitrateBps.toLong() + audioBitrateBps) * durationUs / 1_000_000L
-        return bits / 8
+        // 低于编码器下限就没办法了：抬上去会直接违背用户给的体积承诺
+        if (bps < minBps) return null
+        return bps.coerceAtMost(maxBps.toLong()).toInt()
     }
 }

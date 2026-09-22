@@ -52,6 +52,42 @@ class GifRoundTripTest {
     }
 
     @Test
+    fun `disposal 背景擦除不能把透明区画成不透明黑`() {
+        // 编码器把 0 号槽同时用作透明色和 LSD 背景索引，并且每帧都写 disposal=2 + 透明标志。
+        // 擦背景时必须回到透明，修好之前会画成不透明近黑，镂空处被填实。
+        val blue = 0xFF0000FF.toInt()
+        val green = 0xFF00FF00.toInt()
+        val full = IntArray(8 * 8) { blue }
+        val partial = IntArray(8 * 8) { index -> if (index < 8) green else 0 }
+        val tiny = IntArray(8 * 8) { index -> if (index == 0) green else 0 }
+        val bytes = GifEncoder(8, 8, maxColors = 16).encode(
+            listOf(GifFrame(full, 12), GifFrame(partial, 12), GifFrame(tiny, 12)),
+        )
+
+        val decoded = GifDecoder.decode(bytes)
+        // 每帧都是完整画布，所以透明处不继承上一帧，而是回到背景（=透明槽）
+        assertEquals(0, decoded.frames[1].argb[63], "第二帧的透明处应该是透明")
+        assertEquals(0, decoded.frames[2].argb[63], "第三帧的透明处应该是透明")
+        assertEquals(blue, decoded.frames[0].argb[63], "第一帧应该铺满蓝")
+
+        // 这张图里根本没有黑色，出现不透明黑就说明擦背景时把索引当成了颜色
+        val black = 0xFF000000.toInt()
+        assertTrue(decoded.frames.none { frame -> frame.argb.contains(black) }, "擦背景不能画出不透明黑")
+
+        val again = GifDecoder.decode(GifEncoder(8, 8, maxColors = 16).encode(decoded.frames))
+        assertEquals(0, again.frames[2].argb[63], "重编一次后角落仍然要是透明")
+    }
+
+    @Test
+    fun `帧像素数不够时直接报错而不是挖洞`() {
+        val short = GifFrame(IntArray(40), 10)
+        val error = assertThrows(IllegalArgumentException::class.java) {
+            GifEncoder(8, 8).encode(listOf(short))
+        }
+        assertTrue(error.message!!.contains("像素"), error.message)
+    }
+
+    @Test
     fun `循环次数写进文件也能读回来`() {
         val bytes = GifEncoder(2, 2, loopCount = 3).encode(listOf(frame(2, 2, 5) { _, _ -> 0xFF112233.toInt() }))
         assertEquals(3, GifDecoder.decode(bytes).loopCount)
