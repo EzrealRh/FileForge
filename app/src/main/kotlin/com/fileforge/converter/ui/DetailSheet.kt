@@ -43,8 +43,10 @@ fun DetailSheet(
     item: WorkItem,
     detail: FileDetail,
     preview: Bitmap?,
+    loading: Boolean,
     selected: Boolean,
     onToggleSelect: () -> Unit,
+    onConvert: () -> Unit,
     onDelete: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -78,12 +80,12 @@ fun DetailSheet(
                         modifier = Modifier.fillMaxWidth().padding(6.dp),
                         contentScale = ContentScale.Fit,
                     )
-                    detail.facts.isEmpty() -> Text(
+                    loading -> Text("正在读取…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+                    else -> Text(
                         detail.previewError ?: "这类文件没有可显示的预览",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.outline,
                     )
-                    else -> Text("正在读取…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
                 }
             }
             Spacer(Modifier.height(14.dp))
@@ -113,12 +115,12 @@ fun DetailSheet(
                 usable.forEach { kind ->
                     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                         Text(kind.label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.width(140.dp))
-                        Text(
-                            kind.hint,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                        Text(kind.hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
+                }
+                Spacer(Modifier.height(10.dp))
+                Button(onClick = onConvert, modifier = Modifier.fillMaxWidth()) {
+                    Text("就处理这个文件")
                 }
             }
             detail.previewError?.let {

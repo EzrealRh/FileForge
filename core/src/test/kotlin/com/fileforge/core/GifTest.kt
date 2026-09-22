@@ -74,6 +74,22 @@ class GifRoundTripTest {
     }
 
     @Test
+    fun `超出像素预算时只解前面的帧并标记截断`() {
+        val frames = (0 until 12).map { index ->
+            GifFrame(IntArray(16 * 16) { 0xFF000000.toInt() or (index * 0x001010) }, 10)
+        }
+        val bytes = GifEncoder(16, 16, maxColors = 64).encode(frames)
+
+        val whole = GifDecoder.decode(bytes)
+        assertEquals(12, whole.frames.size)
+        assertTrue(!whole.truncated)
+
+        val bounded = GifDecoder.decode(bytes, pixelBudget = 16 * 16 * 5)
+        assertEquals(5, bounded.frames.size)
+        assertTrue(bounded.truncated)
+    }
+
+    @Test
     fun `帧率换算给界面显示`() {
         val image = com.fileforge.core.gif.GifImage(
             2, 2,

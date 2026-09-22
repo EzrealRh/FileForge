@@ -2,19 +2,23 @@ package com.fileforge.converter.ui
 
 import android.app.Application
 import android.content.Intent
+import android.graphics.Bitmap
 import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.fileforge.core.model.FileKind
 import com.fileforge.core.ops.Operation
+import com.fileforge.converter.data.MediaStorePublisher
 import com.fileforge.converter.data.WorkItem
 import com.fileforge.converter.data.Workspace
+import com.fileforge.converter.engine.FileDetail
 import com.fileforge.converter.engine.MetaReader
 import com.fileforge.converter.engine.OperationRunner
-import com.fileforge.converter.engine.FileDetail
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 enum class KindFilter(val label: String, val matches: (FileKind) -> Boolean) {
@@ -26,20 +30,26 @@ enum class KindFilter(val label: String, val matches: (FileKind) -> Boolean) {
 
 data class Running(val title: String, val percent: Int, val current: String)
 
+/** 带序号的提示：否则连着两条同文案的会被 Snackbar 吞掉，用户以为没执行。 */
+data class Notice(val text: String, val seq: Int)
+
 data class WorkbenchState(
     val items: List<WorkItem> = emptyList(),
     val selection: Set<Long> = emptySet(),
     val filter: KindFilter = KindFilter.All,
     val running: Running? = null,
-    val notice: String? = null,
+    val notice: Notice? = null,
     val sheetOpen: Boolean = false,
     val detailId: Long? = null,
     val detail: FileDetail? = null,
-    val preview: android.graphics.Bitmap? = null,
+    val detailLoading: Boolean = false,
+    val preview: Bitmap? = null,
+    val confirmClear: Boolean = false,
 ) {
     val selected: List<WorkItem> get() = items.filter { it.id in selection }
     val visible: List<WorkItem> get() = items.filter { filter.matches(it.kind) }
     val busy: Boolean get() = running != null
+    val allVisibleSelected: Boolean get() = visible.isNotEmpty() && visible.all { it.id in selection }
 }
 
 class WorkbenchViewModel(app: Application) : AndroidViewModel(app) {
@@ -47,10 +57,19 @@ class WorkbenchViewModel(app: Application) : AndroidViewModel(app) {
     private val workspace = Workspace(app)
     private val runner = OperationRunner(app, workspace)
     private val meta = MetaReader()
+    private val gallery = MediaStorePublisher(app)
+    private var noticeSeq = 0
+
+    init {
+        workspace.purgeStaging()
+    }
+
     private val _state = MutableStateFlow(WorkbenchState(items = workspace.list()))
     val state = _state.asStateFlow()
 
-    fun import(uris: List<Uri>) = viewModelScope.launch {
+    val gallerySupported: Boolean get() = gallery.supported
+
+    fun import(uris: List<Uri>) = viewModelScope.launch(Dispatchers.IO) {
         val added = ArrayList<WorkItem>()
         val failures = ArrayList<String>()
         uris.forEach { uri ->
@@ -58,121 +77,179 @@ class WorkbenchViewModel(app: Application) : AndroidViewModel(app) {
                 .onSuccess { added += it }
                 .onFailure { failures += "${uri.lastPathSegment ?: "文件"}：${it.message}" }
         }
-        _state.value = _state.value.refreshed()
-            .copy(selection = _state.value.selection + added.map { it.id }.toSet())
+        _state.update { current ->
+            val fresh = current.refreshed()
+            fresh.copy(selection = fresh.selection + added.map { it.id }.toSet())
+        }
         if (failures.isNotEmpty()) notify("${failures.size} 个文件没能加入：" + failures.first())
     }
 
     fun toggle(id: Long) {
-        val current = _state.value.selection
-        _state.value = _state.value.copy(
-            selection = if (id in current) current - id else current + id,
-        )
+        _state.update { current ->
+            val picked = current.selection
+            current.copy(selection = if (id in picked) picked - id else picked + id)
+        }
     }
 
-    fun selectAll(visible: Boolean) {
-        _state.value = _state.value.copy(
-            selection = if (visible) _state.value.visible.map { it.id }.toSet() else emptySet(),
-        )
+    /** 已经全选就清空，否则全选当前筛出来的。 */
+    fun toggleSelectAll() {
+        _state.update { current ->
+            current.copy(
+                selection = if (current.allVisibleSelected) emptySet() else current.visible.map { it.id }.toSet(),
+            )
+        }
     }
 
-    fun remove(id: Long) {
-        _state.value.find(id)?.let { workspace.remove(it) }
-        _state.value = _state.value.refreshed()
+    fun askClear() {
+        if (_state.value.busy) {
+            notify("正在处理，先等这一批跑完")
+            return
+        }
+        _state.update { it.copy(confirmClear = true) }
+    }
+
+    fun dismissClear() {
+        _state.update { it.copy(confirmClear = false) }
     }
 
     fun clearAll() {
+        if (_state.value.busy) {
+            notify("正在处理，先等这一批跑完")
+            return
+        }
+        recyclePreview()
         workspace.clearAll()
-        _state.value = WorkbenchState()
+        _state.update { WorkbenchState() }
+    }
+
+    fun remove(id: Long) {
+        if (_state.value.busy) {
+            notify("正在处理，先等这一批跑完再删")
+            return
+        }
+        _state.value.items.firstOrNull { it.id == id }?.let { workspace.remove(it) }
+        val staleDetail = _state.value.detailId == id
+        if (staleDetail) recyclePreview()
+        _state.update { current ->
+            val fresh = current.refreshed()
+            if (staleDetail) {
+                fresh.copy(detailId = null, detail = null, preview = null, detailLoading = false)
+            } else {
+                fresh
+            }
+        }
     }
 
     fun filter(kind: KindFilter) {
-        _state.value = _state.value.copy(filter = kind)
+        _state.update { it.copy(filter = kind) }
     }
 
     fun openSheet(open: Boolean) {
-        _state.value = _state.value.copy(sheetOpen = open)
+        _state.update { it.copy(sheetOpen = open) }
     }
 
-    /** 详情和预览图都要读文件，放 IO 线程做，别卡住列表。 */
-    fun openDetail(id: Long) {
-        val item = _state.value.find(id) ?: return
+    /** 从详情页直接进参数面板：顺手把这个文件选中，省得退回列表再勾一次。 */
+    fun openSheetFor(id: Long) {
+        _state.update { it.copy(detailId = null, detail = null, preview = null, detailLoading = false, selection = setOf(id), sheetOpen = true) }
         recyclePreview()
-        _state.value = _state.value.copy(
-            detailId = id,
-            detail = FileDetail(item.name, "", item.sizeLabel, "", item.fromOperation, emptyList(), null),
-            preview = null,
-        )
-        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+    }
+
+    fun openDetail(id: Long) {
+        val item = _state.value.items.firstOrNull { it.id == id } ?: return
+        recyclePreview()
+        _state.update {
+            it.copy(
+                detailId = id,
+                detail = FileDetail(item.name, item.extension.uppercase(), item.sizeLabel, "", item.fromOperation, emptyList(), null),
+                detailLoading = true,
+                preview = null,
+            )
+        }
+        viewModelScope.launch(Dispatchers.IO) {
             val detail = runCatching { meta.read(item) }.getOrElse { error ->
                 FileDetail(item.name, "读取失败", item.sizeLabel, "", item.fromOperation, emptyList(), error.message)
             }
-            val preview = if (item.kind.isImage || item.kind.isVideo || item.kind == com.fileforge.core.model.FileKind.Pdf) {
-                meta.preview(item)
-            } else {
-                null
-            }
-            if (_state.value.detailId == id) {
-                _state.value = _state.value.copy(detail = detail, preview = preview)
-            } else {
-                preview?.recycle()
+            val preview = if (item.kind.isImage || item.kind.isVideo || item.kind == FileKind.Pdf) meta.preview(item) else null
+            _state.update { current ->
+                if (current.detailId != id) {
+                    preview?.recycle()
+                    current
+                } else {
+                    current.copy(detail = detail, preview = preview, detailLoading = false)
+                }
             }
         }
     }
 
     fun closeDetail() {
         recyclePreview()
-        _state.value = _state.value.copy(detailId = null, detail = null, preview = null)
-    }
-
-    private fun recyclePreview() {
-        _state.value.preview?.takeIf { !it.isRecycled }?.recycle()
+        _state.update { it.copy(detailId = null, detail = null, preview = null, detailLoading = false) }
     }
 
     fun consumeNotice() {
-        _state.value = _state.value.copy(notice = null)
+        _state.update { it.copy(notice = null) }
     }
 
     fun run(operation: Operation) {
-        val state = _state.value
-        val items = state.selected
+        val items = _state.value.selected
         if (items.isEmpty()) {
             notify("先选中要处理的文件")
             return
         }
-        _state.value = state.copy(sheetOpen = false, running = Running(operation.label, 0, items.first().name))
+        _state.update { it.copy(sheetOpen = false, running = Running(operation.label, 0, items.first().name)) }
         viewModelScope.launch {
             val result = runCatching {
                 runner.run(items, operation) { percent, label ->
-                    _state.value = _state.value.copy(running = _state.value.running?.copy(percent = percent, current = label))
+                    _state.update { current -> current.copy(running = current.running?.copy(percent = percent, current = label)) }
                 }
             }
-            val failure = result.exceptionOrNull()
-            val produced = result.getOrNull()?.outputs.orEmpty()
-            val errors = result.getOrNull()?.failures.orEmpty() +
-                listOfNotNull(failure?.message?.let { "整批中断：$it" })
-            _state.value = _state.value.refreshed().copy(
-                running = null,
-                selection = produced.map { it.id }.toSet(),
-            )
+            val crash = result.exceptionOrNull()
+            val report = result.getOrNull()
+            val produced = report?.outputs.orEmpty()
+            val errors = report?.failures.orEmpty().map { (name, why) -> "$name：$why" } +
+                listOfNotNull(crash?.message?.let { "整批中断：$it" })
+            _state.update { current ->
+                current.refreshed().copy(running = null, selection = produced.map { it.id }.toSet())
+            }
             notify(
                 when {
                     produced.isNotEmpty() && errors.isEmpty() -> "完成 ${produced.size} 个结果，可直接再加工"
-                    produced.isNotEmpty() -> "完成 ${produced.size} 个，${errors.size} 个失败：${errors.first()}"
-                    else -> "没做成：" + (errors.firstOrNull() ?: "未知原因")
+                    produced.isNotEmpty() -> "完成 ${produced.size} 个，失败 ${errors.size} 个：" + summarize(errors)
+                    errors.isEmpty() -> "没产出结果文件"
+                    else -> "没做成：" + summarize(errors)
                 },
             )
         }
     }
 
-    /** 导出到用户选的文件夹：有选中就只导选中，否则导全部。 */
-    fun publish(treeUri: Uri) = viewModelScope.launch {
-        val onlySelected = _state.value.selection.isNotEmpty()
-        val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-        runCatching {
-            getApplication<Application>().contentResolver.takePersistableUriPermission(treeUri, flags)
+    /** 直接存进相册/文档目录，聊天 App内容平台选图页马上能挑到。 */
+    fun saveToGallery() = viewModelScope.launch(Dispatchers.IO) {
+        val source = _state.value.selected.ifEmpty { _state.value.items }
+        if (source.isEmpty()) {
+            notify("工作台里还没有文件")
+            return@launch
         }
-        val source = if (onlySelected) _state.value.selected else _state.value.items
+        if (!gallery.supported) {
+            notify("这台系统的存储接口太老，改用右上角文件夹导出")
+            return@launch
+        }
+        val result = runCatching { gallery.save(source) }.getOrElse { error ->
+            notify("存相册失败：${error.message ?: error.javaClass.simpleName}")
+            return@launch
+        }
+        notify(
+            when {
+                result.failures.isEmpty() -> "已存进相册/文档目录 ${result.saved} 个"
+                else -> "存进相册 ${result.saved} 个，失败 ${result.failures.size} 个：" + summarize(result.failures)
+            },
+        )
+    }
+
+    /** 导出到用户选的文件夹：有选中就只导选中，否则导全部。 */
+    fun publish(treeUri: Uri) = viewModelScope.launch(Dispatchers.IO) {
+        val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        runCatching { getContent().takePersistableUriPermission(treeUri, flags) }
+        val source = _state.value.selected.ifEmpty { _state.value.items }
         if (source.isEmpty()) {
             notify("没有可导出的文件")
             return@launch
@@ -185,16 +262,19 @@ class WorkbenchViewModel(app: Application) : AndroidViewModel(app) {
         var done = 0
         val failed = ArrayList<String>()
         source.forEach { item ->
-            runCatching { copyTo(item, tree) }
-                .onSuccess { done++ }
-                .onFailure { failed += "${item.name}：${it.message}" }
+            runCatching { copyTo(item, tree) }.onSuccess { done++ }.onFailure { failed += "${item.name}：${it.message}" }
         }
         notify(
             when {
                 failed.isEmpty() -> "已导出 $done 个文件"
-                else -> "导出 $done 个，失败 ${failed.size} 个：${failed.first()}"
+                else -> "导出 $done 个，失败 ${failed.size} 个：" + summarize(failed)
             },
         )
+    }
+
+    override fun onCleared() {
+        recyclePreview()
+        super.onCleared()
     }
 
     private fun copyTo(item: WorkItem, tree: DocumentFile) {
@@ -222,16 +302,31 @@ class WorkbenchViewModel(app: Application) : AndroidViewModel(app) {
         FileKind.Unknown -> "*/*"
     }
 
-    private fun WorkbenchState.find(id: Long) = items.firstOrNull { it.id == id }
+    private fun recyclePreview() {
+        _state.value.preview?.takeIf { !it.isRecycled }?.recycle()
+    }
 
+    /** 列表是唯一真相：文件没了就把选中和详情一起收掉，别留悬空 id。 */
     private fun WorkbenchState.refreshed(): WorkbenchState {
         val fresh = workspace.list()
         val alive = fresh.map { it.id }.toSet()
-        return copy(items = fresh, selection = selection.filter { it in alive }.toSet())
+        val detailGone = detailId != null && detailId !in alive
+        return copy(
+            items = fresh,
+            selection = selection.filter { it in alive }.toSet(),
+            detailId = if (detailGone) null else detailId,
+            detail = if (detailGone) null else detail,
+            detailLoading = if (detailGone) false else detailLoading,
+        )
     }
 
+    private fun summarize(errors: List<String>): String =
+        if (errors.size <= 2) errors.joinToString("；")
+        else "${errors.take(2).joinToString("；")} 等共 ${errors.size} 处"
+
     private fun notify(message: String) {
-        _state.value = _state.value.copy(notice = message)
+        noticeSeq++
+        _state.update { it.copy(notice = Notice(message, noticeSeq)) }
     }
 
     private fun getContent() = getApplication<Application>().contentResolver

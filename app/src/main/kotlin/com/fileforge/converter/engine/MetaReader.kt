@@ -64,22 +64,9 @@ class MetaReader {
         }
     }.getOrNull()
 
-    private fun stillFrame(file: File, longEdge: Int): android.graphics.Bitmap? {
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeFile(file.absolutePath, bounds)
-        if (bounds.outWidth <= 0) return null
-        var sample = 1
-        while (maxOf(bounds.outWidth, bounds.outHeight) / sample > longEdge) sample *= 2
-        return BitmapFactory.decodeFile(file.absolutePath, BitmapFactory.Options().apply { inSampleSize = sample })
-    }
+    private fun stillFrame(file: File, longEdge: Int): android.graphics.Bitmap? = decodeStillFrame(file, longEdge)
 
-    private fun videoFrame(file: File): android.graphics.Bitmap? {
-        val retriever = android.media.MediaMetadataRetriever()
-        return runCatching {
-            retriever.setDataSource(file.absolutePath)
-            retriever.getScaledFrameAtTime(0, android.media.MediaMetadataRetriever.OPTION_CLOSEST, 900, 900)
-        }.getOrNull().also { runCatching { retriever.release() } }
-    }
+    private fun videoFrame(file: File): android.graphics.Bitmap? = videoFrameAt(file, 0L, 900, 900)
 
     private fun pdfFirstPage(file: File): android.graphics.Bitmap? {
         val descriptor = android.os.ParcelFileDescriptor.open(file, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
@@ -121,15 +108,19 @@ class MetaReader {
     }
 
     private fun gifFacts(file: File): List<Pair<String, String>> {
-        val image = GifDecoder.decode(file.readBytes())
+        // 只为看信息，不解全部帧：200 帧的大 GIF 全解出来会直接把进程顶爆
+        val image = GifDecoder.decode(file.readBytes(), pixelBudget = FACT_PIXEL_BUDGET)
+        val seen = HashSet<Int>()
+        image.frames.forEach { frame ->
+            for (pixel in frame.argb) if (pixel != 0) seen.add(pixel and 0xFFFFFF)
+        }
         return buildList {
             add("画面" to "${image.width} × ${image.height}")
-            add("帧数" to "${image.frames.size}")
+            add("帧数" to if (image.truncated) "${image.frames.size}（只解了前这么多）" else "${image.frames.size}")
             add("时长" to "%.1f 秒".format(image.totalDurationCs / 100f))
             add("平均帧率" to "%.1f fps".format(image.averageFps))
             add("循环" to if (image.loopCount == 0) "无限" else "${image.loopCount} 次")
-            val colors = image.frames.flatMap { frame -> frame.argb.filter { it != 0 }.map { it and 0xFFFFFF } }.distinct().size
-            add("实际颜色" to "$colors 种")
+            add("实际颜色" to "${seen.size} 种")
         }
     }
 
@@ -198,4 +189,9 @@ class MetaReader {
     private fun MediaFormat.stringOrNull(key: String): String? = runCatching { getString(key) }.getOrNull()
     private fun MediaFormat.integerOrNull(key: String): Int? = runCatching { getInteger(key) }.getOrNull()
     private fun MediaFormat.longOrNull(key: String): Long? = runCatching { getLong(key) }.getOrNull()
+
+    private companion object {
+        /** 详情页只是读信息，解这么多像素足够算出颜色数，不必把整个动图搬进堆。 */
+        const val FACT_PIXEL_BUDGET = 4_000_000
+    }
 }

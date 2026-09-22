@@ -25,6 +25,23 @@ private val Fallback = lightColorScheme(
     onErrorContainer = androidx.compose.ui.graphics.Color(0xFF410E0B),
 )
 
+private val Dark = darkColorScheme(
+    primary = androidx.compose.ui.graphics.Color(0xFFD0BCFF),
+    onPrimary = androidx.compose.ui.graphics.Color(0xFF381E72),
+    primaryContainer = androidx.compose.ui.graphics.Color(0xFF4F378B),
+    onPrimaryContainer = androidx.compose.ui.graphics.Color(0xFFEADDFF),
+    secondaryContainer = androidx.compose.ui.graphics.Color(0xFF4A4458),
+    surface = androidx.compose.ui.graphics.Color(0xFF141218),
+    surfaceContainerLow = androidx.compose.ui.graphics.Color(0xFF1D1B20),
+    surfaceContainerHigh = androidx.compose.ui.graphics.Color(0xFF2B2930),
+    surfaceVariant = androidx.compose.ui.graphics.Color(0xFF49454F),
+    onSurface = androidx.compose.ui.graphics.Color(0xFFE6E1E5),
+    onSurfaceVariant = androidx.compose.ui.graphics.Color(0xFFCAC4D0),
+    outline = androidx.compose.ui.graphics.Color(0xFF938F99),
+    errorContainer = androidx.compose.ui.graphics.Color(0xFF93000A),
+    onErrorContainer = androidx.compose.ui.graphics.Color(0xFFF68B8B),
+)
+
 @Composable
 fun FileForgeTheme(content: @Composable () -> Unit) {
     val dark = isSystemInDarkTheme()
@@ -33,7 +50,7 @@ fun FileForgeTheme(content: @Composable () -> Unit) {
         Build.VERSION.SDK_INT >= 31 && dark -> runCatching { dynamicDarkColorScheme(context) }.getOrNull()
         Build.VERSION.SDK_INT >= 31 -> runCatching { dynamicLightColorScheme(context) }.getOrNull()
         else -> null
-    } ?: if (dark) darkColorScheme().copy(primary = Fallback.primary) else Fallback
+    } ?: if (dark) Dark else Fallback
 
     MaterialTheme(colorScheme = scheme, content = content)
 }

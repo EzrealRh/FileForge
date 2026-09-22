@@ -38,9 +38,15 @@ class MediaStorePublisher(private val context: Context) {
             put(MediaStore.MediaColumns.IS_PENDING, 1)
         }
         val uri: Uri = resolver.insert(collectionFor(item), values) ?: error("系统拒绝了写入请求")
-        resolver.openOutputStream(uri).use { output ->
-            requireNotNull(output) { "打不开输出流" }
-            item.file.inputStream().use { it.copyTo(output) }
+        runCatching {
+            resolver.openOutputStream(uri).use { output ->
+                requireNotNull(output) { "打不开输出流" }
+                item.file.inputStream().use { it.copyTo(output) }
+            }
+        }.onFailure {
+            // 写失败的行会一直以 pending 挂着，删掉，别在相册里留个空壳
+            runCatching { resolver.delete(uri, null, null) }
+            throw it
         }
         values.clear()
         values.put(MediaStore.MediaColumns.IS_PENDING, 0)

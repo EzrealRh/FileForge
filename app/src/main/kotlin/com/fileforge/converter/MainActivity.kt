@@ -34,6 +34,10 @@ class MainActivity : ComponentActivity() {
                         viewModel = viewModel,
                         onAddFiles = { pickFiles.launch(arrayOf("*/*")) },
                         onExport = { pickFolder.launch(null) },
+                        onSaveToGallery = {
+                            // 系统太老没有分区存储写法时，直接回落到选文件夹
+                            if (viewModel.gallerySupported) viewModel.saveToGallery() else pickFolder.launch(null)
+                        },
                     )
                 }
             }

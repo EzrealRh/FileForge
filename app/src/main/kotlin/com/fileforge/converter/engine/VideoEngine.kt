@@ -16,6 +16,8 @@ import com.fileforge.core.video.VideoBitratePlan
 import com.fileforge.converter.data.WorkItem
 import com.fileforge.converter.data.Workspace
 import java.nio.ByteBuffer
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlin.math.max
 
 /**
@@ -24,7 +26,7 @@ import kotlin.math.max
  */
 class VideoEngine(private val workspace: Workspace) {
 
-    fun compress(item: WorkItem, operation: Operation.CompressVideo, onProgress: (Int) -> Unit): EngineOutput {
+    suspend fun compress(item: WorkItem, operation: Operation.CompressVideo, onProgress: (Int) -> Unit): EngineOutput {
         val output = workspace.newStagingFile(operation.format.extension)
         val mime = when (operation.format) {
             VideoFormat.Mp4 -> MediaFormat.MIMETYPE_VIDEO_AVC
@@ -36,6 +38,7 @@ class VideoEngine(private val workspace: Workspace) {
         val audioExtractor = MediaExtractor()
         var job: Transcode? = null
         var surface: Surface? = null
+        var muxer: MediaMuxer? = null
 
         try {
             videoExtractor.setDataSource(item.file.absolutePath)
@@ -44,14 +47,12 @@ class VideoEngine(private val workspace: Workspace) {
             val sourceFormat = videoExtractor.getTrackFormat(videoTrack)
             val sourceWidth = sourceFormat.integer(MediaFormat.KEY_WIDTH) ?: error("读不到画面尺寸")
             val sourceHeight = sourceFormat.integer(MediaFormat.KEY_HEIGHT) ?: error("读不到画面尺寸")
-            val swap = rotation == 90 || rotation == 270
-            val displayWidth = if (swap) sourceHeight else sourceWidth
-            val displayHeight = if (swap) sourceWidth else sourceHeight
-
-            // 编码器的输入面不接受尺寸缩放（SDK 没有对外的缩放开关），所以这里只压码率，
-            // 想要改分辨率得走 GPU 通路，那是另一件事，这里如实告诉用户。
-            val target = even(displayWidth) to even(displayHeight)
-            if (operation.maxEdge > 0 && max(displayWidth, displayHeight) > operation.maxEdge) {
+            // 编码器按源文件的存储尺寸配置，旋转交给 muxer 的 orientation hint，
+            // 否则解码器已经转正的画面会被再旋一次。
+            val target = even(sourceWidth) to even(sourceHeight)
+            // 编码器的输入面不接受尺寸缩放（SDK 没有对外的缩放开关），所以只压码率，
+            // 想改分辨率得走 GPU 通路，那是另一件事，这里如实告诉用户。
+            if (operation.maxEdge > 0 && max(sourceWidth, sourceHeight) > operation.maxEdge) {
                 notes += "只压码率，不改分辨率"
             }
             if (operation.format == VideoFormat.WebM) notes += "WebM 输出不带音轨"
@@ -103,12 +104,13 @@ class VideoEngine(private val workspace: Workspace) {
                 throw IllegalStateException("这台设备解不了这个视频的编码格式：${error.message}", error)
             }
 
+            muxer = MediaMuxer(output.absolutePath, muxerFormat(operation.format)).apply {
+                setOrientationHint(rotation)
+            }
             job = Transcode(
                 decoder = decoder,
                 encoder = encoder,
-                muxer = MediaMuxer(output.absolutePath, muxerFormat(operation.format)).apply {
-                    setOrientationHint(rotation)
-                },
+                muxer = muxer!!,
                 videoExtractor = videoExtractor,
                 audioExtractor = if (audioTrack >= 0) audioExtractor else null,
                 audioTrackIndex = audioTrack,
@@ -116,6 +118,7 @@ class VideoEngine(private val workspace: Workspace) {
 
             var decoded = false
             while (!job.encodeDone) {
+                currentCoroutineContext().ensureActive()
                 if (!decoded) job.feedDecoder()
                 job.drainDecoder()
                 job.drainEncoder()
@@ -129,11 +132,13 @@ class VideoEngine(private val workspace: Workspace) {
             job.finish()
             onProgress(100)
         } catch (error: Exception) {
-            if (error is IllegalStateException) throw error
+            // 半写的 mp4 留着就是坏文件，直接删；调用方只会看到失败条目
             runCatching { output.delete() }
+            if (error is IllegalStateException) throw error
             throw IllegalStateException("转码失败：${error.javaClass.simpleName} ${error.message}", error)
         } finally {
             runCatching { job?.release() }
+            if (job == null) runCatching { muxer?.release() }
             runCatching { surface?.release() }
             runCatching { videoExtractor.release() }
             runCatching { audioExtractor.release() }
@@ -255,12 +260,14 @@ class VideoEngine(private val workspace: Workspace) {
             runCatching { decoder.release() }
             runCatching { encoder.stop() }
             runCatching { encoder.release() }
+            // 不 stop 就 release 的话，mp4 缺 moov 尾，文件打不开
+            runCatching { if (muxerStarted) muxer.stop() }
             runCatching { muxer.release() }
         }
     }
 
     /** 编码器要求偶数边长，奇数会 configure 失败。 */
-    private fun even(value: Int): Int = if (value % 2 == 0) value else value - 1
+    private fun even(value: Int): Int = (if (value % 2 == 0) value else value - 1).coerceAtLeast(2)
 
     private fun muxerFormat(format: VideoFormat): Int = when (format) {
         VideoFormat.Mp4 -> MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4

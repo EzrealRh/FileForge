@@ -32,7 +32,7 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
         val outputs = ArrayList<EngineOutput>()
         val failures = ArrayList<Pair<String, String>>()
 
-        fun collect(label: String, block: () -> List<EngineOutput>) {
+        suspend fun collect(label: String, block: suspend () -> List<EngineOutput>) {
             runCatching { block() }
                 .onSuccess { outputs += it }
                 .onFailure { error ->
@@ -52,7 +52,7 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
                 listOf(pdf.imagesToPdf(items, operation.paper, operation.marginDp))
             }
             is Operation.SplitPdfBySize -> items.forEach { item ->
-                collect(item.name) { pdf.splitBySize(item, operation.targetBytes) { onProgress(0, item.name) } }
+                collect(item.name) { pdf.splitBySize(item, operation.targetBytes) { percent -> onProgress(percent / 2, item.name) } }
             }
             is Operation.MergePdfs -> collect("${items.size} 份 PDF") { listOf(pdf.merge(items)) }
             is Operation.ExtractPdfPages -> items.forEach { item ->
