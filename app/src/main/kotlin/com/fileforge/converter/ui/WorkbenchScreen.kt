@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.PictureAsPdf
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.PhotoAlbum
@@ -58,6 +59,7 @@ import com.fileforge.converter.data.WorkItem
 fun WorkbenchScreen(
     viewModel: WorkbenchViewModel,
     onAddFiles: () -> Unit,
+    onPickPdf: () -> Unit,
     onExport: () -> Unit,
     onSaveToGallery: () -> Unit,
     onPickFromGallery: () -> Unit,
@@ -138,7 +140,7 @@ fun WorkbenchScreen(
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
             if (state.items.isEmpty()) {
-                EmptyState(onPickFromGallery, onAddFiles)
+                EmptyState(onPickPdf, onPickFromGallery, onAddFiles)
             } else {
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 16.dp),
@@ -158,10 +160,17 @@ fun WorkbenchScreen(
                             )
                         }
                     }
-                    Button(onClick = onPickFromGallery, enabled = !state.busy) {
-                        Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("从相册", maxLines = 1)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = onPickPdf, enabled = !state.busy) {
+                            Icon(Icons.Outlined.PictureAsPdf, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("加 PDF", maxLines = 1)
+                        }
+                        FilledTonalButton(onClick = onPickFromGallery, enabled = !state.busy) {
+                            Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("相册", maxLines = 1)
+                        }
                     }
                 }
                 Text(
@@ -243,7 +252,7 @@ fun WorkbenchScreen(
 }
 
 @Composable
-private fun EmptyState(onPickFromGallery: () -> Unit, onAddFiles: () -> Unit) {
+private fun EmptyState(onPickPdf: () -> Unit, onPickFromGallery: () -> Unit, onAddFiles: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth().padding(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
@@ -256,22 +265,27 @@ private fun EmptyState(onPickFromGallery: () -> Unit, onAddFiles: () -> Unit) {
                 tint = MaterialTheme.colorScheme.primary,
             )
             Spacer(Modifier.height(12.dp))
-            Text("图片、PDF、视频、GIF 都在这里转", style = MaterialTheme.typography.titleMedium)
+            Text("PDF 工具箱：拆分、截取、压缩、合并", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(6.dp))
             Text(
-                "文件全部留在本机处理，不联网、不上传。转换结果会留在工作台里，可以接着再做下一步。",
+                "按体积拆分、按页码截取或删除、旋转、合并、压掉内嵌图片的水分、提取文字，也能转图片和 GIF、压视频。" +
+                    "文件全部留在本机处理，不联网、不上传；结果会留在工作台，可以接着做下一步。",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(20.dp))
-            Button(onClick = onPickFromGallery, modifier = Modifier.fillMaxWidth()) {
-                Icon(Icons.Outlined.Add, contentDescription = null)
+            Button(onClick = onPickPdf, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Outlined.PictureAsPdf, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
-                Text("从相册选")
+                Text("加 PDF")
             }
             Spacer(Modifier.height(8.dp))
-            FilledTonalButton(onClick = onAddFiles, modifier = Modifier.fillMaxWidth()) {
-                Text("从文件管理器选（PDF 等其他类型）")
+            FilledTonalButton(onClick = onPickFromGallery, modifier = Modifier.fillMaxWidth()) {
+                Text("从相册选图片、视频")
+            }
+            Spacer(Modifier.height(8.dp))
+            TextButton(onClick = onAddFiles, modifier = Modifier.fillMaxWidth()) {
+                Text("从文件管理器选其他类型（GIF、视频、HEIC…）")
             }
         }
     }

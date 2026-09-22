@@ -100,6 +100,37 @@ sealed interface Operation {
     data object MergePdfs : Operation {
         override val label get() = "合并 PDF"
     }
+
+    /**
+     * PDF 压缩：只重编内嵌图片（降采样 + JPEG），文字和矢量图形原样保留。
+     * level 对应「清晰/标准/紧凑」，给了 targetBytes 就沿档位阶梯往下走到达标或走完。
+     */
+    data class CompressPdf(
+        val level: Int = 1,
+        val targetBytes: Long? = null,
+    ) : Operation {
+        override val label get() = if (targetBytes != null) "压到 ${targetLabel(targetBytes)} 以内" else "压缩 PDF"
+    }
+
+    /** 删掉指定页，其余页原样保留。 */
+    data class RemovePdfPages(val spec: String) : Operation {
+        override val label get() = "删除指定页"
+    }
+
+    /** 旋转页面，度数是 90 的整数倍；spec 留空表示所有页。 */
+    data class RotatePdfPages(val spec: String, val degrees: Int) : Operation {
+        override val label get() = if (spec.isBlank()) "旋转所有页 $degrees°" else "旋转指定页 $degrees°"
+    }
+
+    /** 按份数把页数均分拆开，和按体积分割是两回事。 */
+    data class SplitPdfIntoParts(val parts: Int) : Operation {
+        override val label get() = "拆成 $parts 份"
+    }
+
+    /** 提取文字层成 txt；spec 留空表示全文，多段用页码范围写。 */
+    data class PdfToText(val spec: String = "") : Operation {
+        override val label get() = "提取文字"
+    }
 }
 
 enum class PdfPaper(val label: String) { A4("A4"), A5("A5"), Letter("Letter"), FitImage("按图片尺寸") }
