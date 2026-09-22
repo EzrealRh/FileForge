@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 分享工作台里的成品给别的 App：只能暴露这两个目录，别的一概不给 -->
+<paths>
+    <files-path name="workspace" path="workspace/" />
+    <cache-path name="staging" path="staging/" />
+</paths>

@@ -4,9 +4,11 @@ import android.app.Application
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
+import androidx.core.content.FileProvider
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.fileforge.core.model.DayGroup
 import com.fileforge.core.model.FileKind
 import com.fileforge.core.ops.Operation
 import com.fileforge.converter.data.MediaEntry
@@ -49,6 +51,8 @@ data class WorkbenchState(
     val items: List<WorkItem> = emptyList(),
     val selection: Set<Long> = emptySet(),
     val filter: KindFilter = KindFilter.All,
+    /** 列表按日期分组（今天/昨天/本周/更早）。 */
+    val groupByDate: Boolean = false,
     val running: Running? = null,
     val notice: Notice? = null,
     val sheetOpen: Boolean = false,
@@ -63,6 +67,13 @@ data class WorkbenchState(
 ) {
     val selected: List<WorkItem> get() = items.filter { it.id in selection }
     val visible: List<WorkItem> get() = items.filter { filter.matches(it.kind) }
+
+    /**
+     * 按日期分好组。[visible] 本来就是新→旧，所以 groupBy 出来的组序和组内序都对，
+     * 不用再排一次。[now] 由调用方传，测试里能固定住。
+     */
+    fun groupedByDate(now: Long): List<Pair<DayGroup, List<WorkItem>>> =
+        visible.groupBy { DayGroup.of(it.addedAt, now) }.map { (group, list) -> group to list }
     val busy: Boolean get() = running != null
     val allVisibleSelected: Boolean get() = visible.isNotEmpty() && visible.all { it.id in selection }
 }
@@ -242,6 +253,41 @@ class WorkbenchViewModel(app: Application) : AndroidViewModel(app) {
 
     fun filter(kind: KindFilter) {
         _state.update { it.copy(filter = kind) }
+    }
+
+    fun toggleDateGroup() {
+        _state.update { it.copy(groupByDate = !it.groupByDate) }
+    }
+
+    /**
+     * 交给系统分享面板：微信、小红书、蓝牙、邮件都能收。
+     * 文件在应用私有目录，必须经 FileProvider 换成 content:// 并临时授权，直接给路径对方读不到。
+     */
+    fun share(items: List<WorkItem>) {
+        if (items.isEmpty()) {
+            notify("先选中要分享的文件")
+            return
+        }
+        val app = getApplication<Application>()
+        val uris = ArrayList<Uri>()
+        items.forEach { item ->
+            runCatching { FileProvider.getUriForFile(app, "${app.packageName}.fileprovider", item.file) }
+                .onSuccess { uris += it }
+                .onFailure { notify("${item.name} 拿不到分享地址：${it.message ?: it.javaClass.simpleName}") }
+        }
+        if (uris.isEmpty()) return
+        val intent = Intent(if (uris.size == 1) Intent.ACTION_SEND else Intent.ACTION_SEND_MULTIPLE).apply {
+            type = if (uris.size == 1) items.first().kind.mimeType else "*/*"
+            if (uris.size == 1) putExtra(Intent.EXTRA_STREAM, uris.first())
+            else putExtra(Intent.EXTRA_STREAM, uris)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        runCatching {
+            app.startActivity(
+                Intent.createChooser(intent, "分享 ${uris.size} 个文件")
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }.onFailure { notify("这台机器上没有能接收文件的 App") }
     }
 
     fun openSheet(open: Boolean) {
