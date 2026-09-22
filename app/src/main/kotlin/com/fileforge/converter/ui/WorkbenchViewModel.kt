@@ -293,12 +293,15 @@ class WorkbenchViewModel(app: Application) : AndroidViewModel(app) {
             val produced = report?.outputs.orEmpty()
             val errors = report?.failures.orEmpty().map { (name, why) -> "$name：$why" } +
                 listOfNotNull(crash?.message?.let { "整批中断：$it" })
+            val placed = if (produced.isEmpty()) emptyMap() else publish(produced)
             _state.update { current ->
                 current.refreshed().copy(running = null, selection = produced.map { it.id }.toSet())
             }
+            val where = placed.values.firstOrNull()?.substringBeforeLast('/')
             notify(
                 when {
-                    produced.isNotEmpty() && errors.isEmpty() -> "完成 ${produced.size} 个结果，可直接再加工"
+                    produced.isNotEmpty() && errors.isEmpty() ->
+                        "完成 ${produced.size} 个结果" + (where?.let { "，已放到 $it" } ?: "，可直接再加工")
                     produced.isNotEmpty() -> "完成 ${produced.size} 个，失败 ${errors.size} 个：" + summarize(errors)
                     errors.isEmpty() -> "没产出结果文件"
                     else -> "没做成：" + summarize(errors)
@@ -307,28 +310,35 @@ class WorkbenchViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** 直接存进相册/文档目录，聊天 App内容平台选图页马上能挑到。 */
-    /** 一键把成品落到 Download/文件工坊，不再按类型散进相册各个目录。 */
+    /** 顶栏按钮：把选中的（没选就是全部）再往手机存储放一遍。 */
     fun saveToPhone() = viewModelScope.launch(Dispatchers.IO) {
         val source = _state.value.selected.ifEmpty { _state.value.items }
         if (source.isEmpty()) {
             notify("工作台里还没有文件")
             return@launch
         }
+        if (publish(source).isNotEmpty()) notify("已存到 ${gallery.locationLabel}，共 ${source.size} 个")
+    }
+
+    /**
+     * 复制到 /storage/emulated/0/文件工坊 并记住位置。转换一完成就自动来一次，
+     * 省得用户还要记得点"存到手机"；放不进去也不影响工作台里那份继续加工。
+     */
+    private suspend fun publish(items: List<WorkItem>): Map<String, String> {
         if (!gallery.supported) {
-            notify("这台系统的存储接口太老，改用右上角「导出」选文件夹")
-            return@launch
+            notify("这台系统的存储接口太老，用右上角「导出」选文件夹")
+            return emptyMap()
         }
-        val result = runCatching { gallery.save(source) }.getOrElse { error ->
-            notify("存相册失败：${error.message ?: error.javaClass.simpleName}")
-            return@launch
+        val result = withContext(Dispatchers.IO) { runCatching { gallery.save(items) } }
+            .getOrElse { error ->
+                notify("放到手机存储失败：${error.message ?: error.javaClass.simpleName}")
+                return emptyMap()
+            }
+        result.paths.forEach { (name, path) ->
+            items.firstOrNull { it.name == name }?.let { item -> workspace.markShared(item, path) }
         }
-        notify(
-            when {
-                result.failures.isEmpty() -> "已存到 ${gallery.locationLabel}，共 ${result.saved} 个"
-                else -> "存到 ${gallery.locationLabel} ${result.saved} 个，失败 ${result.failures.size} 个：" + summarize(result.failures)
-            },
-        )
+        if (result.failures.isNotEmpty()) notify("有 ${result.failures.size} 个没放进去：" + summarize(result.failures))
+        return result.paths
     }
 
     /** 导出到用户选的文件夹：有选中就只导选中，否则导全部。 */
