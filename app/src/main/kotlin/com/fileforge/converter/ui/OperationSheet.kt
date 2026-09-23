@@ -47,6 +47,7 @@ import com.fileforge.core.ops.Operation
 import com.fileforge.core.ops.OperationKind
 import com.fileforge.core.ops.PdfPaper
 import com.fileforge.core.ops.VideoFormat
+import com.fileforge.core.pdf.StampSpot
 import com.fileforge.core.util.SizeInput
 import com.fileforge.converter.data.WorkItem
 import kotlin.math.roundToInt
@@ -160,6 +161,16 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
     var pdfByTarget by mutableStateOf(false)
     var parts by mutableStateOf(2f)
     var rotateIndex by mutableStateOf(0)
+    var numberStyle by mutableStateOf(0)
+    var numberSpot by mutableStateOf(0)
+    var firstNumber by mutableStateOf(1f)
+    var numberSize by mutableStateOf(11f)
+    var watermarkText by mutableStateOf("")
+    var watermarkColumns by mutableStateOf(1f)
+    var watermarkRows by mutableStateOf(1f)
+    var watermarkOpacity by mutableStateOf(18f)
+    var watermarkTilt by mutableStateOf(45f)
+    var watermarkGray by mutableStateOf(45f)
 
     @Composable
     fun Content() {
@@ -273,6 +284,33 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
                 IntSlider("最长边不超过", maxEdge, 0f..1920f, ::edgeLabel, step = 64f) { maxEdge = it }
                 Summary("取离那一秒最近的画面，横拍竖存会自动转正；抽的是真帧，不是缩略图")
             }
+            OperationKind.AddPageNumbers -> {
+                Segmented("样式", listOf("1", "第 1 页", "1 / 总页数"), numberStyle) { numberStyle = it }
+                Segmented("位置", SPOTS.map { it.label }, numberSpot) { numberSpot = it }
+                PageSpecField("留空=所有页；也可只给几页加，例：3-20,25", "页码数字始终按物理页算，所以跳页也不会串号")
+                IntSlider("起始页码", firstNumber, 1f..99f, { "%.0f 起".format(it) }) { firstNumber = it }
+                IntSlider("字号", numberSize, 7f..28f, { "%.0f pt".format(it) }) { numberSize = it }
+                Summary("只在页面末尾补一行字，原有内容和排版不动；横拍竖存那种带旋转的页也按你看到的方向落位")
+            }
+            OperationKind.PdfWatermark -> {
+                OutlinedTextField(
+                    value = watermarkText,
+                    onValueChange = { watermarkText = it },
+                    label = { Text("水印文字") },
+                    supportingText = { Text("中文会挑系统字体，只把用得到的字形嵌进文件（实测四个汉字只多 3KB）") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                IntSlider("每行几块", watermarkColumns, 1f..6f, { "%.0f 列".format(it) }) { watermarkColumns = it }
+                IntSlider("竖几块", watermarkRows, 1f..6f, { "%.0f 行".format(it) }) { watermarkRows = it }
+                IntSlider("不透明度", watermarkOpacity, 3f..100f, { "%.0f%%".format(it) }) { watermarkOpacity = it }
+                IntSlider("深浅", watermarkGray, 0f..90f, { if (it < 34) "深" else if (it < 67) "中" else "浅" }) { watermarkGray = it }
+                IntSlider("倾斜", watermarkTilt, -90f..90f, { "%.0f°".format(it) }, step = 5f) { watermarkTilt = it }
+                IntSlider("颜色深浅", watermarkGray, 0f..95f, { "%.0f".format(it) }, step = 5f) { watermarkGray = it }
+                IntSlider("倾斜角度", watermarkTilt, 0f..90f, { "%.0f°".format(it) }, step = 5f) { watermarkTilt = it }
+                PageSpecField("留空=整份都盖；也可只盖几页，例：1,5-8", "没点到的页原样带过去")
+                Summary("1x1 就是页面正中一块；行列调大就平铺，字会自动按格子宽度缩放")
+            }
             OperationKind.CompressVideo -> {
                 Segmented("封装", VideoFormat.entries.map { it.label }, videoFormat.ordinal) {
                     videoFormat = VideoFormat.entries[it]
@@ -312,6 +350,7 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
         if (kind == OperationKind.ExtractPdfPages && pageSpec.isBlank()) return "先写要取哪些页"
         if (kind == OperationKind.RemovePdfPages && pageSpec.isBlank()) return "先写要删哪些页"
         if (kind == OperationKind.MergePdfs && items.size < 2) return "合并 PDF 至少选两个文件"
+        if (kind == OperationKind.PdfWatermark && watermarkText.isBlank()) return "先写要盖的水印文字"
         if (startSecondText.isNotBlank() && startSecondText.toFloatOrNull() == null) return "开始秒数不是数字"
         if (durationSecondText.isNotBlank() && durationSecondText.toFloatOrNull() == null) return "取多少秒不是数字"
         return null
@@ -336,6 +375,15 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
             OperationKind.RemovePdfPages -> Operation.RemovePdfPages(pageSpec)
             OperationKind.RotatePdfPages -> Operation.RotatePdfPages(pageSpec.trim(), ROTATE_OPTIONS[rotateIndex].second)
             OperationKind.PdfToText -> Operation.PdfToText(pageSpec.trim())
+            OperationKind.AddPageNumbers -> Operation.PageNumbers(
+                pageSpec.trim(), numberStyle, SPOTS[numberSpot],
+                firstNumber.roundToInt(), numberSize.roundToInt(),
+            )
+            OperationKind.PdfWatermark -> Operation.PdfWatermark(
+                watermarkText.trim(), watermarkColumns.roundToInt(), watermarkRows.roundToInt(),
+                watermarkOpacity.roundToInt(), watermarkTilt.roundToInt(), watermarkGray.roundToInt(),
+                pageSpec.trim(),
+            )
             OperationKind.MergePdfs -> Operation.MergePdfs
             OperationKind.PdfToImages -> Operation.PdfToImages(imageFormat, pdfScale.roundToInt().toFloat(), quality.roundToInt())
             OperationKind.CompressGif -> Operation.CompressGif(maxEdge.roundToInt(), gifFps.roundToInt(), gifColors.roundToInt())
@@ -361,6 +409,8 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
 }
 
 private val ROTATE_OPTIONS = listOf("顺时针 90°" to 90, "180°" to 180, "逆时针 90°" to 270)
+
+private val SPOTS = listOf(StampSpot.BottomCenter, StampSpot.BottomRight, StampSpot.BottomLeft, StampSpot.TopCenter)
 
 private fun edgeLabel(edge: Float): String = if (edge == 0f) "不改" else "%.0f px".format(edge)
 

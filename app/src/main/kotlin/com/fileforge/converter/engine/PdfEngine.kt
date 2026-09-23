@@ -7,16 +7,27 @@ import android.graphics.Paint
 import android.graphics.Rect
 import android.os.ParcelFileDescriptor
 import com.fileforge.core.naming.OutputNaming
+import com.fileforge.core.ops.Operation
 import com.fileforge.core.ops.PdfPaper
+import com.fileforge.core.pdf.Horizontal
 import com.fileforge.core.pdf.PageGroups
+import com.fileforge.core.pdf.PageNumberPlan
 import com.fileforge.core.pdf.PageRangeParser
 import com.fileforge.core.pdf.PdfCompressPlan
 import com.fileforge.core.pdf.PdfTier
 import com.fileforge.core.pdf.SplitPlanner
+import com.fileforge.core.pdf.StampFrame
+import com.fileforge.core.pdf.StampSpot
+import com.fileforge.core.pdf.TextFit
+import com.fileforge.core.pdf.WatermarkPlan
 import com.fileforge.core.util.SizeInput
 import android.graphics.pdf.PdfRenderer
 import com.fileforge.converter.data.WorkItem
 import com.fileforge.converter.data.Workspace
+import com.tom_roush.fontbox.ttf.OTFParser
+import com.tom_roush.fontbox.ttf.TTFParser
+import com.tom_roush.fontbox.ttf.TrueTypeCollection
+import com.tom_roush.fontbox.ttf.TrueTypeFont
 import com.tom_roush.pdfbox.cos.COSBase
 import com.tom_roush.pdfbox.cos.COSName
 import com.tom_roush.pdfbox.cos.COSObject
@@ -28,11 +39,19 @@ import com.tom_roush.pdfbox.pdmodel.PDPage
 import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
 import com.tom_roush.pdfbox.pdmodel.common.PDRectangle
 import com.tom_roush.pdfbox.pdmodel.common.PDStream
+import com.tom_roush.pdfbox.pdmodel.font.PDType0Font
+import com.tom_roush.pdfbox.pdmodel.font.PDType1Font
+import com.tom_roush.pdfbox.pdmodel.graphics.state.PDExtendedGraphicsState
 import com.tom_roush.pdfbox.pdmodel.graphics.image.JPEGFactory
 import com.tom_roush.pdfbox.pdmodel.encryption.InvalidPasswordException
 import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject
 import com.tom_roush.pdfbox.text.PDFTextStripper
+import com.tom_roush.pdfbox.util.Matrix
+import java.io.Closeable
 import java.io.File
+import kotlin.math.cos
+import kotlin.math.roundToInt
+import kotlin.math.sin
 
 /** 一个转换产出的文件，name 是给用户看的名字。 */
 data class EngineOutput(val name: String, val file: File, val note: String? = null)
@@ -116,6 +135,184 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
     }
 
     /** 旋转：只认 90 的整数倍，顺时针；spec 留空表示所有页。其余页原样带过去。 */
+    /**
+     * 加页码：只在页面内容流末尾追加一段文字，原页面对象、字体、图片一概不动。
+     * 位置按**你看到的方向**算，所以带 /Rotate 的页也落在视觉上的那个角。
+     */
+    fun addPageNumbers(item: WorkItem, operation: Operation.PageNumbers): EngineOutput {
+        val document = loadForReading(item.file)
+        var handle: FontHandle? = null
+        try {
+            val total = document.numberOfPages
+            val pages = pagesFor(operation.spec, total)
+            require(pages.isNotEmpty()) { "没有页可加页码" }
+            val sample = PageNumberPlan.text(PageNumberPlan.numberFor(pages.first(), operation.firstNumber), total, operation.style)
+            handle = fontFor(document, sample)
+            pages.forEach { index ->
+                val text = PageNumberPlan.text(PageNumberPlan.numberFor(index, operation.firstNumber), total, operation.style)
+                stamp(document, document.getPage(index), handle.font, operation.fontSize.toFloat(), text,
+                    Placement.AtSpot(operation.spot, operation.margin.toFloat()), DARK, 1f, 0f)
+            }
+            val output = workspace.newStagingFile("pdf")
+            document.save(output)
+            val skipped = if (pages.size == total) "" else "，其余 ${total - pages.size} 页没动"
+            return EngineOutput(
+                OutputNaming.tagged(item.name, "页码", "pdf"),
+                output,
+                "盖了 ${pages.size} 页，形如「${PageNumberPlan.text(PageNumberPlan.numberFor(pages.first(), operation.firstNumber), total, operation.style)}」，位置 ${operation.spot.label}$skipped",
+            )
+        } finally {
+            handle?.close()
+            runCatching { document.close() }
+        }
+    }
+
+    /** 文字水印：1x1 是居中一块，行列更大就平铺。中文字体只把用得到的字形嵌进文件。 */
+    fun watermark(item: WorkItem, operation: Operation.PdfWatermark): EngineOutput {
+        val text = operation.text.trim()
+        require(text.isNotEmpty()) { "先写要盖的字" }
+        val document = loadForReading(item.file)
+        var handle: FontHandle? = null
+        try {
+            val total = document.numberOfPages
+            val pages = pagesFor(operation.spec, total)
+            require(pages.isNotEmpty()) { "没有页可盖水印" }
+            handle = fontFor(document, text)
+            val columns = operation.columns.coerceIn(1, 12)
+            val rows = operation.rows.coerceIn(1, 12)
+            val alpha = (operation.opacityPercent.coerceIn(3, 100)) / 100f
+            val gray = (operation.grayPercent.coerceIn(0, 95)) / 100f
+            val tilt = operation.tilt.toFloat()
+            pages.forEach { index ->
+                val page = document.getPage(index)
+                val box = page.cropBox
+                val frame = StampFrame.forRotation(box.width, box.height, page.rotation)
+                val cellWidth = WatermarkPlan.cellWidth(frame.width, columns)
+                val size = TextFit.largestFontSize(text, cellWidth, maxSize = frame.height / rows * 0.8f)
+                WatermarkPlan.tiles(frame.width, frame.height, columns, rows).forEach { (x, y) ->
+                    stamp(document, page, handle.font, size, text, Placement.InMiddle(x, y), gray, alpha, tilt)
+                }
+            }
+            val output = workspace.newStagingFile("pdf")
+            document.save(output)
+            val tiles = if (columns * rows == 1) "居中一块" else "每页平铺 ${columns}x$rows"
+            return EngineOutput(
+                OutputNaming.tagged(item.name, "水印", "pdf"),
+                output,
+                "「$text」$tiles，${(alpha * 100).roundToInt()}% 不透明、倾斜 $tilt°，盖了 ${pages.size} 页",
+            )
+        } finally {
+            handle?.close()
+            runCatching { document.close() }
+        }
+    }
+
+    private sealed interface Placement {
+        data class AtSpot(val spot: StampSpot, val margin: Float) : Placement
+        data class InMiddle(val x: Float, val y: Float) : Placement
+    }
+
+    /** 真往页面上写字的那一步：先把坐标系掰成视觉方向，再按角度转文字。 */
+    private fun stamp(
+        document: PDDocument,
+        page: PDPage,
+        font: com.tom_roush.pdfbox.pdmodel.font.PDFont,
+        size: Float,
+        text: String,
+        place: Placement,
+        gray: Float,
+        alpha: Float,
+        tiltDegrees: Float,
+    ) {
+        val box = page.cropBox
+        val frame = StampFrame.forRotation(box.width, box.height, page.rotation)
+        val width = font.getStringWidth(text) / 1000f * size
+        val radians = Math.toRadians(tiltDegrees.toDouble())
+        val origin = when (place) {
+            is Placement.AtSpot -> {
+                val anchor = PageNumberPlan.anchor(frame.width, frame.height, place.spot, place.margin, size)
+                val x = when (anchor.align) {
+                    Horizontal.LEFT -> anchor.x
+                    Horizontal.CENTER -> anchor.x - width / 2f
+                    Horizontal.RIGHT -> anchor.x - width
+                }
+                x to anchor.y
+            }
+            is Placement.InMiddle -> place.x - cos(radians).toFloat() * width / 2f to
+                place.y - sin(radians).toFloat() * width / 2f
+        }
+        PDPageContentStream(document, page, PDPageContentStream.AppendMode.APPEND, true).use { stream ->
+            if (alpha < 0.999f) {
+                stream.setGraphicsStateParameters(
+                    PDExtendedGraphicsState().apply {
+                        nonStrokingAlphaConstant = alpha
+                        strokingAlphaConstant = alpha
+                    },
+                )
+            }
+            stream.transform(
+                Matrix().apply {
+                    translate(frame.translateX, frame.translateY)
+                    rotate(Math.toRadians(frame.rotateDegrees.toDouble()))
+                },
+            )
+            stream.beginText()
+            stream.setFont(font, size)
+            stream.setNonStrokingColor(gray)
+            stream.setTextMatrix(
+                Matrix().apply {
+                    translate(origin.first, origin.second)
+                    rotate(radians)
+                },
+            )
+            stream.showText(text)
+            stream.endText()
+        }
+    }
+
+    /** spec 留空就是所有页；否则按页码范围挑。 */
+    private fun pagesFor(spec: String, total: Int): List<Int> =
+        if (spec.isBlank()) (0 until total).toList()
+        else PageRangeParser.toPageIndices(PageRangeParser.parse(spec), total)
+
+    /** 字体可能来自字体集合，底层句柄要活到存盘之后，所以连它一起交给调用方关。 */
+    private class FontHandle(val font: com.tom_roush.pdfbox.pdmodel.font.PDFont, private val owned: List<Closeable>) {
+        fun close() = owned.forEach { runCatching { it.close() } }
+    }
+
+    /**
+     * 能显示这段字的最便宜的字体：纯 ASCII 用标准 Helvetica（不内嵌，零体积），
+     * 其余到系统字体目录里逐个试，判据是"真的能编码这段字"而不是猜字体名。
+     */
+    private fun fontFor(document: PDDocument, text: String): FontHandle {
+        if (text.all { it.code in 32..126 }) return FontHandle(PDType1Font.HELVETICA, emptyList())
+        for (path in SYSTEM_FONTS) {
+            val file = File(path)
+            if (!file.isFile) continue
+            val opened = runCatching { openTrueType(file) }.getOrNull() ?: continue
+            val (owner, face) = opened
+            val font = runCatching { PDType0Font.load(document, face, true) }.getOrNull()
+            if (font != null && runCatching { font.encode(text); true }.getOrDefault(false)) {
+                return FontHandle(font, listOfNotNull(owner, face as Closeable))
+            }
+            runCatching { face.close() }
+            runCatching { owner?.close() }
+        }
+        throw IllegalArgumentException("这台系统里没找到能显示「$text」的字体，把文字换成英文数字再试")
+    }
+
+    /** .ttc 是字体集合，只能按名字挑一个；单个 ttf/otf 直接解析。返回 (需要一起关的集合, 真正的面)。 */
+    private fun openTrueType(file: File): Pair<Closeable?, TrueTypeFont> {
+        if (!file.name.endsWith(".ttc", ignoreCase = true)) {
+            val parser = if (file.name.endsWith(".otf", ignoreCase = true)) OTFParser() else TTFParser()
+            return null to parser.parse(file)
+        }
+        val collection = TrueTypeCollection(file)
+        val name = TTC_FONT_NAMES.firstOrNull { runCatching { collection.getFontByName(it) }.isSuccess }
+            ?: error("字体集合里认不出可用的字面")
+        return collection to collection.getFontByName(name)
+    }
+
     fun rotatePages(item: WorkItem, spec: String, degrees: Int): EngineOutput {
         require(degrees % 90 == 0) { "旋转角度要是 90 的整数倍" }
         val source = loadForReading(item.file)
@@ -513,5 +710,28 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
     private companion object {
         const val MAX_IMAGE_PIXELS = 12_000_000L
         val PROCESSABLE = setOf("DeviceRGB", "DeviceGray")
+
+        /** 页码用的深色：0.15 灰比纯黑柔和，扫成灰底也还看得清。 */
+        const val DARK = 0.15f
+
+        /** 安卓系统字体目录里的候选，单个字面排在集合前面（集合要按名字挑，麻烦且容易挑空）。 */
+        val SYSTEM_FONTS = listOf(
+            "/system/fonts/DroidSansFallbackFull.ttf",
+            "/system/fonts/DroidSansFallback.ttf",
+            "/system/fonts/NotoSansSC-Regular.otf",
+            "/system/fonts/NotoSansCJKsc-Regular.otf",
+            "/system/fonts/SourceHanSansCN-Regular.otf",
+            "/system/fonts/NotoSansCJK-Regular.ttc",
+            "/system/fonts/NotoSerifCJK-Regular.ttc",
+        )
+
+        /** .ttc 里认中文字面的常用名字，按顺序试。 */
+        val TTC_FONT_NAMES = listOf(
+            "NotoSansCJKsc-Regular",
+            "NotoSansCJK-Regular",
+            "SourceHanSansCN-Regular",
+            "DroidSansFallback",
+            "NotoSerifCJKsc-Regular",
+        )
     }
 }

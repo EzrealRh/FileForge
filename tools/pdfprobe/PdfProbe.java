@@ -23,6 +23,13 @@ import org.apache.pdfbox.pdmodel.graphics.color.PDColorSpace;
 import org.apache.pdfbox.pdmodel.graphics.image.JPEGFactory;
 import org.apache.pdfbox.pdmodel.graphics.image.LosslessFactory;
 import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
+import org.apache.fontbox.ttf.TTFParser;
+import org.apache.fontbox.ttf.TrueTypeFont;
+import org.apache.pdfbox.pdmodel.font.PDFont;
+import org.apache.pdfbox.pdmodel.font.PDType0Font;
+import org.apache.pdfbox.pdmodel.graphics.state.PDExtendedGraphicsState;
+import org.apache.pdfbox.pdmodel.common.PDRectangle;
+import org.apache.pdfbox.util.Matrix;
 import org.apache.pdfbox.rendering.PDFRenderer;
 import org.apache.pdfbox.text.PDFTextStripper;
 
@@ -45,6 +52,7 @@ public final class PdfProbe {
             case "strict" -> strict(new File(args[1]), true);
             case "rotate" -> rotate(new File(args[1]), new File(args[2]), parsePages(args[3]), Integer.parseInt(args[4]));
             case "verify" -> verify(new File(args[1]));
+            case "stamp" -> verifyStamping(new File(args[1]));
             default -> throw new IllegalArgumentException("unknown cmd " + args[0]);
         }
     }
@@ -92,7 +100,8 @@ public final class PdfProbe {
                 if (page.getResources() == null) problems.add("第" + (i + 1) + " 页没有资源（本页内容可能画不出来）");
             }
             for (String problem : problems) System.out.println("  结构问题：" + problem);
-            if (problems.isEmpty() && verbose) System.out.println("  结构检查通过");
+            if (!problems.isEmpty()) throw new AssertionError(file.getName() + " 结构不合格：" + problems.get(0));
+            if (verbose) System.out.println("  结构检查通过");
             return objects;
         }
     }
@@ -158,6 +167,7 @@ public final class PdfProbe {
             expect(kept.getWidth() == soft.getWidth() && kept.getHeight() == soft.getHeight(),
                     "掩膜尺寸要跟图一致：" + kept.getWidth() + "x" + kept.getHeight() + " vs " + soft.getWidth() + "x" + soft.getHeight());
         }
+        verifyStamping(dir);
         System.out.println("verify PASS");
     }
 
@@ -188,9 +198,17 @@ public final class PdfProbe {
     }
 
     private static String textOf(File file) throws Exception {
+        return textOf(file, true);
+    }
+
+    /**
+     * 斜着排的水印按位置排序会被打乱（"内部资料"抽成"料料资资部部内内"），
+     * 所以要看书写顺序就把 sortByPosition 关掉——两种都要能抽出来才算字体内嵌没问题。
+     */
+    private static String textOf(File file, boolean byPosition) throws Exception {
         try (PDDocument doc = PDDocument.load(file)) {
             PDFTextStripper stripper = new PDFTextStripper();
-            stripper.setSortByPosition(true);
+            stripper.setSortByPosition(byPosition);
             return stripper.getText(doc).replaceAll("\\s+", " ").trim();
         }
     }
@@ -446,5 +464,232 @@ public final class PdfProbe {
         g.drawImage(source.getScaledInstance(width, height, Image.SCALE_SMOOTH), 0, 0, null);
         g.dispose();
         return out;
+    }
+
+    // ---- 页码 / 水印：CoreLogic 里 PageStampPlan + StampFrame 的 Java 镜像，用渲染结果实测 ----
+
+    /** 只有左上角一个标记的页面：别处出现墨迹，就只能是我们盖上去的东西。第 2 页带 /Rotate 90。 */
+    private static void makeBlankMarked(File out, int pages) throws Exception {
+        try (PDDocument doc = new PDDocument()) {
+            for (int i = 0; i < pages; i++) {
+                PDPage page = new PDPage(new PDRectangle(595, 842));
+                if (i == 1) page.setRotation(90);
+                doc.addPage(page);
+                try (PDPageContentStream stream = new PDPageContentStream(doc, page)) {
+                    stream.beginText();
+                    stream.setFont(PDType1Font.HELVETICA, 16);
+                    stream.setTextMatrix(Matrix.getTranslateInstance(40, 790));
+                    stream.showText("MARK" + (i + 1));
+                    stream.endText();
+                }
+            }
+            doc.save(out);
+        }
+    }
+
+    /** {平移x, 平移y, 反旋转度数, 视觉宽, 视觉高}，和 Kotlin 的 StampFrame.forRotation 一致。 */
+    private static float[] frameFor(float boxWidth, float boxHeight, int rotation) {
+        int turn = ((rotation % 360) + 360) % 360;
+        return switch (turn) {
+            case 90 -> new float[]{boxWidth, 0f, 90f, boxHeight, boxWidth};
+            case 180 -> new float[]{boxWidth, boxHeight, 180f, boxWidth, boxHeight};
+            case 270 -> new float[]{0f, boxHeight, -90f, boxHeight, boxWidth};
+            default -> new float[]{0f, 0f, 0f, boxWidth, boxHeight};
+        };
+    }
+
+    private static void applyFrame(PDPageContentStream stream, float[] frame) throws IOException {
+        Matrix matrix = new Matrix();
+        matrix.translate(frame[0], frame[1]);
+        matrix.rotate(Math.toRadians(frame[2]));
+        stream.transform(matrix);
+    }
+
+    private static String numberText(int number, int total, int style) {
+        return switch (style) {
+            case 1 -> "第 " + number + " 页";
+            case 2 -> number + " / " + total;
+            default -> String.valueOf(number);
+        };
+    }
+
+    /** 加页码：只追加内容流，坐标按"你看到的底部中间"算。 */
+    private static void stampNumbers(File source, File target, int style, float margin, float size, int first) throws Exception {
+        try (PDDocument doc = PDDocument.load(source)) {
+            int total = doc.getNumberOfPages();
+            for (int i = 0; i < total; i++) {
+                PDPage page = doc.getPage(i);
+                PDRectangle box = page.getMediaBox();
+                float[] frame = frameFor(box.getWidth(), box.getHeight(), page.getRotation());
+                String text = numberText(first + i, total, style);
+                float width = PDType1Font.HELVETICA.getStringWidth(text) / 1000f * size;
+                try (PDPageContentStream stream = new PDPageContentStream(doc, page,
+                        PDPageContentStream.AppendMode.APPEND, true)) {
+                    applyFrame(stream, frame);
+                    stream.beginText();
+                    stream.setFont(PDType1Font.HELVETICA, size);
+                    stream.setNonStrokingColor(0.1f);
+                    stream.setTextMatrix(Matrix.getTranslateInstance(frame[3] / 2f - width / 2f, margin + size * 0.25f));
+                    stream.showText(text);
+                    stream.endText();
+                }
+            }
+            doc.save(target);
+        }
+    }
+
+    /** 水印：中文字体走子集内嵌，透明度用图形状态，平铺按行列取格子中心。 */
+    private static void stampWatermark(File source, File target, String text, int columns, int rows,
+                                       float alpha, float tilt, File fontFile) throws Exception {
+        try (PDDocument doc = PDDocument.load(source)) {
+            TrueTypeFont ttf = new TTFParser().parse(fontFile.getPath());
+            PDFont font = PDType0Font.load(doc, ttf, true);
+            PDExtendedGraphicsState fade = new PDExtendedGraphicsState();
+            fade.setNonStrokingAlphaConstant(alpha);
+            double units = 0;
+            for (char c : text.toCharArray()) units += c >= 0x2E80 ? 1.0 : 0.55;
+            for (int i = 0; i < doc.getNumberOfPages(); i++) {
+                PDPage page = doc.getPage(i);
+                PDRectangle box = page.getMediaBox();
+                float[] frame = frameFor(box.getWidth(), box.getHeight(), page.getRotation());
+                float size = (float) Math.min(160, Math.max(6, frame[3] / columns * 0.9 / units));
+                float width = font.getStringWidth(text) / 1000f * size;
+                try (PDPageContentStream stream = new PDPageContentStream(doc, page,
+                        PDPageContentStream.AppendMode.APPEND, true)) {
+                    stream.setGraphicsStateParameters(fade);
+                    applyFrame(stream, frame);
+                    for (int row = 0; row < rows; row++) {
+                        for (int col = 0; col < columns; col++) {
+                            float cx = frame[3] * (col + 0.5f) / columns;
+                            float cy = frame[4] * (row + 0.5f) / rows;
+                            Matrix shift = new Matrix();
+                            shift.translate(cx - (float) Math.cos(Math.toRadians(tilt)) * width / 2f,
+                                    cy - (float) Math.sin(Math.toRadians(tilt)) * width / 2f);
+                            shift.rotate(Math.toRadians(tilt));
+                            stream.beginText();
+                            stream.setFont(font, size);
+                            stream.setNonStrokingColor(0.3f);
+                            stream.setTextMatrix(shift);
+                            stream.showText(text);
+                            stream.endText();
+                        }
+                    }
+                }
+            }
+            doc.save(target);
+        }
+    }
+
+    /** 只看渲染图里某个分块区域的墨迹占比（分数坐标，y 从渲染图顶部算）。 */
+    private static double bandInk(File pdf, int page, double yFrom, double yTo, double xFrom, double xTo) throws Exception {
+        try (PDDocument doc = PDDocument.load(pdf)) {
+            BufferedImage image = new PDFRenderer(doc).renderImageWithDPI(page, 50);
+            int x0 = (int) (image.getWidth() * xFrom);
+            int x1 = Math.min(image.getWidth(), (int) Math.ceil(image.getWidth() * xTo));
+            int y0 = (int) (image.getHeight() * yFrom);
+            int y1 = Math.min(image.getHeight(), (int) Math.ceil(image.getHeight() * yTo));
+            long dark = 0;
+            for (int y = y0; y < y1; y++) {
+                for (int x = x0; x < x1; x++) {
+                    int rgb = image.getRGB(x, y);
+                    if (((rgb >> 16) & 0xFF) < 245 || ((rgb >> 8) & 0xFF) < 245 || (rgb & 0xFF) < 245) dark++;
+                }
+            }
+            long area = (long) Math.max(1, y1 - y0) * Math.max(1, x1 - x0);
+            return dark * 100.0 / area;
+        }
+    }
+
+    private static int[] renderedSize(File pdf, int page) throws Exception {
+        try (PDDocument doc = PDDocument.load(pdf)) {
+            BufferedImage image = new PDFRenderer(doc).renderImageWithDPI(page, 50);
+            return new int[]{image.getWidth(), image.getHeight()};
+        }
+    }
+
+    private static int countOf(String haystack, String needle) {
+        int found = 0;
+        for (int at = haystack.indexOf(needle); at >= 0; at = haystack.indexOf(needle, at + needle.length())) found++;
+        return found;
+    }
+
+    /** 页码与水印的实测：位置、文字层、旋转页、透明度、中文字体子集，全部用渲染图和抽取结果判定。 */
+    private static void verifyStamping(File dir) throws Exception {
+        dir.mkdirs();
+        File font = new File(System.getProperty("probe.font", "C:/Windows/Fonts/simhei.ttf"));
+        File blank = new File(dir, "blank.pdf");
+        makeBlankMarked(blank, 3);
+
+        int[] straight = renderedSize(blank, 0);
+        int[] turned = renderedSize(blank, 1);
+        expect(straight[0] < straight[1], "没旋转的页渲染出来是竖的（" + straight[0] + "x" + straight[1] + "）");
+        expect(turned[0] > turned[1], "带 /Rotate 90 的页渲染出来要换成横的（" + turned[0] + "x" + turned[1] + "）");
+        for (int i = 0; i < 3; i++) {
+            expect(bandInk(blank, i, 0.90, 1.0, 0.0, 1.0) == 0, "盖章前页面底部不该有任何墨迹（第" + (i + 1) + "页）");
+        }
+
+        File numbered = new File(dir, "numbered.pdf");
+        stampNumbers(blank, numbered, 2, 20f, 11f, 1);
+        String numbers = textOf(numbered);
+        expect(numbers.contains("1 / 3") && numbers.contains("2 / 3") && numbers.contains("3 / 3"),
+                "页码要进文字层，抽取结果：" + numbers);
+        for (int i = 0; i < 3; i++) {
+            double bottom = bandInk(numbered, i, 0.90, 1.0, 0.0, 1.0);
+            expect(bottom > 0.02, "第" + (i + 1) + "页底部该有页码墨迹，实测 " + bottom + "%");
+        }
+        // 旋转页也按"看到的方向"落位：它的渲染图是横的，底部照样要有墨迹
+        expect(bandInk(numbered, 1, 0.90, 1.0, 0.0, 1.0) > 0.02, "旋转 90° 那页的页码也要打在视觉底部");
+        expect(bandInk(numbered, 0, 0.0, 0.10, 0.0, 0.35) == bandInk(blank, 0, 0.0, 0.10, 0.0, 0.35),
+                "左上角原来的标记不许被动到");
+        try (PDDocument doc = PDDocument.load(numbered)) {
+            expect(doc.getNumberOfPages() == 3, "加页码不改页数");
+        }
+        strict(numbered, true);
+
+        if (font.isFile()) {
+            long before = blank.length();
+            File marked = new File(dir, "watermarked.pdf");
+            stampWatermark(blank, marked, "内部资料", 2, 2, 0.18f, 45f, font);
+            String text = textOf(marked, false).replace(" ", "");
+            expect(text.contains("内部资料"), "中文水印要按书写顺序抽得出来（抽出来是：" + text + "）");
+            expect(countOf(text, "内部资料") >= 4, "2x2 平铺该有 4 处水印，实测 " + countOf(text, "内部资料"));
+            expect(bandInk(blank, 0, 0.35, 0.65, 0.1, 0.9) == 0, "水印测试页中部本来是空的");
+            double faint = bandInk(marked, 0, 0.30, 0.70, 0.05, 0.95);
+            expect(faint > 0.02, "中部该出现水印墨迹，实测 " + faint + "%");
+
+            // 挑字体的判据：encode 得过去才算这字体能显示，拉丁字体必须在中文面前露馅
+            File latin = new File(System.getProperty("probe.latin", "C:/Windows/Fonts/arial.ttf"));
+            if (latin.isFile()) {
+                try (PDDocument probe = new PDDocument()) {
+                    PDFont arial = PDType0Font.load(probe, new TTFParser().parse(latin.getPath()), true);
+                    boolean latinFails = false;
+                    try {
+                        arial.encode("内部资料");
+                    } catch (Exception error) {
+                        latinFails = true;
+                    }
+                    expect(latinFails, "拉丁字体要在中文字面前 encode 失败，否则挑字体的判据不可信");
+                    boolean latinOk = true;
+                    try {
+                        arial.encode("Draft");
+                    } catch (Exception error) {
+                        latinOk = false;
+                    }
+                    expect(latinOk, "同一个字体要能编码拉丁字母");
+                }
+            }
+            File solid = new File(dir, "watermark-solid.pdf");
+            stampWatermark(blank, solid, "内部资料", 2, 2, 1f, 45f, font);
+            double opaque = bandInk(solid, 0, 0.30, 0.70, 0.05, 0.95);
+            expect(faint < opaque, "透明度真生效：淡的 " + faint + "% 该比实的 " + opaque + "% 浅");
+            expect(bandInk(marked, 1, 0.30, 0.70, 0.05, 0.95) > 0.02, "旋转页也要盖到水印");
+            strict(marked, true);
+            long growth = marked.length() - before;
+            expect(growth < 600_000, "中文字体必须子集内嵌（整份 " + (font.length() / 1024) + "KB，实际只长了 " + (growth / 1024) + "KB）");
+            System.out.printf("  中文字体子集内嵌：%dB → %dB（+%dB），源字体 %dKB%n", before, marked.length(), growth, font.length() / 1024);
+        } else {
+            expect(false, "找不到中文字体 " + font + "，水印那半没验");
+        }
+        System.out.println("stamp PASS");
     }
 }

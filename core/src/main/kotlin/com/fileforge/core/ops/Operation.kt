@@ -1,5 +1,8 @@
 package com.fileforge.core.ops
 
+import com.fileforge.core.pdf.PageNumberPlan
+import com.fileforge.core.pdf.StampSpot
+
 enum class ImageFormat(val extension: String, val label: String) {
     Jpeg("jpg", "JPG"),
     Png("png", "PNG"),
@@ -121,6 +124,34 @@ sealed interface Operation {
         val targetBytes: Long? = null,
     ) : Operation {
         override val label get() = if (targetBytes != null) "压到 ${targetLabel(targetBytes)} 以内" else "压缩视频"
+    }
+
+    /**
+     * 给 PDF 加页码。位置、边距都按**你看到的方向**算，带 /Rotate 的页也一样落在视觉底部。
+     * spec 留空表示所有页；firstNumber 只平移起始数字，中间页不重排。
+     */
+    data class PageNumbers(
+        val spec: String = "",
+        val style: Int = PageNumberPlan.STYLE_PLAIN,
+        val spot: StampSpot = StampSpot.BottomCenter,
+        val firstNumber: Int = 1,
+        val fontSize: Int = 11,
+        val margin: Int = 20,
+    ) : Operation {
+        override val label get() = "加页码"
+    }
+
+    /** 文字水印：1x1 就是居中一块，行列大于 1 就平铺。中文字体会子集内嵌进文件。 */
+    data class PdfWatermark(
+        val text: String,
+        val columns: Int = 1,
+        val rows: Int = 1,
+        val opacityPercent: Int = 18,
+        val tilt: Int = 45,
+        val grayPercent: Int = 45,
+        val spec: String = "",
+    ) : Operation {
+        override val label get() = "加水印"
     }
 
     /** 多份 PDF 按选中顺序合成一份。 */

@@ -15,6 +15,8 @@ enum class OperationKind(val label: String, val hint: String) {
     RotatePdfPages("PDF 旋转页面", "整份或指定页，90 的倍数"),
     MergePdfs("合并 PDF", "按选中顺序拼成一份"),
     PdfToText("PDF 提取文字", "输出 txt，可以只要几页"),
+    AddPageNumbers("PDF 加页码", "底部或角落，可跳过前几页"),
+    PdfWatermark("PDF 加水印", "文字水印，可平铺和调深浅"),
     PdfToImages("PDF 每页导出图片", "页转 JPG / PNG / WebP"),
     CompressGif("压缩 GIF", "降尺寸、降帧、减色"),
     GifToImages("GIF 转图片", "逐帧导出，或只要首帧"),
@@ -36,7 +38,7 @@ enum class OperationKind(val label: String, val hint: String) {
             ConvertImage, CompressImage -> fileKind.isImage && fileKind != FileKind.Gif
             ImagesToPdf -> fileKind.isImage
             CompressPdf, SplitPdfBySize, SplitPdfIntoParts, ExtractPdfPages, RemovePdfPages,
-            RotatePdfPages, MergePdfs, PdfToText, PdfToImages,
+            RotatePdfPages, MergePdfs, PdfToText, PdfToImages, AddPageNumbers, PdfWatermark,
             -> fileKind == FileKind.Pdf
             CompressGif, GifToImages -> fileKind == FileKind.Gif
             ImagesToGif -> fileKind.isImage

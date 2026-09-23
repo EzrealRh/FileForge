@@ -80,6 +80,12 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
             is Operation.PdfToText -> items.forEach { item ->
                 collect(item.name) { listOf(pdf.toText(item, operation.spec)) }
             }
+            is Operation.PageNumbers -> items.forEach { item ->
+                collect(item.name) { listOf(pdf.addPageNumbers(item, operation)) }
+            }
+            is Operation.PdfWatermark -> items.forEach { item ->
+                collect(item.name) { listOf(pdf.watermark(item, operation)) }
+            }
             is Operation.PdfToImages -> items.forEach { item ->
                 collect(item.name) {
                     pdf.pagesToImages(item, operation.scale) { bitmap ->
