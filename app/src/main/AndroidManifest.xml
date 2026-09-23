@@ -10,6 +10,11 @@
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
 
+    <!-- 应用内更新：只用来问 GitHub 要版本信息和下安装包，不传任何用户文件 -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Android 8 起，从应用里拉起安装器要用户先允许"安装未知应用" -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
     <application
         android:name=".FileForgeApp"
         android:allowBackup="false"

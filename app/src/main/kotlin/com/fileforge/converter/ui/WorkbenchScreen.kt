@@ -26,6 +26,7 @@ import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.PhotoAlbum
 import androidx.compose.material.icons.outlined.RuleFolder
 import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material.icons.outlined.SystemUpdate
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -94,6 +95,9 @@ fun WorkbenchScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = viewModel::openUpdateSheet) {
+                        Icon(Icons.Outlined.SystemUpdate, contentDescription = "检查更新")
+                    }
                     IconButton(onClick = onSaveToPhone, enabled = state.items.isNotEmpty()) {
                         Icon(Icons.Outlined.PhotoAlbum, contentDescription = "存到手机 Download/文件工坊")
                     }
@@ -330,6 +334,20 @@ fun WorkbenchScreen(
             items = state.selected,
             onDismiss = { viewModel.openSheet(false) },
             onStart = viewModel::run,
+        )
+    }
+
+    if (state.updateSheetOpen) {
+        UpdateSheet(
+            localVersion = viewModel.localVersionName,
+            state = state.update,
+            tokenDraft = state.updateToken,
+            onTokenChange = { viewModel.setUpdateTokenDraft(it) },
+            onSaveToken = viewModel::saveUpdateToken,
+            onCheck = viewModel::checkForUpdate,
+            onDownload = viewModel::downloadUpdate,
+            onInstall = viewModel::installUpdate,
+            onDismiss = viewModel::closeUpdateSheet,
         )
     }
 }

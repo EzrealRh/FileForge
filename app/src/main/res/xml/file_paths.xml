@@ -3,4 +3,6 @@
 <paths>
     <files-path name="workspace" path="workspace/" />
     <cache-path name="staging" path="staging/" />
+    <!-- 应用内更新下载的安装包，只交给系统安装器 -->
+    <cache-path name="apk" path="apk/" />
 </paths>
