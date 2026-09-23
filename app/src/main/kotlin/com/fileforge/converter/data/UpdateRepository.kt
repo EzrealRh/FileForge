@@ -21,8 +21,7 @@ import kotlinx.coroutines.withContext
  * 应用内更新：问 GitHub 要最新 release，把 apk 下到应用自己的缓存目录，再交给系统安装器。
  *
  * 只往 api.github.com 发两个请求（查版本、下安装包），装什么由用户在本机点确认。
- * token 只存在本机 SharedPreferences，因为仓库现在是私有的：不给 token 就只能
- * 等仓库转公开，两条路都留好了。
+ * 仓库公开时不用任何凭据；token 输入框留给以后改私有或换源的情况，只存本机 SharedPreferences。
  */
 class UpdateRepository(context: Context) {
 

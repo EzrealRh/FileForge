@@ -29,18 +29,20 @@ public class UpdateProbe {
         RemoteRelease parsedAnon = null;
         try {
             parsedAnon = ReleaseFeed.INSTANCE.parse(anonymous);
-            System.out.println("匿名也能读到发布页（仓库是公开的）");
+            check("匿名就能读到发布页（仓库已公开，应用内更新零配置）", true, "");
         } catch (Exception error) {
             check("私有仓库的报错提到了 token", error.getMessage() != null && error.getMessage().contains("token"),
                 "实际文案：" + error.getMessage());
         }
-
-        if (token == null) {
+        boolean anonymousWorks = parsedAnon != null;
+        if (token == null && !anonymousWorks) {
             System.out.println("\n结论：需要 token 才能继续（仓库私有）。用法：bash run.sh <只读token>");
             System.exit(failed == 0 ? 2 : 1);
         }
+        // 仓库公开时全程不带凭据：验的才是手机上真正会走的那条路
+        String access = anonymousWorks ? null : token;
 
-        String body = fetch(ReleaseFeed.LATEST_URL, "application/vnd.github+json", token);
+        String body = fetch(ReleaseFeed.LATEST_URL, "application/vnd.github+json", access);
         RemoteRelease release = ReleaseFeed.INSTANCE.parse(body);
         System.out.println("最新版本 " + release.getTagName() + " · 资产 " + release.getAssets().size() + " 个");
 
@@ -59,19 +61,32 @@ public class UpdateProbe {
         check("本地已经是最新时不催更新",
             !release.isNewerThan(release.getVersion()), "同版本还说有更新");
 
-        byte[] head = downloadHead(apk, token, 4096);
+        byte[] head = downloadHead(apk, access, 4096);
         check("302 跳完能拿到前 4KB 字节", head.length == 4096, "只拿到 " + head.length + " 字节");
         check("开头是 zip 的 PK 头（apk 就是 zip）", head[0] == 0x50 && head[1] == 0x4B,
             String.format("%02X %02X", head[0], head[1]));
 
         String localApk = System.getProperty("localApk");
         if (localApk != null && new File(localApk).isFile()) {
-            byte[] local = Files.readAllBytes(Paths.get(localApk));
-            boolean same = local.length >= head.length;
-            for (int i = 0; i < head.length && same; i++) same = local[i] == head[i];
-            check("线上包和本机构建产物前 4KB 一致", same, localApk);
-            check("线上包体积与本机一致", local.length == apk.getSize(),
-                "本地 " + local.length + " / API " + apk.getSize());
+            File remote = File.createTempFile("remote-release", ".apk");
+            try {
+                downloadFull(apk, access, remote);
+                long localSize = new File(localApk).length();
+                check("远端包体积与本机一致", remote.length() == localSize && localSize == apk.getSize(),
+                    "远端 " + remote.length() + " / 本地 " + localSize + " / API " + apk.getSize());
+                // 逐字节比会因为重新打包时的 zip 时间戳而假失败，所以比条目 CRC：内容变了才报
+                for (String entry : new String[] {"classes.dex", "AndroidManifest.xml", "resources.arsc"}) {
+                    long a = crcOf(remote, entry);
+                    long b = crcOf(new File(localApk), entry);
+                    if (a < 0 && b < 0) {
+                        System.out.println("  SKIP  " + entry + "（两边都没有这个条目）");
+                        continue;
+                    }
+                    check("远端与本机 " + entry + " 内容一致", a == b, "远端 " + a + " / 本地 " + b);
+                }
+            } finally {
+                if (!remote.delete()) remote.deleteOnExit();
+            }
         }
 
         System.out.println("\n通过 " + passed + " 条，失败 " + failed + " 条");
@@ -125,6 +140,41 @@ public class UpdateProbe {
 
     private static byte[] readAll(InputStream input) throws Exception {
         return input.readAllBytes();
+    }
+
+    /** 整包下载：只用来和本机构建产物比内容。 */
+    private static void downloadFull(ReleaseAsset asset, String token, File target) throws Exception {
+        HttpURLConnection connection = open(asset.getApiDownloadUrl(), "application/octet-stream", token);
+        connection.setInstanceFollowRedirects(false);
+        int hops = 0;
+        while (hops++ < 3) {
+            int status = connection.getResponseCode();
+            String location = connection.getHeaderField("Location");
+            if (status >= 300 && status < 400 && location != null && !location.isEmpty()) {
+                connection.disconnect();
+                connection = open(location, "application/octet-stream", null);
+                connection.setInstanceFollowRedirects(false);
+                continue;
+            }
+            if (status != 200) throw new IllegalStateException("下载 HTTP " + status);
+            try (java.io.OutputStream out = new java.io.FileOutputStream(target);
+                 InputStream input = connection.getInputStream()) {
+                input.transferTo(out);
+            }
+            connection.disconnect();
+            return;
+        }
+        throw new IllegalStateException("302 跳了三次还没到");
+    }
+
+    /** 取 apk（就是个 zip）里某个条目的 CRC32；条目不存在给 -1。 */
+    private static long crcOf(File apk, String entryName) {
+        try (java.util.zip.ZipFile zip = new java.util.zip.ZipFile(apk)) {
+            java.util.zip.ZipEntry entry = zip.getEntry(entryName);
+            return entry == null ? -1 : entry.getCrc();
+        } catch (Exception error) {
+            return -2;
+        }
     }
 
     private static void check(String name, boolean ok, String detail) {

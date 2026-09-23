@@ -2,8 +2,8 @@
 # 应用内更新的验证台：拿 :core 里那份真代码去打真实 GitHub API。
 #
 # 用法：bash tools/updateprobe/run.sh [只读token] [本地apk路径]
-#   仓库私有时必须给 token（GitHub → Settings → Developer settings → Fine-grained token，
-#   只勾 Contents: Read-only）；只给到前 4KB，不下整个包。
+#   仓库公开时什么也不用给，全程匿名跑；改回私有再传一个 token（GitHub → Settings →
+#   Developer settings → Fine-grained token，只勾 Contents: Read-only）。比产物 CRC 时会下整包，其余只取前 4KB。
 #
 # 依赖：JDK 21、Gradle 缓存里的 kotlin-stdlib（跑过一次 :core:jar 就有）。
 set -euo pipefail
