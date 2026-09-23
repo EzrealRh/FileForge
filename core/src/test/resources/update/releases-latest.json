@@ -1,0 +1,52 @@
+{
+  "url": "https://api.github.com/repos/example-org/FileForge/releases/394486248",
+  "assets_url": "https://api.github.com/repos/example-org/FileForge/releases/394486248/assets",
+  "upload_url": "https://uploads.github.com/repos/example-org/FileForge/releases/394486248/assets{?name,label}",
+  "html_url": "https://github.com/example-org/FileForge/releases/tag/v0.4.2",
+  "id": 394486248,
+  "node_id": "RE_kwDOUkGL1c4Xg2Ho",
+  "tag_name": "v0.4.2",
+  "target_commitish": "master",
+  "name": "v0.4.2",
+  "draft": false,
+  "immutable": false,
+  "prerelease": false,
+  "created_at": "2026-09-23T09:15:44Z",
+  "updated_at": "2026-09-23T09:16:54Z",
+  "published_at": "2026-09-23T09:16:54Z",
+  "assets": [
+    {
+      "url": "https://api.github.com/repos/example-org/FileForge/releases/assets/583416107",
+      "id": 583416107,
+      "node_id": "RA_kwDOUkGL1c4ixjkr",
+      "name": "fileforge-v0.4.2-debug.apk",
+      "label": null,
+      "content_type": "application/vnd.android.package-archive",
+      "state": "uploaded",
+      "size": 25467910,
+      "digest": "sha256:e0e0bd3d24f54deec1fae26de97971ed7dc8746561a83a4551853d935c2fb36d",
+      "download_count": 0,
+      "created_at": "2026-09-23T09:16:36Z",
+      "updated_at": "2026-09-23T09:16:53Z",
+      "browser_download_url": "https://github.com/example-org/FileForge/releases/download/v0.4.2/fileforge-v0.4.2-debug.apk"
+    },
+    {
+      "url": "https://api.github.com/repos/example-org/FileForge/releases/assets/583416105",
+      "id": 583416105,
+      "node_id": "RA_kwDOUkGL1c4ixjkp",
+      "name": "fileforge-v0.4.2-release.apk",
+      "label": null,
+      "content_type": "application/vnd.android.package-archive",
+      "state": "uploaded",
+      "size": 7665282,
+      "digest": "sha256:0dba19597d1b38136d4dcc3cf1047c0882a81d6ae0da8a0e6be67c1b9bb4f21b",
+      "download_count": 1,
+      "created_at": "2026-09-23T09:16:36Z",
+      "updated_at": "2026-09-23T09:16:41Z",
+      "browser_download_url": "https://github.com/example-org/FileForge/releases/download/v0.4.2/fileforge-v0.4.2-release.apk"
+    }
+  ],
+  "tarball_url": "https://api.github.com/repos/example-org/FileForge/tarball/v0.4.2",
+  "zipball_url": "https://api.github.com/repos/example-org/FileForge/zipball/v0.4.2",
+  "body": "## 更新\n\n- 图片格式转换与压缩\n- PDF 压缩、分割、截取\n"
+}

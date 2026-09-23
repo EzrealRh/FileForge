@@ -11,15 +11,19 @@ import androidx.lifecycle.viewModelScope
 import com.fileforge.core.model.DayGroup
 import com.fileforge.core.model.FileKind
 import com.fileforge.core.ops.Operation
+import com.fileforge.core.update.ReleaseAsset
+import com.fileforge.core.update.RemoteRelease
 import com.fileforge.converter.data.Batch
 import com.fileforge.converter.data.MediaEntry
 import com.fileforge.converter.data.MediaLibrary
 import com.fileforge.converter.data.MediaStorePublisher
+import com.fileforge.converter.data.UpdateRepository
 import com.fileforge.converter.data.WorkItem
 import com.fileforge.converter.data.Workspace
 import com.fileforge.converter.engine.FileDetail
 import com.fileforge.converter.engine.MetaReader
 import com.fileforge.converter.engine.OperationRunner
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -48,6 +52,22 @@ sealed interface MediaUi {
 /** 带序号的提示：否则连着两条同文案的会被 Snackbar 吞掉，用户以为没执行。 */
 data class Notice(val text: String, val seq: Int)
 
+/** 应用内更新面板的状态机。 */
+sealed interface UpdateUi {
+    data object Idle : UpdateUi
+    data object Checking : UpdateUi
+    data class Failed(val message: String) : UpdateUi
+    data class UpToDate(val versionName: String) : UpdateUi
+    data class Available(
+        val release: RemoteRelease,
+        val asset: ReleaseAsset,
+        val percent: Int = -1,
+        val downloaded: File? = null,
+    ) : UpdateUi {
+        val downloading: Boolean get() = percent >= 0 && downloaded == null
+    }
+}
+
 data class WorkbenchState(
     val items: List<WorkItem> = emptyList(),
     val selection: Set<Long> = emptySet(),
@@ -68,6 +88,9 @@ data class WorkbenchState(
     val pendingDelete: Set<Long> = emptySet(),
     val mediaPickerOpen: Boolean = false,
     val media: MediaUi = MediaUi.Idle,
+    val updateSheetOpen: Boolean = false,
+    val update: UpdateUi = UpdateUi.Idle,
+    val updateToken: String = "",
 ) {
     val selected: List<WorkItem> get() = items.filter { it.id in selection }
     val visible: List<WorkItem> get() = items.filter { filter.matches(it.kind) }
@@ -93,6 +116,7 @@ class WorkbenchViewModel(app: Application) : AndroidViewModel(app) {
     private val meta = MetaReader()
     private val gallery = MediaStorePublisher(app)
     private val mediaLibrary = MediaLibrary(app)
+    private val updates = UpdateRepository(app)
     private var noticeSeq = 0
 
     init {
@@ -505,6 +529,90 @@ class WorkbenchViewModel(app: Application) : AndroidViewModel(app) {
     private fun summarize(errors: List<String>): String =
         if (errors.size <= 2) errors.joinToString("；")
         else "${errors.take(2).joinToString("；")} 等共 ${errors.size} 处"
+
+    val localVersionName: String get() = updates.localVersionName()
+
+    fun openUpdateSheet() {
+        _state.update { it.copy(updateSheetOpen = true, updateToken = updates.token) }
+        checkForUpdate()
+    }
+
+    fun closeUpdateSheet() {
+        _state.update { it.copy(updateSheetOpen = false) }
+    }
+
+    /** 输入框里改字只动界面状态，落盘要等"存到本机"那一下。 */
+    fun setUpdateTokenDraft(value: String) {
+        _state.update { it.copy(updateToken = value) }
+    }
+
+    /** token 只写进本机 SharedPreferences，跟着这个 App 卸载就没了。 */
+    fun saveUpdateToken() {
+        updates.token = _state.value.updateToken
+        checkForUpdate()
+    }
+
+    fun checkForUpdate() = viewModelScope.launch(Dispatchers.IO) {
+        _state.update { it.copy(update = UpdateUi.Checking) }
+        val release = runCatching { updates.check() }.getOrElse { error ->
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            // 失败原因要原样贴出来：私有仓库、token 无效、网络被掐，三种处理办法不一样
+            _state.update { current -> current.copy(update = UpdateUi.Failed(error.message ?: error.javaClass.simpleName)) }
+            return@launch
+        }
+        val apk = release.pickApk()
+        _state.update { current ->
+            current.copy(
+                update = when {
+                    apk == null -> UpdateUi.Failed("最新一版里没有可安装的安装包")
+                    release.isNewerThan(updates.localVersion()) -> UpdateUi.Available(release, apk)
+                    else -> UpdateUi.UpToDate(updates.localVersionName())
+                },
+            )
+        }
+    }
+
+    fun downloadUpdate() {
+        val available = _state.value.update as? UpdateUi.Available ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            _state.update { it.copy(update = available.copy(percent = 0, downloaded = null)) }
+            val file = runCatching {
+                updates.download(available.asset) { percent, _, _ ->
+                    _state.update { current ->
+                        val now = current.update as? UpdateUi.Available ?: return@update current
+                        current.copy(update = now.copy(percent = percent))
+                    }
+                }
+            }.getOrElse { error ->
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                _state.update { current ->
+                    val now = current.update as? UpdateUi.Available ?: return@update current
+                    current.copy(update = now.copy(percent = -1))
+                }
+                notify("下载失败：${error.message ?: error.javaClass.simpleName}")
+                return@launch
+            }
+            _state.update { current ->
+                val now = current.update as? UpdateUi.Available ?: return@update current
+                current.copy(update = now.copy(percent = 100, downloaded = file))
+            }
+            notify("安装包下好了，点「安装」就走系统安装器")
+        }
+    }
+
+    /** 真正装包的是系统安装器，我们只把文件递过去；某些定制系统之类还会再多问几道。 */
+    fun installUpdate() {
+        val file = (_state.value.update as? UpdateUi.Available)?.downloaded ?: return
+        val app = getApplication<Application>()
+        if (updates.needsInstallPermission()) {
+            runCatching { app.startActivity(updates.installPermissionIntent()) }
+                .onFailure { notify("这台机器不让去设置里授权") }
+            notify("先允许「安装未知应用」，回来再点一次安装")
+            return
+        }
+        runCatching { app.startActivity(updates.installIntent(file)) }
+            .onFailure { notify("没有能安装 apk 的程序，去系统设置里手动装") }
+    }
 
     private fun notify(message: String) {
         noticeSeq++
