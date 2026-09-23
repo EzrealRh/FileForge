@@ -10,7 +10,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 
 TOKEN="${1:-}"
-APK="${2:-app/build/outputs/apk/release/fileforge-v0.5.0-release.apk}"
+APK="${2:-app/build/outputs/apk/release/fileforge-v0.6.0-release.apk}"
 export GRADLE_USER_HOME="${GRADLE_USER_HOME:-D:/gradle-home}"
 JDK="/c/Program Files/Java/jdk-21/bin"
 [ -x "$JDK/javac" ] || JDK="$(dirname "$(command -v javac)")"
