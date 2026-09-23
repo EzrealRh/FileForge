@@ -1,6 +1,7 @@
 package com.fileforge.converter.engine
 
 import android.content.Context
+import com.fileforge.core.model.BatchLineage
 import com.fileforge.core.ops.Operation
 import com.fileforge.converter.data.WorkItem
 import com.fileforge.converter.data.Workspace
@@ -102,8 +103,10 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
         }
 
         coroutineContext.ensureActive()
+        // 来源是同一批的，产物继续留在那批里；跨批就另起一批，别把两批的历史搅浑
+        val group = BatchLineage.inherit(items.map { it.groupId }) ?: workspace.startBatch(items.first().name)
         RunResult(
-            outputs = outputs.map { output -> workspace.adopt(output.file, output.name, output.note ?: operation.label) },
+            outputs = outputs.map { output -> workspace.adopt(output.file, output.name, output.note ?: operation.label, group) },
             failures = failures,
         )
     }

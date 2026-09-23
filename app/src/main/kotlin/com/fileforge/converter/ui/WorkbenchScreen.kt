@@ -1,6 +1,7 @@
 package com.fileforge.converter.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -182,6 +183,11 @@ fun WorkbenchScreen(
                             onClick = viewModel::toggleDateGroup,
                             label = { Text("按日期", maxLines = 1) },
                         )
+                        androidx.compose.material3.FilterChip(
+                            selected = state.groupByBatch,
+                            onClick = viewModel::toggleBatchGroup,
+                            label = { Text("按批次", maxLines = 1) },
+                        )
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = onPickPdf, enabled = !state.busy) {
@@ -206,7 +212,26 @@ fun WorkbenchScreen(
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    if (state.groupByDate) {
+                    if (state.groupByBatch) {
+                        // 一次导入 + 它转出来的结果算一组；点组头整批选中
+                        state.groupedByBatch().forEach { (batch, list) ->
+                            stickyHeader(key = batch?.id ?: -1L) {
+                                BatchHeader(batch, list.size, state.selection.containsAll(list.map { it.id })) {
+                                    batch?.let { viewModel.selectBatch(it.id) }
+                                }
+                            }
+                            items(list, key = { it.id }) { item ->
+                                FileRow(
+                                    item = item,
+                                    checked = item.id in state.selection,
+                                    busy = state.busy,
+                                    onToggle = { viewModel.toggle(item.id) },
+                                    onOpen = { viewModel.openDetail(item.id) },
+                                    onDelete = { viewModel.remove(item.id) },
+                                )
+                            }
+                        }
+                    } else if (state.groupByDate) {
                         // 组头跟着滚动停在顶上，一眼看清哪堆是今天的
                         state.groupedByDate(System.currentTimeMillis()).forEach { (group, list) ->
                             stickyHeader(key = group) {
@@ -348,6 +373,43 @@ private fun EmptyState(onPickPdf: () -> Unit, onPickFromGallery: () -> Unit, onA
         }
     }
 }
+
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun BatchHeader(batch: com.fileforge.converter.data.Batch?, count: Int, allSelected: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth()
+            .clickable(onClick = onClick)
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                (batch?.title ?: "未分组") + " · $count 个",
+                style = MaterialTheme.typography.labelLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                batch?.let { "同一批导入，转出来的也在这里 · " + clock.format(java.util.Date(it.addedAt)) }
+                    ?: "点一下整批选中",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.outline,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Text(
+            if (allSelected) "取消整批" else "整批选中",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary,
+        )
+    }
+}
+
+private val clock = java.text.SimpleDateFormat("M月d日 HH:mm", java.util.Locale.CHINA)
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
