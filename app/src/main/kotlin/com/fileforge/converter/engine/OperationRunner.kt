@@ -23,7 +23,7 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
     private val images = ImageEngine()
     private val gifs = GifEngine(workspace, images)
     private val pdf = PdfEngine(context, workspace)
-    private val video = VideoEngine(workspace)
+    private val video = VideoEngine(workspace, images)
 
     suspend fun run(
         items: List<WorkItem>,
@@ -90,6 +90,12 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
             is Operation.CompressGif -> items.forEach { item ->
                 collect(item.name) { listOf(gifs.compress(item, operation)) }
             }
+            is Operation.GifToImages -> items.forEach { item ->
+                collect(item.name) { gifs.toImages(item, operation) }
+            }
+            is Operation.ImagesToGif -> collect("${items.size} 张图片") {
+                listOf(gifs.fromImages(items, operation))
+            }
             is Operation.VideoToGif -> items.forEach { item ->
                 collect(item.name) {
                     listOf(gifs.fromVideo(item, operation) { percent -> onProgress(percent, item.name) })
@@ -99,6 +105,9 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
                 collect(item.name) {
                     listOf(video.compress(item, operation) { percent, -> onProgress(percent, item.name) })
                 }
+            }
+            is Operation.VideoToImage -> items.forEach { item ->
+                collect(item.name) { listOf(video.still(item, operation)) }
             }
         }
 

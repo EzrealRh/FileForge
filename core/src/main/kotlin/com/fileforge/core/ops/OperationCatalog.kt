@@ -17,7 +17,10 @@ enum class OperationKind(val label: String, val hint: String) {
     PdfToText("PDF 提取文字", "输出 txt，可以只要几页"),
     PdfToImages("PDF 每页导出图片", "页转 JPG / PNG / WebP"),
     CompressGif("压缩 GIF", "降尺寸、降帧、减色"),
+    GifToImages("GIF 转图片", "逐帧导出，或只要首帧"),
+    ImagesToGif("图片合成 GIF", "一张一帧，可设每帧停留"),
     VideoToGif("视频转 GIF", "支持 MP4 / WebM"),
+    VideoToImage("视频抽帧成图片", "指定秒数取那一帧，做封面"),
     CompressVideo("压缩视频", "硬件转码，可按目标体积反推码率"),
     ;
 
@@ -35,8 +38,9 @@ enum class OperationKind(val label: String, val hint: String) {
             CompressPdf, SplitPdfBySize, SplitPdfIntoParts, ExtractPdfPages, RemovePdfPages,
             RotatePdfPages, MergePdfs, PdfToText, PdfToImages,
             -> fileKind == FileKind.Pdf
-            CompressGif -> fileKind == FileKind.Gif
-            VideoToGif -> fileKind.isVideo
+            CompressGif, GifToImages -> fileKind == FileKind.Gif
+            ImagesToGif -> fileKind.isImage
+            VideoToGif, VideoToImage -> fileKind.isVideo
             CompressVideo -> fileKind.isVideo
         }
     }

@@ -1,8 +1,11 @@
 package com.fileforge.core
 
+import com.fileforge.core.gif.GifCanvasPlan
 import com.fileforge.core.model.BatchLineage
 import com.fileforge.core.model.DayGroup
+import com.fileforge.core.model.FileKind
 import com.fileforge.core.naming.OutputNaming
+import com.fileforge.core.ops.OperationKind
 import com.fileforge.core.pdf.PageGroups
 import com.fileforge.core.pdf.PageRangeException
 import com.fileforge.core.pdf.PdfCompressPlan
@@ -10,6 +13,7 @@ import com.fileforge.core.pdf.PageRangeParser
 import com.fileforge.core.pdf.SplitPlanner
 import com.fileforge.core.util.SizeInput
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -305,5 +309,67 @@ class BatchLineageTest {
         assertNull(BatchLineage.inherit(listOf(7L, 8L)))
         assertNull(BatchLineage.inherit(emptyList()))
         assertNull(BatchLineage.inherit(listOf(BatchLineage.NONE)))
+    }
+}
+
+class GifCanvasPlanTest {
+
+    @Test
+    fun `画布是所有图的外接矩形`() {
+        val canvas = GifCanvasPlan.canvas(
+            widths = listOf(1000, 800, 500),
+            heights = listOf(700, 1200, 500),
+            pixelBudget = 100_000_000,
+        )
+        assertEquals(1000 to 1200, canvas)
+    }
+
+    @Test
+    fun `最长边超了按比例缩，两边一起收`() {
+        assertEquals(300 to 600, GifCanvasPlan.canvas(listOf(1000, 1000), listOf(2000, 2000), maxEdge = 600, pixelBudget = 100_000_000))
+    }
+
+    @Test
+    fun `帧数乘像素超上限时按面积往下收`() {
+        val budget = 14_000_000
+        val canvas = GifCanvasPlan.canvas(List(100) { 2000 }, List(100) { 2000 }, pixelBudget = budget)
+        // sqrt(14e6 / (2000*2000*100)) = 0.18708…，两边各取 374
+        assertEquals(374 to 374, canvas)
+        assertTrue(GifCanvasPlan.fits(canvas.first, canvas.second, 100, budget))
+    }
+
+    @Test
+    fun `收到最小边还是装不下时如实说不兼容`() {
+        val budget = 14_000_000
+        val canvas = GifCanvasPlan.canvas(List(5000) { 4000 }, List(5000) { 4000 }, pixelBudget = budget)
+        assertEquals(53 to 53, canvas)
+        assertFalse(GifCanvasPlan.fits(canvas.first, canvas.second, 5000, budget))
+    }
+
+    @Test
+    fun `一张图也能出画布`() {
+        assertEquals(640 to 360, GifCanvasPlan.canvas(listOf(640), listOf(360), pixelBudget = 1 shl 20))
+    }
+}
+
+class CrossConversionCatalogTest {
+
+    @Test
+    fun `GIF 可以转图片但不给普通格式转换`() {
+        val gif = OperationKind.applicable(setOf(FileKind.Gif))
+        assertTrue(OperationKind.GifToImages in gif)
+        assertTrue(OperationKind.CompressGif in gif)
+        assertFalse(OperationKind.ConvertImage in gif)
+    }
+
+    @Test
+    fun `图片能合成 GIF，视频能抽帧`() {
+        assertTrue(OperationKind.ImagesToGif in OperationKind.applicable(setOf(FileKind.Png, FileKind.Jpeg)))
+        assertTrue(OperationKind.VideoToImage in OperationKind.applicable(setOf(FileKind.WebM)))
+    }
+
+    @Test
+    fun `混选时只留两边都能做的操作`() {
+        assertTrue(OperationKind.applicable(setOf(FileKind.Gif, FileKind.Pdf)).isEmpty())
     }
 }

@@ -139,8 +139,8 @@ fun OperationSheet(items: List<WorkItem>, onDismiss: () -> Unit, onStart: (Opera
  * 上一次的错误里灰着不动。数字输入一律先存原始字符串，避免小数点被回显吃掉。
  */
 class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
-    var imageFormat by mutableStateOf(ImageFormat.Jpeg)
-    var quality by mutableStateOf(82f)
+    var imageFormat by mutableStateOf(if (kind == OperationKind.GifToImages) ImageFormat.Png else ImageFormat.Jpeg)
+    var quality by mutableStateOf(if (kind == OperationKind.GifToImages || kind == OperationKind.VideoToImage) 92f else 82f)
     var maxEdge by mutableStateOf(if (kind == OperationKind.VideoToGif) 480f else 0f)
     var targetSizeText by mutableStateOf("10")
     var pageSpec by mutableStateOf("")
@@ -149,6 +149,8 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
     var pdfScale by mutableStateOf(2f)
     var gifFps by mutableStateOf(if (kind == OperationKind.VideoToGif) 12f else 10f)
     var gifColors by mutableStateOf(128f)
+    var gifFrameDelay by mutableStateOf(1000f)
+    var firstFrameOnly by mutableStateOf(false)
     var videoFormat by mutableStateOf(VideoFormat.Mp4)
     var videoByTarget by mutableStateOf(false)
     var bitrate by mutableStateOf(2500f)
@@ -245,6 +247,32 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
                 NumberField("取多少秒（空=全部）", durationSecondText) { durationSecondText = it }
                 Summary("帧数或尺寸超出内存上限时会自动往下收，结果里会写明")
             }
+            OperationKind.GifToImages -> {
+                Segmented("导出哪些帧", listOf("全部帧", "只要首帧"), if (firstFrameOnly) 1 else 0) { firstFrameOnly = it == 1 }
+                Segmented("图片格式", ImageFormat.entries.map { it.label }, imageFormat.ordinal) {
+                    imageFormat = ImageFormat.entries[it]
+                }
+                if (imageFormat != ImageFormat.Png) {
+                    IntSlider("质量", quality, 40f..100f, { "%.0f".format(it) }) { quality = it }
+                }
+                Summary("PNG 会保住 GIF 的透明边；逐帧导出时一张一帧，帧多就出得多")
+            }
+            OperationKind.ImagesToGif -> {
+                IntSlider("每帧停留", gifFrameDelay, 100f..5000f, { "%.0f ms".format(it) }, step = 100f) { gifFrameDelay = it }
+                IntSlider("最长边不超过", maxEdge, 0f..1200f, ::edgeLabel, step = 40f) { maxEdge = it }
+                Summary("${items.size} 张按选择顺序一张一帧；尺寸统一到最大那张，其余等比缩放居中，空的地方填白")
+            }
+            OperationKind.VideoToImage -> {
+                Segmented("图片格式", ImageFormat.entries.map { it.label }, imageFormat.ordinal) {
+                    imageFormat = ImageFormat.entries[it]
+                }
+                NumberField("第几秒（空=第一帧）", startSecondText) { startSecondText = it }
+                if (imageFormat != ImageFormat.Png) {
+                    IntSlider("质量", quality, 40f..100f, { "%.0f".format(it) }) { quality = it }
+                }
+                IntSlider("最长边不超过", maxEdge, 0f..1920f, ::edgeLabel, step = 64f) { maxEdge = it }
+                Summary("取离那一秒最近的画面，横拍竖存会自动转正；抽的是真帧，不是缩略图")
+            }
             OperationKind.CompressVideo -> {
                 Segmented("封装", VideoFormat.entries.map { it.label }, videoFormat.ordinal) {
                     videoFormat = VideoFormat.entries[it]
@@ -311,6 +339,14 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
             OperationKind.MergePdfs -> Operation.MergePdfs
             OperationKind.PdfToImages -> Operation.PdfToImages(imageFormat, pdfScale.roundToInt().toFloat(), quality.roundToInt())
             OperationKind.CompressGif -> Operation.CompressGif(maxEdge.roundToInt(), gifFps.roundToInt(), gifColors.roundToInt())
+            OperationKind.GifToImages -> Operation.GifToImages(imageFormat, firstFrameOnly, quality.roundToInt())
+            OperationKind.ImagesToGif -> Operation.ImagesToGif(gifFrameDelay.roundToInt(), maxEdge.roundToInt())
+            OperationKind.VideoToImage -> Operation.VideoToImage(
+                imageFormat,
+                startSecondText.toFloatOrNull()?.toDouble() ?: 0.0,
+                quality.roundToInt(),
+                maxEdge.roundToInt(),
+            )
             OperationKind.VideoToGif -> Operation.VideoToGif(
                 gifFps.roundToInt(), maxEdge.roundToInt(),
                 startSecondText.toFloatOrNull()?.toDouble() ?: 0.0,

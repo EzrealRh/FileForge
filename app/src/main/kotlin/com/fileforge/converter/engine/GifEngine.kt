@@ -1,7 +1,8 @@
 package com.fileforge.converter.engine
 
 import android.graphics.Bitmap
-import android.media.MediaMetadataRetriever
+import android.graphics.Canvas
+import com.fileforge.core.gif.GifCanvasPlan
 import com.fileforge.core.gif.GifDecoder
 import com.fileforge.core.gif.GifEncoder
 import com.fileforge.core.gif.GifFrame
@@ -55,7 +56,7 @@ class GifEngine(private val workspace: Workspace, private val images: ImageEngin
     }
 
     fun fromVideo(item: WorkItem, operation: Operation.VideoToGif, onProgress: (Int) -> Unit = {}): EngineOutput {
-        val meta = videoMeta(item)
+        val meta = videoDisplayMeta(item.file)
         val fps = operation.fps.coerceIn(1, 25)
         var frames = (meta.durationUs / 1_000_000.0 * fps).toInt().coerceIn(1, MAX_FRAMES)
         var edge = operation.maxEdge.coerceIn(64, 900)
@@ -111,27 +112,63 @@ class GifEngine(private val workspace: Workspace, private val images: ImageEngin
         )
     }
 
-    private class VideoMeta(val width: Int, val height: Int, val durationUs: Long, val rotation: Int)
-
-    private fun videoMeta(item: WorkItem): VideoMeta {
-        val retriever = MediaMetadataRetriever()
-        try {
-            retriever.setDataSource(item.file.absolutePath)
-            val rawWidth = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
-            val rawHeight = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
-            val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
-            val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
-            require(rawWidth > 0 && rawHeight > 0) { "读不到画面尺寸，这个视频可能损坏" }
-            val swapped = rotation == 90 || rotation == 270
-            return VideoMeta(
-                if (swapped) rawHeight else rawWidth,
-                if (swapped) rawWidth else rawHeight,
-                durationMs * 1000,
-                rotation,
+    /** GIF 拆成图片：逐帧导出，或者只取首帧做封面。 */
+    fun toImages(item: WorkItem, operation: Operation.GifToImages): List<EngineOutput> {
+        val source = GifDecoder.decode(item.file.readBytes(), pixelBudget = PIXEL_BUDGET)
+        val picked = if (operation.firstFrameOnly) source.frames.take(1) else source.frames
+        require(picked.isNotEmpty()) { "这个 GIF 里解不出画面" }
+        val extension = operation.format.extension
+        return picked.mapIndexed { index, frame ->
+            val bitmap = Bitmap.createBitmap(frame.argb, source.width, source.height, Bitmap.Config.ARGB_8888)
+            val bytes = images.encode(bitmap, operation.format, operation.quality)
+            bitmap.recycle()
+            EngineOutput(
+                OutputNaming.tagged(item.name, if (operation.firstFrameOnly) "首帧" else "第${index + 1}帧", extension),
+                workspace.newStagingFile(extension).apply { writeBytes(bytes) },
+                note = if (index == 0) {
+                    "${picked.size} 帧 ${source.width}x${source.height}" +
+                        if (source.truncated) "，帧太多只解出前 ${source.frames.size} 张" else ""
+                } else null,
             )
-        } finally {
-            runCatching { retriever.release() }
         }
+    }
+
+    /** 多张图合成 GIF：画布是所有图的外接矩形，小图等比放大缩小后居中，不裁切。 */
+    fun fromImages(items: List<WorkItem>, operation: Operation.ImagesToGif): EngineOutput {
+        require(items.isNotEmpty()) { "没有图片可合成" }
+        val decoded = items.map { images.decode(it.file) }
+        val (width, height) = GifCanvasPlan.canvas(
+            widths = decoded.map { it.width },
+            heights = decoded.map { it.height },
+            maxEdge = operation.maxEdge,
+            pixelBudget = PIXEL_BUDGET,
+        )
+        require(GifCanvasPlan.fits(width, height, decoded.size, PIXEL_BUDGET)) {
+            "${decoded.size} 帧 ${width}x$height 还是超出内存上限，减少张数或把最长边调小"
+        }
+        val delayCs = (operation.frameDelayMs / 10).coerceIn(2, 65_535)
+        val frames = decoded.map { bitmap ->
+            val canvas = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            val painter = Canvas(canvas).apply { drawColor(0xFFFFFFFF.toInt()) }
+            val ratio = minOf(width.toFloat() / bitmap.width, height.toFloat() / bitmap.height)
+            val drawWidth = (bitmap.width * ratio).roundToInt().coerceAtLeast(1)
+            val drawHeight = (bitmap.height * ratio).roundToInt().coerceAtLeast(1)
+            val scaled = Bitmap.createScaledBitmap(bitmap, drawWidth, drawHeight, true)
+            painter.drawBitmap(scaled, ((width - drawWidth) / 2f), ((height - drawHeight) / 2f), null)
+            if (scaled !== bitmap) scaled.recycle()
+            val pixels = IntArray(width * height)
+            canvas.getPixels(pixels, 0, width, 0, 0, width, height)
+            canvas.recycle()
+            GifFrame(pixels, delayCs)
+        }
+        decoded.forEach { it.recycle() }
+
+        val bytes = GifEncoder(width, height, 0, 256).encode(frames)
+        return EngineOutput(
+            OutputNaming.tagged(items.first().name, "合成", "gif"),
+            workspace.newStagingFile("gif").apply { writeBytes(bytes) },
+            "${frames.size} 帧 ${width}x$height，每帧 ${delayCs * 10}ms，${SizeInput.format(bytes.size.toLong())}",
+        )
     }
 
     private fun resize(image: GifImage, edge: Int): GifImage {
