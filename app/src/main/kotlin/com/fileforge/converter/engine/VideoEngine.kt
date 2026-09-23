@@ -19,12 +19,14 @@ import java.nio.ByteBuffer
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.roundToInt
 
 /**
  * 视频压缩走硬件路径：解码器直接输出到编码器的输入面，帧数据不进 Java 堆；
  * 缩放交给编码器（API 29 起支持），音轨原样搬运不重编码。
  */
-class VideoEngine(private val workspace: Workspace) {
+class VideoEngine(private val workspace: Workspace, private val images: ImageEngine) {
 
     suspend fun compress(item: WorkItem, operation: Operation.CompressVideo, onProgress: (Int) -> Unit): EngineOutput {
         val output = workspace.newStagingFile(operation.format.extension)
@@ -264,6 +266,40 @@ class VideoEngine(private val workspace: Workspace) {
             runCatching { if (muxerStarted) muxer.stop() }
             runCatching { muxer.release() }
         }
+    }
+
+    /** 抽一帧当图片：走和转 GIF 同一套顺序解码，秒数指到哪帧就是哪帧。 */
+    fun still(item: WorkItem, operation: Operation.VideoToImage): EngineOutput {
+        val meta = videoDisplayMeta(item.file)
+        require(meta.durationUs > 0) { "读不到时长，这个视频可能损坏" }
+        // 留 0.1 秒余量：正好指到结尾时解不出采样，报错会误导成"不支持这个编码"
+        val second = operation.second.coerceIn(0.0, max(0.0, meta.durationUs / 1_000_000.0 - 0.1))
+        val longest = max(meta.width, meta.height)
+        val scale = if (operation.maxEdge > 0) min(1f, operation.maxEdge.toFloat() / longest) else 1f
+        val width = (meta.width * scale).roundToInt().coerceAtLeast(2)
+        val height = (meta.height * scale).roundToInt().coerceAtLeast(2)
+
+        val taken = VideoFrameSequence.extract(
+            file = item.file,
+            startUs = (second * 1_000_000).toLong(),
+            windowUs = 1L,
+            frameCount = 1,
+            stepUs = 1L,
+            targetWidth = width,
+            targetHeight = height,
+            rotation = meta.rotation,
+        )
+        val bitmap = taken.bitmaps.firstOrNull() ?: error("这一帧解不出来，换个秒数试试")
+        val extension = operation.format.extension
+        val bytes = images.encode(bitmap, operation.format, operation.quality)
+        bitmap.recycle()
+
+        val tag = if (second < 0.05) "封面" else "${"%.1f".format(second)}秒"
+        return EngineOutput(
+            OutputNaming.tagged(item.name, tag, extension),
+            workspace.newStagingFile(extension).apply { writeBytes(bytes) },
+            "$width x $height · 取自第 ${"%.1f".format(second)} 秒 · ${SizeInput.format(bytes.size.toLong())}",
+        )
     }
 
     /** 编码器要求偶数边长，奇数会 configure 失败。 */

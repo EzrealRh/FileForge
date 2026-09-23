@@ -52,3 +52,30 @@ fun videoFrameAt(file: File, timeUs: Long, width: Int, height: Int): Bitmap? {
         retriever.frameAt(timeUs, width, height)
     }.getOrNull().also { runCatching { retriever.release() } }
 }
+
+/** 显示尺寸（已按旋转角交换过宽高）、时长和旋转角本身。 */
+class VideoDisplayMeta(val width: Int, val height: Int, val durationUs: Long, val rotation: Int)
+
+/** 抽帧和解码器都要靠这份元数据定尺寸与方向，所以只在这里读一次。 */
+fun videoDisplayMeta(file: File): VideoDisplayMeta {
+    val retriever = MediaMetadataRetriever()
+    try {
+        retriever.setDataSource(file.absolutePath)
+        val rawWidth = retriever.metadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
+        val rawHeight = retriever.metadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
+        val rotation = retriever.metadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+        val durationMs = retriever.metadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+        require(rawWidth > 0 && rawHeight > 0) { "读不到画面尺寸，这个视频可能损坏" }
+        val swapped = rotation == 90 || rotation == 270
+        return VideoDisplayMeta(
+            if (swapped) rawHeight else rawWidth,
+            if (swapped) rawWidth else rawHeight,
+            durationMs * 1000,
+            rotation,
+        )
+    } finally {
+        runCatching { retriever.release() }
+    }
+}
+
+private fun MediaMetadataRetriever.metadata(key: Int): String? = runCatching { extractMetadata(key) }.getOrNull()

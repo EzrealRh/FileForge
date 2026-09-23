@@ -72,6 +72,33 @@ sealed interface Operation {
         override val label get() = "压缩 GIF"
     }
 
+    /** GIF 拆成图片：默认逐帧导出，也可以只要首帧（做封面、进 PPT）。 */
+    data class GifToImages(
+        val format: ImageFormat = ImageFormat.Png,
+        val firstFrameOnly: Boolean = false,
+        val quality: Int = 92,
+    ) : Operation {
+        override val label get() = if (firstFrameOnly) "导出首帧为 ${format.label}" else "每帧导出为 ${format.label}"
+    }
+
+    /** 多张图片合成 GIF：一张一帧，尺寸统一到最大那张，其余等比缩放居中。 */
+    data class ImagesToGif(
+        val frameDelayMs: Int = 1000,
+        val maxEdge: Int = 0,
+    ) : Operation {
+        override val label get() = "合成为 GIF"
+    }
+
+    /** 视频里抽一帧成图片；秒数给 0 就是第一帧。 */
+    data class VideoToImage(
+        val format: ImageFormat = ImageFormat.Jpeg,
+        val second: Double = 0.0,
+        val quality: Int = 92,
+        val maxEdge: Int = 0,
+    ) : Operation {
+        override val label get() = "抽一帧为 ${format.label}"
+    }
+
     /** 视频转 GIF。 */
     data class VideoToGif(
         val fps: Int = 12,
