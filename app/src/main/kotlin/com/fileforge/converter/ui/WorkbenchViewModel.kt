@@ -11,6 +11,7 @@ import androidx.lifecycle.viewModelScope
 import com.fileforge.core.model.DayGroup
 import com.fileforge.core.model.FileKind
 import com.fileforge.core.ops.Operation
+import com.fileforge.converter.data.Batch
 import com.fileforge.converter.data.MediaEntry
 import com.fileforge.converter.data.MediaLibrary
 import com.fileforge.converter.data.MediaStorePublisher
@@ -53,6 +54,9 @@ data class WorkbenchState(
     val filter: KindFilter = KindFilter.All,
     /** 列表按日期分组（今天/昨天/本周/更早）。 */
     val groupByDate: Boolean = false,
+    /** 列表按批次分组：同一次导入的、以及这批文件转出来的结果，算一组。 */
+    val groupByBatch: Boolean = false,
+    val batches: Map<Long, Batch> = emptyMap(),
     val running: Running? = null,
     val notice: Notice? = null,
     val sheetOpen: Boolean = false,
@@ -74,6 +78,10 @@ data class WorkbenchState(
      */
     fun groupedByDate(now: Long): List<Pair<DayGroup, List<WorkItem>>> =
         visible.groupBy { DayGroup.of(it.addedAt, now) }.map { (group, list) -> group to list }
+
+    /** 按批次分组，新批次在前（[visible] 本来就是新→旧）。 */
+    fun groupedByBatch(): List<Pair<Batch?, List<WorkItem>>> =
+        visible.groupBy { it.groupId }.map { (id, list) -> batches[id] to list }
     val busy: Boolean get() = running != null
     val allVisibleSelected: Boolean get() = visible.isNotEmpty() && visible.all { it.id in selection }
 }
@@ -91,24 +99,23 @@ class WorkbenchViewModel(app: Application) : AndroidViewModel(app) {
         workspace.purgeStaging()
     }
 
-    private val _state = MutableStateFlow(WorkbenchState(items = workspace.list()))
+    private val _state = MutableStateFlow(WorkbenchState(items = workspace.list(), batches = workspace.batches()))
     val state = _state.asStateFlow()
 
     val phoneSaveSupported: Boolean get() = gallery.supported
 
+    /** 一次选中的算一批：整批交给 Workspace，产物以后也归这批。 */
     fun import(uris: List<Uri>) = viewModelScope.launch(Dispatchers.IO) {
-        val added = ArrayList<WorkItem>()
-        val failures = ArrayList<String>()
-        uris.forEach { uri ->
-            runCatching { workspace.import(uri, getContent()) }
-                .onSuccess { added += it }
-                .onFailure { failures += "${uri.lastPathSegment ?: "文件"}：${it.message}" }
-        }
+        val added = runCatching { workspace.importAll(uris, getContent()) }
+            .getOrElse { error ->
+                notify("没能加入：" + (error.message ?: error.javaClass.simpleName))
+                return@launch
+            }
         _state.update { current ->
             val fresh = current.refreshed()
             fresh.copy(selection = fresh.selection + added.map { it.id }.toSet())
         }
-        if (failures.isNotEmpty()) notify("${failures.size} 个文件没能加入：" + failures.first())
+        if (added.size < uris.size) notify("${uris.size - added.size} 个文件没能加入")
     }
 
     fun toggle(id: Long) {
@@ -255,8 +262,25 @@ class WorkbenchViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(filter = kind) }
     }
 
+    /** 两种分组互斥，开一个就关另一个。 */
     fun toggleDateGroup() {
-        _state.update { it.copy(groupByDate = !it.groupByDate) }
+        _state.update { current -> current.copy(groupByDate = !current.groupByDate, groupByBatch = false) }
+    }
+
+    fun toggleBatchGroup() {
+        _state.update { current -> current.copy(groupByBatch = !current.groupByBatch, groupByDate = false) }
+    }
+
+    /** 点组头：把这一批（当前筛选下看得见的）整批选中或取消。 */
+    fun selectBatch(groupId: Long) {
+        _state.update { current ->
+            val inBatch = current.visible.filter { it.groupId == groupId }.map { it.id }.toSet()
+            if (inBatch.isEmpty()) return@update current
+            val allOn = inBatch.all { it in current.selection }
+            current.copy(
+                selection = if (allOn) current.selection - inBatch else current.selection + inBatch,
+            )
+        }
     }
 
     /**
@@ -470,6 +494,7 @@ class WorkbenchViewModel(app: Application) : AndroidViewModel(app) {
         val detailGone = detailId != null && detailId !in alive
         return copy(
             items = fresh,
+            batches = workspace.batches(),
             selection = selection.filter { it in alive }.toSet(),
             detailId = if (detailGone) null else detailId,
             detail = if (detailGone) null else detail,

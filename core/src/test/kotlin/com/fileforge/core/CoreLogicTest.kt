@@ -1,5 +1,6 @@
 package com.fileforge.core
 
+import com.fileforge.core.model.BatchLineage
 import com.fileforge.core.model.DayGroup
 import com.fileforge.core.naming.OutputNaming
 import com.fileforge.core.pdf.PageGroups
@@ -288,5 +289,21 @@ class DayGroupTest {
         val now = at("2026-09-22T12:00:00")
         assertEquals(DayGroup.Today, DayGroup.of(now, now))
         assertEquals(DayGroup.Today, DayGroup.of(at("2026-09-25T12:00:00"), now))
+    }
+}
+
+class BatchLineageTest {
+
+    @Test
+    fun `来源同批就继承`() {
+        assertEquals(7L, BatchLineage.inherit(listOf(7L, 7L, 7L)))
+        assertEquals(7L, BatchLineage.inherit(listOf(BatchLineage.NONE, 7L)))
+    }
+
+    @Test
+    fun `跨批或没批就另起一批`() {
+        assertNull(BatchLineage.inherit(listOf(7L, 8L)))
+        assertNull(BatchLineage.inherit(emptyList()))
+        assertNull(BatchLineage.inherit(listOf(BatchLineage.NONE)))
     }
 }
