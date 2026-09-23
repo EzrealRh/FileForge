@@ -47,8 +47,8 @@ object ReleaseFeed {
     const val REPO = "FileForge"
 
     /**
-     * 一律走 api.github.com：有些网络环境会把 github.com:443 掐掉，
-     * 但同一个资产用 API 端点带 `Accept: application/octet-stream` 能直接下下来（PC 上实测过）。
+     * 一律走 api.github.com：有些网络环境会掐掉 github.com:443 却放通 API 域名，
+     * 而同一个资产用 API 端点带 `Accept: application/octet-stream` 就能直接下下来。
      */
     const val LATEST_URL = "https://api.github.com/repos/$OWNER/$REPO/releases/latest"
 

@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
-/** 真实抓下来的 GitHub 响应（api.github.com/repos/EzrealRh/FileForge/releases/latest）。 */
+/** 线上 `releases/latest` 端点的真实响应，账号身份字段已换成 example-org 占位。 */
 private fun fixture(name: String): String =
     checkNotNull(Thread.currentThread().contextClassLoader.getResourceAsStream("update/$name")) {
         "少了测试夹具 update/$name"

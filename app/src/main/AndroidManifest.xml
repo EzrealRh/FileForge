@@ -43,7 +43,7 @@
             </intent-filter>
         </activity>
 
-        <!-- 把成品分享给社交 App等别的 App：它们只能拿到我们主动交出去的那几个文件 -->
+        <!-- 把成品分享给别的 App：它们只能拿到我们主动交出去的那几个文件 -->
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

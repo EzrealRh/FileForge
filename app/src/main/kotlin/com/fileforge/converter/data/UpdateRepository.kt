@@ -128,7 +128,7 @@ class UpdateRepository(context: Context) {
             connectTimeout = 15_000
             readTimeout = 30_000
             // 重定向自己跟：第二跳是另一个域名（release-assets.githubusercontent.com），
-            // 有些网络环境只放通 api.github.com，让错误说清楚是哪个域名被掐
+            // 有些网络环境只放通 api.github.com，所以错误里要说清楚是哪个域名被掐
             instanceFollowRedirects = false
         }
 

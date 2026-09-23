@@ -431,7 +431,7 @@ class WorkbenchViewModel(app: Application) : AndroidViewModel(app) {
 
     /**
      * 复制到 /storage/emulated/0/文件工坊 并记住位置。转换一完成就自动来一次，
-     * 省得用户还要记得点"存到手机"；放不进去也不影响工作台里那份继续加工。
+     * 省得用户还得记得点"存到手机"；放不进去也不影响工作台里那份继续加工。
      */
     private suspend fun publish(items: List<WorkItem>): Map<String, String> {
         if (!gallery.supported) {
@@ -600,7 +600,7 @@ class WorkbenchViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** 真正装包的是系统安装器，我们只把文件递过去；某些定制系统之类还会再多问几道。 */
+    /** 真正装包的是系统安装器，我们只把文件递过去；某些定制系统还会再多问几道。 */
     fun installUpdate() {
         val file = (_state.value.update as? UpdateUi.Available)?.downloaded ?: return
         val app = getApplication<Application>()

@@ -69,9 +69,9 @@ tools/updateprobe/ 应用内更新验证台：直接拿 :core 那份真代码打
 还没验证的（需要真机跑一次）：
 
 - 真机上 SAF 选文件、导出到文件夹的完整往返
-- 分享：社交 App能不能收到（FileProvider 的 authority 是 `包名.fileprovider`，只暴露 workspace 和 staging 两个目录）
+- 分享：社交 App 能不能收到（FileProvider 的 authority 是 `包名.fileprovider`，只暴露 workspace 和 staging 两个目录）
 - 「按日期」分组的观感（今天/昨天/本周/更早，周一为一周起点）
-- 转换后自动放出去的那份：详情页「位置」显示的是 `/storage/emulated/0/文件工坊/...` 还是退回了 `Download/文件工坊/...`，文件管理器和社交 App能不能直接选到
+- 转换后自动放出去的那份：详情页「位置」显示的是 `/storage/emulated/0/文件工坊/...` 还是退回了 `Download/文件工坊/...`，文件管理器和社交 App 的文件选择器能不能直接选到
 - webm→GIF 换成顺序解码后到底动不动（结果说明会写「N 帧 …」；只解出一张画面时直接报错，不再假装成功）
 - 新增的三类互转：GIF 逐帧拆图（帧多的 GIF 会出几十个文件，够不够用）、多张图片合成 GIF（尺寸不一时是否真按外接矩形居中、白底能不能接受）、视频按秒数抽帧（横拍竖存有没有转正、指定秒数取到的是不是想要那一帧）
 - 应用内更新在真机上整条跑一遍：手机上能不能连 `api.github.com` 和 302 之后的 `release-assets.githubusercontent.com`（两个域名都得通）、定制系统的"安装未知应用"引导能不能跳过去、装完工作台列表和 文件工坊 目录里的成品在不在

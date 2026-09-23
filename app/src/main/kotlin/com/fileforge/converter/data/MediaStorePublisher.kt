@@ -10,11 +10,11 @@ import android.provider.MediaStore
 
 /**
  * 把工作台里的成品写进手机存储（分区存储写法，不需要运行时权限），落在
- * `/storage/emulated/0/文件工坊/` —— 跟其他 App 默认的顶层目录一样，
- * 文件管理器直接翻得到，社交 App也选得到。
+ * `/storage/emulated/0/文件工坊/` —— 一个顶层目录，文件管理器第一屏就翻得到，
+ * 社交 App 的文件选择器也默认从这里找。
  *
- * 按类型散进 Pictures / Movies / Documents 会被嫌"不方便找"；只留在应用私有目录时，
- * 用户看到的是 /data/user/0/... 那种根本进不去的地址。所以这里只认一个顶层目录，
+ * 不按类型散进 Pictures / Movies / Documents，也不只留在应用私有目录：那样用户
+ * 拿到的是 /data/user/0/... 这种根本进不去的地址。所以这里只认一个顶层目录，
  * 个别 ROM 不让建就退回 Download/文件工坊/。API 29 以下没有这套写法，交给调用方回落到"选文件夹导出"。
  */
 class MediaStorePublisher(private val context: Context) {
