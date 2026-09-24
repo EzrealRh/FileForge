@@ -3,6 +3,8 @@ package com.fileforge.core
 import com.fileforge.core.model.FileKind
 import com.fileforge.core.ops.Operation
 import com.fileforge.core.ops.OperationKind
+import com.fileforge.core.ops.VideoFormat
+import com.fileforge.core.video.MuxSupport
 import com.fileforge.core.pdf.Horizontal
 import com.fileforge.core.pdf.PageNumberPlan
 import com.fileforge.core.pdf.PageNumberPlan.STYLE_CJK
@@ -13,6 +15,7 @@ import com.fileforge.core.pdf.StampSpot
 import com.fileforge.core.pdf.TextFit
 import com.fileforge.core.pdf.WatermarkPlan
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -158,6 +161,36 @@ class StampCatalogTest {
         assertEquals(1, operation.columns * operation.rows)
         val tiles = WatermarkPlan.tiles(595f, 842f, operation.columns, operation.rows)
         assertEquals(WatermarkPlan.center(595f, 842f), tiles.single())
+    }
+}
+
+class MuxSupportTest {
+
+    @Test
+    fun `无压缩 PCM 音轨不能原样搬进 mp4`() {
+        assertFalse(MuxSupport.keepsAudio(VideoFormat.Mp4, "audio/raw"))
+        assertFalse(MuxSupport.keepsAudio(VideoFormat.Mp4, "audio/x-pcm"))
+        assertFalse(MuxSupport.keepsAudio(VideoFormat.Mp4, null))
+        assertFalse(MuxSupport.keepsAudio(VideoFormat.Mp4, "  "))
+    }
+
+    @Test
+    fun `AAC 这类常规音轨照带`() {
+        assertTrue(MuxSupport.keepsAudio(VideoFormat.Mp4, "audio/mp4a-latm"))
+        assertTrue(MuxSupport.keepsAudio(VideoFormat.Mp4, "Audio/FLAC"))
+    }
+
+    @Test
+    fun `webm 只收 vorbis 和 opus`() {
+        assertTrue(MuxSupport.keepsAudio(VideoFormat.WebM, "audio/opus"))
+        assertFalse(MuxSupport.keepsAudio(VideoFormat.WebM, "audio/mp4a-latm"))
+    }
+
+    @Test
+    fun `退让时给一句人话`() {
+        assertTrue(MuxSupport.dropReason("audio/raw").contains("PCM"))
+        assertTrue(MuxSupport.dropReason("audio/mp4a-latm").contains("mp4a-latm"))
+        assertTrue(MuxSupport.dropReason(null).contains("读不到"))
     }
 }
 

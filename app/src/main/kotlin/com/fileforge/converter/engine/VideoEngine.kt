@@ -12,6 +12,7 @@ import com.fileforge.core.naming.OutputNaming
 import com.fileforge.core.ops.Operation
 import com.fileforge.core.ops.VideoFormat
 import com.fileforge.core.util.SizeInput
+import com.fileforge.core.video.MuxSupport
 import com.fileforge.core.video.VideoBitratePlan
 import com.fileforge.converter.data.WorkItem
 import com.fileforge.converter.data.Workspace
@@ -46,6 +47,9 @@ class VideoEngine(private val workspace: Workspace, private val images: ImageEng
             videoExtractor.setDataSource(item.file.absolutePath)
             val videoTrack = videoExtractor.selectFirst("video/")
             require(videoTrack >= 0) { "这个文件里没有视频轨" }
+            // 只找不选等于没选：不 selectTrack 的话 readSampleData 第一下就返回 -1，
+            // 整条流水线会"安静地"编出一个 3KB 空 mp4 还报成功（真机踩过）
+            videoExtractor.selectTrack(videoTrack)
             val sourceFormat = videoExtractor.getTrackFormat(videoTrack)
             val sourceWidth = sourceFormat.integer(MediaFormat.KEY_WIDTH) ?: error("读不到画面尺寸")
             val sourceHeight = sourceFormat.integer(MediaFormat.KEY_HEIGHT) ?: error("读不到画面尺寸")
@@ -59,11 +63,19 @@ class VideoEngine(private val workspace: Workspace, private val images: ImageEng
             }
             if (operation.format == VideoFormat.WebM) notes += "WebM 输出不带音轨"
 
-            val keepAudio = operation.format == VideoFormat.Mp4
-            if (keepAudio) audioExtractor.setDataSource(item.file.absolutePath)
-            val audioTrack = if (keepAudio) audioExtractor.selectFirst("audio/") else -1
-            if (keepAudio && audioTrack < 0) notes += "没有音轨可保留"
-            if (audioTrack >= 0) audioExtractor.selectTrack(audioTrack)
+            val wantAudio = operation.format == VideoFormat.Mp4
+            if (wantAudio) audioExtractor.setDataSource(item.file.absolutePath)
+            val foundAudio = if (wantAudio) audioExtractor.selectFirst("audio/") else -1
+            val audioMime = if (foundAudio >= 0) audioExtractor.getTrackFormat(foundAudio).string(MediaFormat.KEY_MIME) else null
+            // 音轨是原样搬运不重编码的，所以封装收不下的格式（无压缩 PCM 就是）只能放弃，
+            // 硬塞给 muxer 会让整件事失败
+            val audioTrack = if (foundAudio >= 0 && MuxSupport.keepsAudio(operation.format, audioMime)) {
+                audioExtractor.selectTrack(foundAudio)
+                foundAudio
+            } else {
+                if (wantAudio) notes += if (foundAudio >= 0) MuxSupport.dropReason(audioMime) else "没有音轨可保留"
+                -1
+            }
             // 音轨是原样搬运不重编码的，所以预留体积要按源音轨的真实码率算
             val audioBitsPerSecond = if (audioTrack < 0) {
                 0
@@ -132,6 +144,9 @@ class VideoEngine(private val workspace: Workspace, private val images: ImageEng
                 }
             }
             job.finish()
+            require(job.writtenSamples > 0) {
+                "这台设备一帧都没编出来（源编码 ${sourceFormat.string(MediaFormat.KEY_MIME)}），没产出可用文件"
+            }
             onProgress(100)
         } catch (error: Exception) {
             // 半写的 mp4 留着就是坏文件，直接删；调用方只会看到失败条目
@@ -178,10 +193,17 @@ class VideoEngine(private val workspace: Workspace, private val images: ImageEng
 
         private var videoTrack = -1
         private var muxerStarted = false
-        private val audioTrack = if (audioExtractor != null && audioTrackIndex >= 0) {
-            muxer.addTrack(audioExtractor.getTrackFormat(audioTrackIndex))
-        } else {
-            -1
+        /** 真写进 muxer 的视帧数，用来拒绝"编了半天一帧没有"的假成功。 */
+        var writtenSamples = 0
+            private set
+        // 判据也可能漏（机型/封装差异），所以这里再兜一层：加不进去就当没有音轨，别把整件事搞失败
+        private val audioTrack = run {
+            val extractor = audioExtractor
+            if (extractor != null && audioTrackIndex >= 0) {
+                runCatching { muxer.addTrack(extractor.getTrackFormat(audioTrackIndex)) }.getOrDefault(-1)
+            } else {
+                -1
+            }
         }
 
         fun feedDecoder() {
@@ -230,6 +252,7 @@ class VideoEngine(private val workspace: Workspace, private val images: ImageEng
                     }
                     if (muxerStarted && !config && encodeInfo.size > 0 && buffer != null) {
                         muxer.writeSampleData(videoTrack, buffer, encodeInfo)
+                        writtenSamples++
                     }
                     if (encodeInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) encodeDone = true
                     encoder.releaseOutputBuffer(index, false)
