@@ -55,6 +55,7 @@ fun DetailSheet(
     selected: Boolean,
     onToggleSelect: () -> Unit,
     onShare: () -> Unit,
+    onOpenWith: () -> Unit,
     onConvert: () -> Unit,
     onDelete: () -> Unit,
     onDismiss: () -> Unit,
@@ -146,9 +147,10 @@ fun DetailSheet(
                 Button(onClick = onToggleSelect, modifier = Modifier.weight(1f)) {
                     Text(if (selected) "取消选中" else "选中它")
                 }
+                // 「打开」= 交给系统里能处理这个类型的 App（阅读器、播放器、相册）
+                OutlinedButton(onClick = onOpenWith) { Text("打开") }
                 OutlinedButton(onClick = onShare) { Text("分享") }
                 OutlinedButton(onClick = { onDelete(); onDismiss() }) { Text("删除") }
-                TextButton(onClick = onDismiss) { Text("关闭") }
             }
             Spacer(Modifier.height(20.dp))
         }

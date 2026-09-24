@@ -26,7 +26,7 @@ import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.PhotoAlbum
 import androidx.compose.material.icons.outlined.RuleFolder
 import androidx.compose.material.icons.outlined.Share
-import androidx.compose.material.icons.outlined.SystemUpdate
+import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -95,9 +95,6 @@ fun WorkbenchScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = viewModel::openUpdateSheet) {
-                        Icon(Icons.Outlined.SystemUpdate, contentDescription = "检查更新")
-                    }
                     IconButton(onClick = onSaveToPhone, enabled = state.items.isNotEmpty()) {
                         Icon(Icons.Outlined.PhotoAlbum, contentDescription = "存到手机 Download/文件工坊")
                     }
@@ -192,6 +189,14 @@ fun WorkbenchScreen(
                             onClick = viewModel::toggleBatchGroup,
                             label = { Text("按批次", maxLines = 1) },
                         )
+                        // 更新入口写成字：光一个箭头图标没人认得出是"检查更新"
+                        androidx.compose.material3.AssistChip(
+                            onClick = viewModel::openUpdateSheet,
+                            label = { Text("检查更新", maxLines = 1) },
+                            leadingIcon = {
+                                Icon(Icons.Outlined.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                            },
+                        )
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = onPickPdf, enabled = !state.busy) {
@@ -285,6 +290,7 @@ fun WorkbenchScreen(
                 detail = detail,
                 preview = state.preview,
                 onShare = { viewModel.share(listOf(item)) },
+                onOpenWith = { viewModel.openWith(item) },
                 loading = state.detailLoading,
                 selected = id in state.selection,
                 onToggleSelect = { viewModel.toggle(id) },
@@ -312,6 +318,22 @@ fun WorkbenchScreen(
                 TextButton(onClick = viewModel::confirmDelete) { Text(if (onlySelected) "删除" else "全部删除") }
             },
             dismissButton = { TextButton(onClick = viewModel::dismissDelete) { Text("取消") } },
+        )
+    }
+
+    if (state.topLevelHint) {
+        AlertDialog(
+            onDismissRequest = viewModel::dismissTopLevelHint,
+            title = { Text("成品在 Download 里，不是一层目录") },
+            text = {
+                Text(
+                    "系统不让普通应用直接建 /storage/emulated/0/文件工坊，所以这批成品落到了 " +
+                        "Download/文件工坊。想让它像其他 App 一样在存储根目录出现，" +
+                        "去系统设置里给本应用开「所有文件访问权限」；不开也能正常用，只是位置深一层。",
+                )
+            },
+            confirmButton = { TextButton(onClick = viewModel::grantTopLevelAccess) { Text("去开启") } },
+            dismissButton = { TextButton(onClick = viewModel::dismissTopLevelHint) { Text("先不用") } },
         )
     }
 

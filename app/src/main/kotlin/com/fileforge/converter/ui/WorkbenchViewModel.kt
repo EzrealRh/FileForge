@@ -91,6 +91,8 @@ data class WorkbenchState(
     val updateSheetOpen: Boolean = false,
     val update: UpdateUi = UpdateUi.Idle,
     val updateToken: String = "",
+    /** 成品只能落在 Download 时的一次性提示。 */
+    val topLevelHint: Boolean = false,
 ) {
     val selected: List<WorkItem> get() = items.filter { it.id in selection }
     val visible: List<WorkItem> get() = items.filter { filter.matches(it.kind) }
@@ -118,6 +120,7 @@ class WorkbenchViewModel(app: Application) : AndroidViewModel(app) {
     private val mediaLibrary = MediaLibrary(app)
     private val updates = UpdateRepository(app)
     private var noticeSeq = 0
+    private var topLevelHintShown = false
 
     init {
         workspace.purgeStaging()
@@ -447,7 +450,57 @@ class WorkbenchViewModel(app: Application) : AndroidViewModel(app) {
             items.firstOrNull { it.name == name }?.let { item -> workspace.markShared(item, path) }
         }
         if (result.failures.isNotEmpty()) notify("有 ${result.failures.size} 个没放进去：" + summarize(result.failures))
+        offerTopLevelHint(result)
         return result.paths
+    }
+
+    /**
+     * 成品落到 Download 而不是顶层时提一句去哪开权限 —— 一次会话只提一次，
+     * 别每次转换都弹窗。
+     */
+    private fun offerTopLevelHint(result: MediaStorePublisher.Result) {
+        if (result.topLevel || result.paths.isEmpty() || topLevelHintShown) return
+        // 只有"能开权限但没开"才值得提；老系统或已经开了还落回 Download 的，提了也解决不了
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.R || gallery.topLevelGranted) return
+        topLevelHintShown = true
+        _state.update { it.copy(topLevelHint = true) }
+    }
+
+    fun dismissTopLevelHint() {
+        _state.update { it.copy(topLevelHint = false) }
+    }
+
+    /** 跳到系统「所有文件访问权限」页，开完就能直接建 /storage/emulated/0/文件工坊。 */
+    fun grantTopLevelAccess() {
+        _state.update { it.copy(topLevelHint = false) }
+        runCatching { getApplication<Application>().startActivity(gallery.topLevelPermissionIntent()) }
+            .onFailure { notify("这台系统没给这个入口，用「导出」自己选文件夹也一样") }
+    }
+
+    /**
+     * 用其他应用打开这个文件：PDF 交给阅读器、视频交给播放器。
+     * 系统里没有能接的 App 就退回分享面板，不给一个"点了没反应"。
+     */
+    fun openWith(item: WorkItem) {
+        val app = getApplication<Application>()
+        val uri = runCatching {
+            FileProvider.getUriForFile(app, "${app.packageName}.fileprovider", item.file)
+        }.getOrElse {
+            notify("${item.name} 拿不到打开地址：${it.message ?: it.javaClass.simpleName}")
+            return
+        }
+        val view = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, item.kind.mimeType)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        val handler = runCatching { view.resolveActivity(app.packageManager) }.getOrNull()
+        if (handler == null) {
+            notify("这台机器上没有能打开 ${item.kind.mimeType} 的应用，改用分享")
+            share(listOf(item))
+            return
+        }
+        runCatching { app.startActivity(Intent.createChooser(view, "打开 ${item.name}").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            .onFailure { notify("打不开：${it.message ?: it.javaClass.simpleName}") }
     }
 
     /** 导出到用户选的文件夹：有选中就只导选中，否则导全部。 */
