@@ -10,7 +10,11 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 
 TOKEN="${1:-}"
-APK="${2:-app/build/outputs/apk/release/fileforge-v0.6.0-release.apk}"
+# 默认取 release 目录里版本号最新的那个包。写死版本号的坑不是"忘了改就报错"，
+# 而是"忘了改就拿着上一版的本地产物去比这一版的线上产物"——那种比出来的 CRC 结论是假的。
+DEFAULT_APK=$(ls -1 app/build/outputs/apk/release/fileforge-v*-release.apk 2>/dev/null | sort -V | tail -1)
+APK="${2:-$DEFAULT_APK}"
+[ -n "$APK" ] || { echo "release 目录里没有 fileforge-v*-release.apk，先跑 ./gradlew :app:assembleRelease"; exit 3; }
 export GRADLE_USER_HOME="${GRADLE_USER_HOME:-D:/gradle-home}"
 JDK="/c/Program Files/Java/jdk-21/bin"
 [ -x "$JDK/javac" ] || JDK="$(dirname "$(command -v javac)")"
