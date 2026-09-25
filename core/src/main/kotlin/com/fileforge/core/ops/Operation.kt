@@ -389,6 +389,21 @@ sealed interface Operation {
         override val label get() = "网页转 Markdown"
     }
 
+    /**
+     * CSV → xlsx（一张表，表名用文件名）。
+     *
+     * 格子类型只按字面判：只有"变成数字后还能一字不差读回来"的写法才写成数字，
+     * `007`、`1.50`、15 位以上的编号一律保持文字 —— 那是数据，不是格式问题。
+     */
+    data object CsvToXlsx : Operation {
+        override val label get() = "写成 Excel 表格"
+    }
+
+    /** JSON（对象数组）→ xlsx：列名取第一份对象的键，套进去的值摊平成文字。 */
+    data object JsonToXlsx : Operation {
+        override val label get() = "JSON 写成 Excel 表格"
+    }
+
     /** 把 .ico 里的每一帧画面导成 PNG。 */
     data object IcoToImages : Operation {
         override val label get() = "导出图标里的画面"

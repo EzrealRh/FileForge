@@ -172,6 +172,14 @@ class FileKindSniffTest {
         val xlsx = OperationKind.applicable(setOf(FileKind.Xlsx))
         assertTrue(OperationKind.XlsxToCsv in xlsx, "xlsx 该能转 CSV：$xlsx")
         assertTrue(OperationKind.OfficeToText !in xlsx, "表格不是连着读的正文：$xlsx")
+        // 写出来的那两条是给 csv / json 用的，别在 xlsx 上再摆一个"转成 xlsx"
+        assertTrue(
+            OperationKind.CsvToXlsx !in xlsx && OperationKind.JsonToXlsx !in xlsx,
+            "xlsx 不该拿到「写成 Excel」这两条：$xlsx",
+        )
+
+        val text = OperationKind.applicable(setOf(FileKind.Text))
+        assertTrue(OperationKind.CsvToXlsx in text && OperationKind.JsonToXlsx in text, "文本该能写成 xlsx：$text")
 
         // 纯文本没有"丢图"这一说，抽取操作不给它
         assertTrue(OperationKind.OfficeToText !in OperationKind.applicable(setOf(FileKind.Text)))

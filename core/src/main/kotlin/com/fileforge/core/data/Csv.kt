@@ -227,12 +227,16 @@ object TableBridge {
     }
 
     /** 转过去会丢什么，动手之前显示给用户看。 */
-    fun losses(json: Json): List<String> {
+    fun losses(json: Json): List<String> =
+        (listOf("CSV 只有文字：数字、真假、null 过去之后全是字符串，回来时不再认得类型（除非开类型识别）") +
+            flatteningNotes(json)).distinct()
+
+    /** 与目标格式无关的那几条：嵌套值要压平、null 与空格分不出来、各条目字段数不齐。 */
+    fun flatteningNotes(json: Json): List<String> {
         val out = ArrayList<String>()
-        out += "CSV 只有文字：数字、真假、null 过去之后全是字符串，回来时不再认得类型（除非开类型识别）"
         val nested = json.arrayValue.any { item -> item.members.values.any { child -> child is JsonArray || child is JsonObject } }
-        if (nested) out += "嵌套的对象与数组会被压成一格 JSON 文本，那一列回来时还是文字，不自动还原成结构"
-        if (json.arrayValue.any { it.isNull }) out += "null 与空单元格在 CSV 里分不出来，回来时都是空字符串"
+        if (nested) out += "嵌套的对象与数组会被压成一格文字，那一列回来时还是文字，不自动还原成结构"
+        if (json.arrayValue.any { it.isNull }) out += "null 与空值在表里分不出来，回来时都是空格子"
         val widths = json.arrayValue.map { it.members.size }.distinct()
         if (widths.size > 1) out += "各条目的字段数不一样：并集成一排列，缺的地方留空"
         return out.distinct()

@@ -4,12 +4,15 @@ import com.fileforge.converter.data.WorkItem
 import com.fileforge.converter.data.Workspace
 import com.fileforge.core.data.Csv
 import com.fileforge.core.data.Delimiter
+import com.fileforge.core.data.TableBridge
 import com.fileforge.core.text.LineEnding
 import com.fileforge.core.model.FileKind
 import com.fileforge.core.naming.OutputNaming
 import com.fileforge.core.office.OoxmlStructure
 import com.fileforge.core.office.Sheet
+import com.fileforge.core.office.SheetToWrite
 import com.fileforge.core.office.Xlsx
+import com.fileforge.core.office.XlsxWrite
 import java.io.File
 
 /**
@@ -82,6 +85,62 @@ class OfficeEngine(private val workspace: Workspace) {
     }
 
     private fun tag(sheetName: String): String = OutputNaming.sanitize(sheetName).take(MAX_SHEET_TAG)
+
+    /**
+     * CSV 写成一份 xlsx（一张表，表名用文件名）。
+     *
+     * 类型判定全在 `:core`（那边能脱机单测）：只有变成数字后还能一字不差读回来的写法才写成数字。
+     */
+    fun csvToXlsx(item: WorkItem): EngineOutput {
+        val text = com.fileforge.core.text.TextCodecs.decodeForConversion(read(item), null).text
+        val doc = Csv.parse(text)
+        require(!doc.isEmpty) { "这份 CSV 里一行记录都没有" }
+        val notes = ArrayList<String>()
+        if (doc.ragged.isNotEmpty()) {
+            notes += "第 ${doc.ragged.joinToString("、")} 行列数与最宽的 ${doc.widest} 列不齐，右边补了空格子"
+        }
+        val rows = doc.records.map { record -> record + List(doc.widest - record.size) { "" } }
+        return workbook(item, listOf(SheetToWrite(OutputNaming.stem(item.name), rows)), notes)
+    }
+
+    /** JSON（对象数组）写成一份 xlsx：摊平用的是「JSON 转 CSV」同一套判据，两层结果对得上。 */
+    fun jsonToXlsx(item: WorkItem): EngineOutput {
+        val text = com.fileforge.core.text.TextCodecs.decodeForConversion(read(item), null).text
+        val json = try {
+            com.fileforge.core.json.Json.parse(text.trim())
+        } catch (bad: com.fileforge.core.json.JsonException) {
+            throw IllegalArgumentException("这不是合法 JSON：${bad.message}")
+        }
+        val table = TableBridge.toTable(json) ?: throw IllegalArgumentException(
+            TableBridge.reasonWhyNotTable(json) ?: "这份 JSON 摊不成表：要的是对象数组（每项的键当列名）",
+        )
+        val notes = ArrayList(TableBridge.flatteningNotes(json))
+        notes += "第一行是列名"
+        return workbook(item, listOf(SheetToWrite(OutputNaming.stem(item.name), table.records)), notes)
+    }
+
+    private fun workbook(
+        item: WorkItem,
+        sheets: List<SheetToWrite>,
+        notes: List<String>,
+    ): EngineOutput {
+        val out = XlsxWrite.workbook(sheets, modifiedAt = item.file.lastModified())
+        val file = workspace.newStagingFile("xlsx").apply { writeBytes(out.bytes) }
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "", "xlsx"),
+            file,
+            (listOf("${sheets.size} 张表 · ${sheets.sumOf { it.rows.size }} 行 × ${sheets.maxOf { it.rows.maxOfOrNull { row -> row.size } ?: 0 }} 列") +
+                notes + out.notes).joinToString(" · "),
+        )
+    }
+
+    /** 输入按文本上限卡：CSV / JSON 再大也不该超出这个量级，超了多半是把二进制误选进来了。 */
+    private fun read(item: WorkItem): ByteArray {
+        require(item.file.length() <= MAX_TEXT_BYTES) {
+            "这份文件 ${item.file.length() / 1024 / 1024} MB，超过 ${MAX_TEXT_BYTES / 1024 / 1024} MB 上限"
+        }
+        return item.file.readBytes()
+    }
 
     /** 成品一律 UTF-8 无 BOM：BOM 会让第一列的列名在前面的工具里多出一个看不见的字符。 */
     private fun write(extension: String, text: String): File =

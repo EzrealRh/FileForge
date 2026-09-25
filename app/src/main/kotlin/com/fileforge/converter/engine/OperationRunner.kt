@@ -187,6 +187,12 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
             is Operation.HtmlToMarkdown -> items.forEach { item ->
                 collect(item.name) { listOf(text.htmlToMarkdown(item)) }
             }
+            is Operation.CsvToXlsx -> items.forEach { item ->
+                collect(item.name) { listOf(office.csvToXlsx(item)) }
+            }
+            is Operation.JsonToXlsx -> items.forEach { item ->
+                collect(item.name) { listOf(office.jsonToXlsx(item)) }
+            }
         }
 
         coroutineContext.ensureActive()

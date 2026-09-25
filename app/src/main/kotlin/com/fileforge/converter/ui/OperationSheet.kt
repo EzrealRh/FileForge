@@ -554,6 +554,16 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
                 Summary("表单控件与内嵌框架里放不进标记的东西，只留文字并写明几处。")
                 Summary("成品里的 `*` `_` `<` 都是转义过的字面字符，别人再读这份 Markdown 不会把正文读成标记。")
             }
+            OperationKind.CsvToXlsx -> {
+                Summary("写一份真 .xlsx（一张表，表名用文件名），Excel / WPS / Numbers 直接打得开。")
+                Summary("格子类型只按字面判：能一字不差读回来的写法才写成数字，`007`、`1.50`、15 位以上的编号一律保持文字。")
+                Summary("以 `=` `+` `@` 开头的格子按文字存，不会被当成公式执行。")
+            }
+            OperationKind.JsonToXlsx -> {
+                Summary("要的是对象数组：第一行是列名（取各条目键的并集，按首次出现的顺序），每条一行。")
+                Summary("嵌套的对象与数组会压成一格文字，字段数不齐时缺的地方留空 —— 都会逐条写明。")
+                Summary("与「JSON 转 CSV」用的是同一套摊平判据，两条路出来的表内容一致。")
+            }
             OperationKind.IcoToImages -> {
                 Summary("PNG 内嵌的那种直接把内嵌字节原样取出，不重新编码；老式位图（DIB）的要重建像素再编 PNG。")
                 Summary("一个图标里有几个尺寸就出几张图，名字带序号。")
@@ -731,6 +741,8 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
             OperationKind.MdToText -> Operation.MdToText
             OperationKind.HtmlToText -> Operation.HtmlToText
             OperationKind.HtmlToMarkdown -> Operation.HtmlToMarkdown
+            OperationKind.CsvToXlsx -> Operation.CsvToXlsx
+            OperationKind.JsonToXlsx -> Operation.JsonToXlsx
             OperationKind.IcoToImages -> Operation.IcoToImages
         }
     }
