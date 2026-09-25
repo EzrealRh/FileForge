@@ -183,6 +183,12 @@ class MetaReader {
         FileKind.Jpeg -> "JPEG 图片"
         FileKind.Bmp -> "BMP 图片"
         FileKind.Zip -> "ZIP 压缩包"
+        FileKind.Mp3 -> "MP3 音频"
+        FileKind.Aac -> "AAC 音频"
+        FileKind.M4a -> "M4A 音频"
+        FileKind.Flac -> "FLAC 音频"
+        FileKind.Ogg -> "OGG 音频"
+        FileKind.Wav -> "WAV 音频"
         FileKind.Unknown -> "未知类型"
     }
 

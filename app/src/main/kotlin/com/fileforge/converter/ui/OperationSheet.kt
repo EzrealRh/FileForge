@@ -416,18 +416,7 @@ private fun edgeLabel(edge: Float): String = if (edge == 0f) "不改" else "%.0f
 
 private fun sizeOf(items: List<WorkItem>): String = SizeInput.format(items.sumOf { it.size })
 
-private fun FileKind.label(): String = when (this) {
-    FileKind.Pdf -> "PDF"
-    FileKind.Gif -> "GIF"
-    FileKind.WebP -> "WebP"
-    FileKind.Heic -> "HEIC"
-    FileKind.Avif -> "AVIF"
-    FileKind.Mp4 -> "MP4"
-    FileKind.WebM -> "WebM"
-    FileKind.Mkv -> "MKV"
-    FileKind.QuickTime -> "MOV"
-    else -> "图片"
-}
+private fun FileKind.label(): String = badge
 
 /** 整数档位滑块：显示值和实际执行值必须一致，否则会出现"显示 13fps 跑 12"。 */
 @Composable

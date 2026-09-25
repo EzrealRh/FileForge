@@ -536,28 +536,11 @@ class WorkbenchViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun copyTo(item: WorkItem, tree: DocumentFile) {
-        val created = tree.createFile(mimeOf(item), item.name) ?: error("无法在目标文件夹创建文件")
+        val created = tree.createFile(item.kind.mimeType, item.name) ?: error("无法在目标文件夹创建文件")
         getContent().openOutputStream(created.uri, "w").use { output ->
             requireNotNull(output) { "无法写入这个文件夹" }
             item.file.inputStream().use { it.copyTo(output) }
         }
-    }
-
-    private fun mimeOf(item: WorkItem): String = when (item.kind) {
-        FileKind.Pdf -> "application/pdf"
-        FileKind.Gif -> "image/gif"
-        FileKind.Png -> "image/png"
-        FileKind.Jpeg -> "image/jpeg"
-        FileKind.WebP -> "image/webp"
-        FileKind.Bmp -> "image/bmp"
-        FileKind.Heic -> "image/heic"
-        FileKind.Avif -> "image/avif"
-        FileKind.Mp4 -> "video/mp4"
-        FileKind.WebM -> "video/webm"
-        FileKind.Mkv -> "video/x-matroska"
-        FileKind.QuickTime -> "video/quicktime"
-        FileKind.Zip -> "application/zip"
-        FileKind.Unknown -> "*/*"
     }
 
     private fun recyclePreview() {

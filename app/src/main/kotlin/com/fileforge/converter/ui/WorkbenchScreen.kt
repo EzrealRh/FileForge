@@ -496,16 +496,9 @@ private fun FileRow(
 }
 
 private fun kindLabel(item: WorkItem): String = when (item.kind) {
-    FileKind.Pdf -> "PDF"
-    FileKind.Gif -> "GIF"
-    FileKind.WebP -> "WebP"
-    FileKind.Heic -> "HEIC"
-    FileKind.Avif -> "AVIF"
-    FileKind.Mp4 -> "MP4"
-    FileKind.WebM -> "WebM"
-    FileKind.Mkv -> "MKV"
-    FileKind.QuickTime -> "MOV"
-    else -> item.extension.uppercase()
+    // 这两种没有统一短名，报真实扩展名更有用（.epub 和 .zip 都归 Unknown/Zip）
+    FileKind.Unknown, FileKind.Zip -> item.extension.uppercase()
+    else -> item.kind.badge
 }
 
 private fun usedSpace(items: List<WorkItem>): String = SizeInput.format(items.sumOf { it.size })
