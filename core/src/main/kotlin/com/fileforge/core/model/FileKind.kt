@@ -4,7 +4,7 @@ package com.fileforge.core.model
 enum class FileKind {
     Pdf, Png, Jpeg, Gif, WebP, Bmp, Heic, Avif, Mp4, WebM, Mkv, QuickTime,
     Mp3, Aac, M4a, Flac, Ogg, Wav,
-    Zip, Ico, Text, Unknown;
+    Zip, Ico, Docx, Xlsx, Pptx, Text, Unknown;
 
     val isImage: Boolean get() = this in IMAGE_KINDS
     val isVideo: Boolean get() = this in VIDEO_KINDS
@@ -32,6 +32,9 @@ enum class FileKind {
         Ogg -> "audio/ogg"
         Wav -> "audio/wav"
         Zip -> "application/zip"
+        Docx -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        Xlsx -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        Pptx -> "application/vnd.openxmlformats-officedocument.presentationml.presentation"
         Text -> "text/plain"
         Unknown -> "application/octet-stream"
     }
@@ -61,6 +64,9 @@ enum class FileKind {
         Ogg -> "OGG"
         Wav -> "WAV"
         Zip -> "ZIP"
+        Docx -> "DOCX"
+        Xlsx -> "XLSX"
+        Pptx -> "PPTX"
         Text -> "文本"
         Unknown -> "文件"
     }

@@ -1,0 +1,295 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""造 OOXML 夹具：手工拼出 Word / PowerPoint 的最小合法包。
+
+本机没装 Word 也没装 python-docx，所以部件 XML 全部照 ECMA-376 的树形手写，
+再用标准库 zipfile 装成包 —— 这样"包能被 zipfile 打开"本身就是一条外部约束。
+
+三份夹具各自要卡住的东西不同：
+  prose.docx   只有段落、修订、域、超链接 —— 这一份要能和 pandoc 抽出的文字**逐段相同**
+  tables.docx  表格、文本框、图片、脚注引用 —— 这些 pandoc 有它自己的规矩，只跟自家期望比
+  deck.pptx    两页幻灯片，每页多个形状
+
+输出到 core/src/test/resources/office/。用法：python tools/make_office_fixtures.py
+"""
+import io
+import os
+import zipfile
+from xml.etree import ElementTree
+
+OUT = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "core", "src", "test", "resources", "office"
+)
+
+W_NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+R_NS = 'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"'
+WP_NS = 'xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"'
+A_NS = 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"'
+PIC_NS = 'xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"'
+
+XML_DECL = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+
+
+def run(text, preserve=False):
+    """一个文本 run。preserve 决定边上的空格保不保 —— Word 需要时才写这个属性。"""
+    space = ' xml:space="preserve"' if preserve else ""
+    return "<w:r><w:t%s>%s</w:t></w:r>" % (space, text)
+
+
+def para(*parts):
+    return "<w:p>%s</w:p>" % "".join(parts)
+
+
+def document(body):
+    return XML_DECL + ('<w:document %s %s %s %s %s><w:body>%s<w:sectPr/></w:body></w:document>'
+                       % (W_NS, R_NS, WP_NS, A_NS, PIC_NS, body))
+
+
+CONTENT_TYPES_DOCUMENT = XML_DECL + (
+    '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+    '<Default Extension="xml" ContentType="application/xml"/>'
+    '<Override PartName="/word/document.xml" '
+    'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+    '<Override PartName="/word/footnotes.xml" '
+    'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml"/>'
+    "</Types>"
+)
+
+ROOT_RELS = XML_DECL + (
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+    '<Relationship Id="rId1" '
+    'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
+    'Target="word/document.xml"/></Relationships>'
+)
+
+DOC_RELS = XML_DECL + (
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+    '<Relationship Id="rId10" '
+    'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" '
+    'Target="https://example.com/" TargetMode="External"/>'
+    "</Relationships>"
+)
+
+FOOTNOTES = XML_DECL + (
+    '<w:footnotes %s><w:footnote w:type="separator" w:id="-1"/><w:footnote w:type="continuationSeparator" '
+    'w:id="0"/><w:footnote w:id="1"><w:p>%s</w:p></w:footnote></w:footnotes>'
+    % (W_NS, run("脚注里的一句话"))
+)
+
+
+def prose_document():
+    """段落、修订、域、超链接。每段都单独可核对。"""
+    body = "".join([
+        para(run("项目清单")),
+        para(run("第一批：", True), run("甲"), "<w:tab/>", run("乙")),
+        para(run("备注 A&#8212;B &amp; &lt;tag&gt; &#8220;引号&#8221;")),
+        # 修订：ins 是新增的字，del 里的 delText 是被删掉的字（不该出现在结果里）
+        para('<w:ins w:id="1" w:author="谁"><w:r><w:t>新增保留</w:t></w:r></w:ins>'
+             '<w:del w:id="2" w:author="谁"><w:r><w:delText>删掉不该出现</w:delText></w:r></w:del>'),
+        # 域：instrText 是代码，separate 之后的 run 才是显示结果
+        para('<w:r><w:fldChar w:fldCharType="begin"/></w:r>'
+             '<w:r><w:instrText> PAGE </w:instrText></w:r>'
+             '<w:r><w:fldChar w:fldCharType="separate"/></w:r>' + run("7") +
+             '<w:r><w:fldChar w:fldCharType="end"/></w:r>'),
+        # 超链接在内联层：它只能是 w:p 的孩子，跟 w:r 平级（挂在 body 上就是不合法的，pandoc 会直接丢掉）
+        '<w:p><w:hyperlink r:id="rId10" w:history="1">%s</w:hyperlink></w:p>' % run("官网"),
+        "<w:p/>",
+        para(run("结尾")),
+    ])
+    return document(body)
+
+
+PROSE_EXPECT = [
+    "项目清单",
+    "第一批：甲\t乙",
+    "备注 A—B & <tag> “引号”",
+    "新增保留",
+    "7",
+    "官网",
+    "",                                        # 夹具里那个空段落
+    "结尾",
+]
+
+
+def tables_document():
+    """表格、文本框、图片、脚注引用 —— 这些各家规矩不同，只跟自家期望比。"""
+    table = (
+        "<w:tbl><w:tblPr/><w:tr><w:tc><w:tcPr/>%s</w:tc><w:tc><w:tcPr/>%s</w:tc>"
+        "<w:tc><w:tcPr/>%s</w:tc></w:tr>"
+        "<w:tr><w:tc><w:tcPr/>%s</w:tc><w:tc><w:tcPr/>%s</w:tc><w:tc><w:tcPr/><w:p/></w:tc></w:tr></w:tbl>"
+        % (
+            para(run("名称")), para(run("数量")), para(run("备注")),
+            para(run("苹果")), para(run("3")),
+        )
+    )
+    cell_two_paras = (
+        "<w:tbl><w:tr><w:tc><w:tcPr/>%s%s</w:tc><w:tc><w:tcPr/>%s</w:tc></w:tr></w:tbl>"
+        % (para(run("格内第一段")), para(run("格内第二段")), para(run("右格")))
+    )
+    drawing = (
+        '<w:r><w:drawing><wp:inline><wp:extent cx="1" cy="1"/><a:graphic><a:graphicData>'
+        '<pic:pic><pic:blipFill><a:blip r:embed="rId5"/></pic:blipFill></pic:pic>'
+        "</a:graphicData></a:graphic></wp:inline></w:drawing></w:r>"
+    )
+    text_box = (
+        '<w:r><mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">'
+        '<mc:Choice xmlns:v="urn:schemas-microsoft-com:vml" Requires="v">'
+        '<w:drawing><wp:inline><w:txbxContent>%s</w:txbxContent></wp:inline></w:drawing>'
+        "</mc:Choice></mc:AlternateContent></w:r>" % para(run("文本框里的字"))
+    )
+    footnote_ref = '<w:r><w:footnoteReference w:id="1"/></w:r>'
+    body = "".join([
+        para(run("前言")),
+        table,
+        cell_two_paras,
+        para(run("带图的"), drawing),
+        para(run("带脚注的"), footnote_ref, run("这句话")),
+        para(run("框外"), text_box),
+        "<w:p><w:pPr><w:sectPr><w:headerReference r:id=\"rId7\" w:type=\"default\"/>"
+        "<w:footerReference r:id=\"rId8\" w:type=\"default\"/></w:sectPr></w:pPr></w:p>",
+        para(run("结尾")),
+    ])
+    return document(body)
+
+
+TABLES_EXPECT = [
+    "前言",
+    "名称\t数量\t备注",
+    "苹果\t3\t",
+    "格内第一段 格内第二段\t右格",
+    "带图的",
+    "带脚注的这句话",
+    "框外文本框里的字",
+    "",                                        # 带页眉页脚引用的那段是空的
+    "结尾",
+]
+
+
+def slide(*shapes):
+    return (XML_DECL +
+            '<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+            'xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">'
+            "<p:cSld><p:spTree>%s</p:spTree></p:cSld></p:sld>" % "".join(shapes))
+
+
+def shape(*paragraphs):
+    return "<p:sp><p:nvSpPr/><p:spPr/><p:txBody>%s</p:txBody></p:sp>" % "".join(paragraphs)
+
+
+def a_para(text):
+    return "<a:p><a:r><a:t>%s</a:t></a:r></a:p>" % text
+
+
+SLIDE_ONE = slide(shape(a_para("第一页标题"), a_para("副标题")), shape(a_para("右下角备注")))
+SLIDE_TWO = slide(
+    "<p:graphicFrame><a:graphic><a:graphicData><a:tbl>"
+    "<a:tr><a:tc><a:txBody>%s</a:txBody></a:tc><a:tc><a:txBody>%s</a:txBody></a:tc></a:tr>"
+    "<a:tr><a:tc><a:txBody>%s</a:txBody></a:tc><a:tc><a:txBody>%s</a:txBody></a:tc></a:tr>"
+    "</a:tbl></a:graphicData></a:graphic></p:graphicFrame>"
+    % (a_para("列一"), a_para("列二"), a_para("1"), a_para("2")),
+    # 形状必须在 p:sld 这棵根里面：写成 slide(...) + shape(...) 会变成两份根，pandoc 直接报"根之后还有内容"
+    shape('<a:p><a:fld id="{B}" type="slidenumber"><a:t>2</a:t></a:fld></a:p>'),
+)
+
+DECK_EXPECT = [
+    "第一页标题",
+    "副标题",
+    "右下角备注",
+    "列一\t列二",
+    "1\t2",
+    "2",
+]
+
+CONTENT_TYPES_DECK = XML_DECL + (
+    '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+    '<Default Extension="xml" ContentType="application/xml"/>'
+    '<Override PartName="/ppt/presentation.xml" '
+    'ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>'
+    '<Override PartName="/ppt/slides/slide1.xml" '
+    'ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>'
+    '<Override PartName="/ppt/slides/slide2.xml" '
+    'ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>'
+    "</Types>"
+)
+
+# 根关系指向哪份主部件是包级别的规矩：演示文稿指 ppt/presentation.xml。
+# （这条早先抄了文档包的那份，pandoc 立刻按关系去找 word/document.xml 然后报"部件不存在"。）
+DECK_ROOT_RELS = XML_DECL + (
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+    '<Relationship Id="rId1" '
+    'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
+    'Target="ppt/presentation.xml"/></Relationships>'
+)
+
+DECK_RELS = XML_DECL + (
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+    '<Relationship Id="rId2" '
+    'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" '
+    'Target="slides/slide1.xml"/>'
+    '<Relationship Id="rId3" '
+    'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" '
+    'Target="slides/slide2.xml"/></Relationships>'
+)
+
+PRESENTATION = XML_DECL + (
+    '<p:presentation xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+    'xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" '
+    'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+    '<p:sldIdLst><p:sldId id="256" r:id="rId2"/><p:sldId id="257" r:id="rId3"/></p:sldIdLst>'
+    "</p:presentation>"
+)
+
+
+def write_zip(name, parts):
+    path = os.path.join(OUT, name)
+    # 先体检再生成：每个部件都得能被 ElementTree 解析。夹具自己坏了，测出来的"一致"毫无意义
+    for part, payload in parts:
+        ElementTree.fromstring(payload.encode("utf-8"))
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as package:
+        for part, payload in parts:
+            package.writestr(part, payload)
+    # 自己先开一遍：能被 zipfile 打开才算一份包
+    with zipfile.ZipFile(path) as check:
+        assert check.testzip() is None, name
+        names = check.namelist()
+    print("  %s：%d 个部件，%d 字节" % (name, len(names), os.path.getsize(path)))
+    return names
+
+
+def main():
+    os.makedirs(OUT, exist_ok=True)
+    write_zip("prose.docx", [
+        ("[Content_Types].xml", CONTENT_TYPES_DOCUMENT),
+        ("_rels/.rels", ROOT_RELS),
+        ("word/_rels/document.xml.rels", DOC_RELS),
+        ("word/document.xml", prose_document()),
+        ("word/footnotes.xml", FOOTNOTES),
+    ])
+    write_zip("tables.docx", [
+        ("[Content_Types].xml", CONTENT_TYPES_DOCUMENT),
+        ("_rels/.rels", ROOT_RELS),
+        ("word/_rels/document.xml.rels", DOC_RELS),
+        ("word/document.xml", tables_document()),
+        ("word/footnotes.xml", FOOTNOTES),
+    ])
+    write_zip("deck.pptx", [
+        ("[Content_Types].xml", CONTENT_TYPES_DECK),
+        ("_rels/.rels", DECK_ROOT_RELS),
+        ("ppt/_rels/presentation.xml.rels", DECK_RELS),
+        ("ppt/presentation.xml", PRESENTATION),
+        ("ppt/slides/slide1.xml", SLIDE_ONE),
+        ("ppt/slides/slide2.xml", SLIDE_TWO),
+    ])
+    for name, lines in (
+        ("prose.docx", PROSE_EXPECT), ("tables.docx", TABLES_EXPECT), ("deck.pptx", DECK_EXPECT)
+    ):
+        # 期望值按"一行一段"写成 .expect：两端的比对单位就是行，不各写一份解析器
+        with io.open(os.path.join(OUT, name + ".expect"), "w", encoding="utf-8", newline="\n") as handle:
+            handle.write("\n".join(lines) + "\n")
+    print("写到", os.path.normpath(OUT))
+
+
+if __name__ == "__main__":
+    main()
