@@ -11,10 +11,22 @@ class JsonException(message: String) : Exception(message)
 sealed interface Json {
 
     val stringValue: String? get() = null
+
+    /**
+     * 数字的**原文**。
+     *
+     * 格式化别人的 JSON 时不能把 `1` 印成 `1.0`、把 `1e20` 印成 `1.0E20`：
+     * 看着是同一堆数， diff 却全是噪音，而大整数过一遍 Double 还会真的丢位。
+     * 所以解析时把 token 原样留下，输出侧默认照抄。
+     */
+    val numberText: String? get() = null
     val numberValue: Double? get() = null
     val boolValue: Boolean? get() = null
     val arrayValue: List<Json> get() = emptyList()
     val members: Map<String, Json> get() = emptyMap()
+
+    /** 是 null 字面量。和"这个字段没值"是两件事，所以分开判。 */
+    val isNull: Boolean get() = this is JsonNull
 
     fun field(name: String): Json? = members[name]
     fun string(name: String): String? = field(name)?.stringValue
@@ -32,8 +44,10 @@ class JsonString(private val value: String) : Json {
     override fun toString() = value
 }
 
-class JsonNumber(private val value: Double) : Json {
-    override val numberValue get() = value
+/** raw 是源文本里那个数字 token，value 是它的双精度读法。 */
+class JsonNumber(val raw: String) : Json {
+    override val numberText get() = raw
+    override val numberValue get() = raw.toDoubleOrNull()
 }
 
 class JsonBoolean(private val value: Boolean) : Json {
@@ -153,13 +167,39 @@ private class Reader(private val text: String) {
         else -> throw JsonException("不认识的反斜杠转义 \\$code")
     }
 
+    /**
+     * 数字按 **JSON 的语法**收，不是按 `String.toDouble` 能认什么收。
+     *
+     * 两者差得很远：后者认 `+5`、`1.`、`3d`、`Infinity`、`0x1p3`，而规范只认
+     * `-?(0|[1-9]\d*)(\.\d+)?([eE][-+]?\d+)?`。放过去的话，解析+重新渲染会产出
+     * 非法 JSON（`+5` 原样照抄出去），而渲染时是照抄原文的，所以必须在这一步就拦下。
+     */
     private fun readNumber(): Json {
         val start = at
-        if (peek() == '-' || peek() == '+') at++
-        while (at < text.length && (text[at].isDigit() || text[at] in ".eE+-")) at++
+        if (peek() == '-') at++
+        if (peek() == '0') {
+            at++
+        } else {
+            if (at >= text.length || !text[at].isDigit()) throw JsonException("数字开头不对")
+            while (at < text.length && text[at].isDigit()) at++
+        }
+        if (at < text.length && text[at] == '.') {
+            at++
+            if (at >= text.length || !text[at].isDigit()) throw JsonException("小数点后面没有数字")
+            while (at < text.length && text[at].isDigit()) at++
+        }
+        if (at < text.length && text[at] in "eE") {
+            val mark = at
+            at++
+            if (at < text.length && text[at] in "+-") at++
+            if (at >= text.length || !text[at].isDigit()) {
+                at = mark
+            } else {
+                while (at < text.length && text[at].isDigit()) at++
+            }
+        }
         val token = text.substring(start, at)
-        return token.toDoubleOrNull()?.let { JsonNumber(it) }
-            ?: throw JsonException("「$token」不是数字")
+        return JsonNumber(token)
     }
 
     private fun readLiteral(literal: String, value: Json): Json {

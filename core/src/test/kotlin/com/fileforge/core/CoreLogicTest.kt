@@ -406,6 +406,20 @@ class CrossConversionCatalogTest {
 class OperationLabelTest {
 
     @Test
+    fun `数据格式三个操作只摆在文本上`() {
+        val text = OperationKind.applicable(setOf(FileKind.Text))
+        listOf(OperationKind.FormatJson, OperationKind.JsonToCsv, OperationKind.CsvToJson).forEach {
+            assertTrue(it in text, "${'$'}{it.label} 该摆在文本上")
+        }
+        // 压缩包与 PDF 上不许出现：选了必失败
+        listOf(FileKind.Zip, FileKind.Pdf, FileKind.Jpeg).forEach { kind ->
+            val ops = OperationKind.applicable(setOf(kind))
+            assertFalse(OperationKind.FormatJson in ops, "$kind 上不该有 JSON 格式化")
+            assertFalse(OperationKind.CsvToJson in ops, "$kind 上不该有 CSV 转 JSON")
+        }
+    }
+
+    @Test
     fun `操作名要真把参数拼进去，不能留下没展开的模板`() {
         // 界面按钮上写的就是这些字符串，`${target.label}` 没展开会直接糊在用户脸上
         listOf(
@@ -414,6 +428,12 @@ class OperationLabelTest {
             Operation.ConvertSubtitle(SubtitleFormat.Vtt),
             Operation.EncryptPdf("1234"),
             Operation.DecryptPdf("1234"),
+            Operation.FormatJson(pretty = true, indent = 4),
+            Operation.FormatJson(pretty = false),
+            Operation.JsonToCsv(),
+            Operation.CsvToJson(header = false),
+            Operation.UnpackArchive,
+            Operation.PackArchive,
         ).forEach {
             assertFalse(it.label.contains('$'), "「${it.label}」里有没展开的模板")
             assertFalse(it.label.contains('{'), "「${it.label}」里有没展开的模板")
@@ -421,5 +441,9 @@ class OperationLabelTest {
         assertEquals("转成 GBK（简体中文）（带 BOM）", Operation.ConvertTextEncoding(target = TextEncoding.Gbk, bom = true).label)
         assertEquals("转成 UTF-8", Operation.ConvertTextEncoding(target = TextEncoding.Utf8).label)
         assertEquals("字幕转为 WebVTT", Operation.ConvertSubtitle(SubtitleFormat.Vtt).label)
+        // 这几条的名字里带参数，最容易在改文案时把占位符漏出来
+        assertEquals("按 4 空格缩进", Operation.FormatJson(pretty = true, indent = 4).label)
+        assertEquals("压成一行", Operation.FormatJson(pretty = false).label)
+        assertEquals("转为 JSON（按数组摆）", Operation.CsvToJson(header = false).label)
     }
 }

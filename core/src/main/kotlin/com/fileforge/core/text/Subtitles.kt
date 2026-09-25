@@ -366,5 +366,5 @@ object Subtitles {
 
     /** 统一换行，并去掉开头可能残留的 BOM 字符（它会混进第一行文本里）。 */
     private fun normalize(source: String): String =
-        source.removePrefix("﻿").replace("\r\n", "\n").replace('\r', '\n')
+        source.removePrefix("\uFEFF").replace("\r\n", "\n").replace('\r', '\n')
 }

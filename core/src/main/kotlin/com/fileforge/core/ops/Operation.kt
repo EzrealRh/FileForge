@@ -1,6 +1,7 @@
 package com.fileforge.core.ops
 
 import com.fileforge.core.audio.AudioTarget
+import com.fileforge.core.data.Delimiter
 import com.fileforge.core.text.LineEnding
 import com.fileforge.core.text.SubtitleFormat
 import com.fileforge.core.text.TextEncoding
@@ -266,6 +267,39 @@ sealed interface Operation {
      */
     data object UnpackArchive : Operation {
         override val label get() = "解压"
+    }
+
+    /**
+     * JSON 格式化：缩进或压平，可选键排序与非 ASCII 转码。
+     *
+     * 数字**一律照抄原文**（`1.50` 不会变成 `1.5`）：格式化不该改写值的样子，
+     * 而大整数过一遍 double 还会真的丢位。
+     */
+    data class FormatJson(
+        val pretty: Boolean = true,
+        val indent: Int = 2,
+        val sortKeys: Boolean = false,
+        val ascii: Boolean = false,
+    ) : Operation {
+        override val label get() = if (pretty) "按 $indent 空格缩进" else "压成一行"
+    }
+
+    /** JSON 数组 → CSV。会丢什么由 [com.fileforge.core.data.TableBridge.losses] 说。 */
+    data class JsonToCsv(
+        val delimiter: Delimiter = Delimiter.Comma,
+        val ending: LineEnding = LineEnding.Lf,
+        val quoteAll: Boolean = false,
+    ) : Operation {
+        override val label get() = "转为 CSV 表格"
+    }
+
+    /** CSV → JSON 数组。[inferTypes] 默认关：`007` 与 `1.50` 猜错就再也回不去了。 */
+    data class CsvToJson(
+        val header: Boolean = true,
+        val inferTypes: Boolean = false,
+        val indent: Int = 2,
+    ) : Operation {
+        override val label get() = if (header) "转为 JSON（首行当列名）" else "转为 JSON（按数组摆）"
     }
 }
 
