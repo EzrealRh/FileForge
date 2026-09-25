@@ -1,0 +1,1 @@
+{"book":{"@id":"b-1","@lang":"zh-CN","title":[{"#text":"带子元素的标题","n":["内嵌"]}],"chapter":[{"@no":"1","heading":["开始"],"body":["里面可以有 <标签> 与 & 号"]},{"@no":"2","heading":["进阶"]}],"author":["甲","乙"],"empty":[null],"note":["实体 & 与 <尖括号>"]}}

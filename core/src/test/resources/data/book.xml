@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 这份夹具带注释：约定是丢掉，所以参照结构里不该有它 -->
+<book id="b-1" lang="zh-CN">
+  <title>带子元素的标题<n>内嵌</n></title>
+  <chapter no="1">
+    <heading>开始</heading>
+    <body><![CDATA[里面可以有 <标签> 与 & 号]]></body>
+  </chapter>
+  <chapter no="2">
+    <heading>进阶</heading>
+  </chapter>
+  <author>甲</author>
+  <author>乙</author>
+  <empty/>
+  <note>实体 &amp; 与 &lt;尖括号&gt;</note>
+</book>

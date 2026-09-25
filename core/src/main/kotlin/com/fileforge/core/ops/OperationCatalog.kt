@@ -36,6 +36,8 @@ enum class OperationKind(val label: String, val hint: String) {
     FormatJson("JSON 格式化", "缩进或压平、键排序；数字原文不被改写"),
     JsonToCsv("JSON 转 CSV", "对象数组拆成表，会丢什么都先说明"),
     CsvToJson("CSV 转 JSON", "首行当列名；默认不猜类型，007 不会变成 7"),
+    XmlToJson("XML 转 JSON", "属性加 @、子元素成数组；带 DTD 的不解析"),
+    JsonToXml("JSON 转 XML", "键当标签名，数组写成重复元素"),
     ;
 
     companion object {
@@ -70,7 +72,7 @@ enum class OperationKind(val label: String, val hint: String) {
             UnpackZip -> fileKind == FileKind.Zip
             // 数据格式这一族只看"是不是文本"，具体是不是合法 JSON / 长得对不对交给引擎判，
             // 判不动会直说 —— 与字幕那族同一个路子，不在类型层猜
-            FormatJson, JsonToCsv, CsvToJson -> fileKind == FileKind.Text
+            FormatJson, JsonToCsv, CsvToJson, XmlToJson, JsonToXml -> fileKind == FileKind.Text
         }
     }
 }

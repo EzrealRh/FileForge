@@ -1,0 +1,6 @@
+<order>
+  <item sku="A1"><price>12.50</price></item>
+  <item sku="B2"><price>7</price></item>
+  <total currency="CNY">19.50</total>
+  <remark/>
+</order>

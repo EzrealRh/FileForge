@@ -301,6 +301,19 @@ sealed interface Operation {
     ) : Operation {
         override val label get() = if (header) "转为 JSON（首行当列名）" else "转为 JSON（按数组摆）"
     }
+
+    /**
+     * XML → JSON。约定写在 `:core` 的 Xml 头部：子元素一律成数组、属性加 `@`、
+     * 元素自己的文字进 `#text`、注释与处理指令丢掉、带 DTD 的一律不解析。
+     */
+    data class XmlToJson(val indent: Int = 2) : Operation {
+        override val label get() = "转为 JSON"
+    }
+
+    /** JSON → XML。[root] 为空时用源文件名当根元素名。 */
+    data class JsonToXml(val root: String = "", val indent: Int = 2) : Operation {
+        override val label get() = "转为 XML"
+    }
 }
 
 enum class PdfPaper(val label: String) { A4("A4"), A5("A5"), Letter("Letter"), FitImage("按图片尺寸") }

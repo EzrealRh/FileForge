@@ -408,7 +408,10 @@ class OperationLabelTest {
     @Test
     fun `数据格式三个操作只摆在文本上`() {
         val text = OperationKind.applicable(setOf(FileKind.Text))
-        listOf(OperationKind.FormatJson, OperationKind.JsonToCsv, OperationKind.CsvToJson).forEach {
+        listOf(
+            OperationKind.FormatJson, OperationKind.JsonToCsv, OperationKind.CsvToJson,
+            OperationKind.XmlToJson, OperationKind.JsonToXml,
+        ).forEach {
             assertTrue(it in text, "${'$'}{it.label} 该摆在文本上")
         }
         // 压缩包与 PDF 上不许出现：选了必失败
@@ -434,6 +437,8 @@ class OperationLabelTest {
             Operation.CsvToJson(header = false),
             Operation.UnpackArchive,
             Operation.PackArchive,
+            Operation.XmlToJson(),
+            Operation.JsonToXml(root = "catalog"),
         ).forEach {
             assertFalse(it.label.contains('$'), "「${it.label}」里有没展开的模板")
             assertFalse(it.label.contains('{'), "「${it.label}」里有没展开的模板")
@@ -445,5 +450,7 @@ class OperationLabelTest {
         assertEquals("按 4 空格缩进", Operation.FormatJson(pretty = true, indent = 4).label)
         assertEquals("压成一行", Operation.FormatJson(pretty = false).label)
         assertEquals("转为 JSON（按数组摆）", Operation.CsvToJson(header = false).label)
+        assertEquals("转为 JSON", Operation.XmlToJson().label)
+        assertEquals("转为 XML", Operation.JsonToXml().label)
     }
 }
