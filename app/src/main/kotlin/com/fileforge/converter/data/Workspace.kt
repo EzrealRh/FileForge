@@ -6,6 +6,8 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import com.fileforge.core.model.BatchLineage
 import com.fileforge.core.model.FileKind
+import com.fileforge.core.archive.ZipReader
+import com.fileforge.core.office.OoxmlParts
 import com.fileforge.core.model.FileTypeSniffer
 import com.fileforge.core.naming.OutputNaming
 import com.fileforge.core.util.SizeInput
@@ -191,9 +193,18 @@ class Workspace(context: Context) {
         file.inputStream().use { stream ->
             val read = stream.read(header)
             if (read in 0 until header.size) header.copyOf(read) else header
-        }
-        FileTypeSniffer.sniff(header)
+        }.let { FileTypeSniffer.sniff(it) }
+            // OOXML 的身份证据是包里的部件名，头 64 字节看不出来：是 zip 就再开一次目录看一眼
+            .let { if (it == FileKind.Zip) ooxmlKind(file) else it }
     }.getOrDefault(FileKind.Unknown)
+
+    /** 开不了目录、目录读坏了的都算回普通 zip：具体哪里坏，引擎那边会照着文件说。 */
+    private fun ooxmlKind(file: File): FileKind {
+        val slices = runCatching { FileSlices(file) }.getOrNull() ?: return FileKind.Zip
+        return runCatching {
+            OoxmlParts.kindOf(ZipReader.read(slices, file.length()).entries.map { entry -> entry.name })
+        }.getOrDefault(FileKind.Zip).also { runCatching { slices.close() } }
+    }
 
     companion object {
         fun displayNameOf(resolver: ContentResolver, uri: Uri): String {

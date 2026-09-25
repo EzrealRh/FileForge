@@ -6,6 +6,7 @@ import com.fileforge.core.archive.UnpackPlan
 import com.fileforge.core.archive.ZipItem
 import com.fileforge.core.archive.ZipSink
 import com.fileforge.core.archive.ZipReader
+import com.fileforge.converter.data.FileSlices
 import com.fileforge.core.archive.ZipWriter
 import com.fileforge.core.naming.OutputNaming
 import com.fileforge.core.ops.Operation
@@ -85,27 +86,6 @@ class ArchiveEngine {
 }
 
 /** 一个文件背后的"按区间取字节"：中央目录在末尾、条目数据散在各处，整份搬进堆没道理。 */
-internal class FileSlices(private val file: File) : ByteSlice, AutoCloseable {
-    private val handle = RandomAccessFile(file, "r")
-
-    override fun slice(from: Long, to: Long): ByteArray {
-        val start = from.coerceAtLeast(0L)
-        val stop = to.coerceAtMost(file.length())
-        if (stop <= start) return ByteArray(0)
-        val buffer = ByteArray((stop - start).toInt())
-        return try {
-            handle.seek(start)
-            handle.readFully(buffer)
-            buffer
-        } catch (end: java.io.EOFException) {
-            throw IllegalStateException("文件比它声称的短，读到第 ${start / 1024} KB 就没了", end)
-        }
-    }
-
-    override fun close() {
-        handle.close()
-    }
-}
 
 /** staging 文件上的回写落点：本地头的长度要压完才能回填，所以得能 seek。 */
 internal class FileZipSink(file: File) : ZipSink, AutoCloseable {

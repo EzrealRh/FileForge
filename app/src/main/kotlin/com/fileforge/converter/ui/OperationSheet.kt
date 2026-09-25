@@ -518,6 +518,23 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
                 Summary("一次出多个尺寸：系统按用途挑合适的那张，只给一个尺寸时在别的场合会被强制缩放而发虚。")
                 Summary("非方图先缩到短边等于目标尺寸、再居中裁方，不会拉扁。")
             }
+            OperationKind.OfficeToText -> {
+                Summary("段落一段一行；表格拍平成行，单元格之间用制表符。")
+                Summary("图片、页眉页脚、脚注正文这些搬不过来，抽完在结果里逐条写明丢了什么。")
+                Summary("只认 Office 2007 起的 zip 容器（docx / pptx）；老式 .doc / .ppt 认不出会直说，不猜。")
+            }
+            OperationKind.XlsxToCsv -> {
+                PickerRow("分隔符", Delimiter.entries.map { it.label }, Delimiter.entries.indexOf(csvDelimiter)) {
+                    csvDelimiter = Delimiter.entries[it]
+                }
+                Segmented("换行", LineEnding.entries.map { it.label }, LineEnding.entries.indexOf(csvEnding)) {
+                    csvEnding = LineEnding.entries[it]
+                }
+                Summary("每张表出一份 CSV，表名进文件名；只有一张表时不加后缀。")
+                Summary("日期格子按样式认出来再转成 ISO 写法 —— 不认样式的话，转出来是 45047 这种序列号。")
+                Summary("数字照文件里的写法原样搬：1.50 不会变成 1.5，007 不会变成 7。")
+                Summary("公式给的是文件里存着的**算过的结果**；没算过的格子（比如别的工具刚写完还没打开过的）会是空格，并写明有几格。")
+            }
             OperationKind.IcoToImages -> {
                 Summary("PNG 内嵌的那种直接把内嵌字节原样取出，不重新编码；老式位图（DIB）的要重建像素再编 PNG。")
                 Summary("一个图标里有几个尺寸就出几张图，名字带序号。")
@@ -689,6 +706,8 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
                 textSize.roundToInt(), paper, textMargin.roundToInt(), textLeading, textIndent, textNumber,
             )
             OperationKind.ImageToIco -> Operation.ImageToIco(icoSizes())
+            OperationKind.OfficeToText -> Operation.OfficeToText
+            OperationKind.XlsxToCsv -> Operation.XlsxToCsv(csvDelimiter, csvEnding)
             OperationKind.IcoToImages -> Operation.IcoToImages
         }
     }

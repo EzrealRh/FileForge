@@ -157,4 +157,28 @@ class FileKindSniffTest {
         assertEquals(listOf(OperationKind.PackZip), OperationKind.applicable(setOf(FileKind.Mp3, FileKind.Jpeg)))
         assertTrue(OperationKind.applicable(setOf(FileKind.Pdf)).isNotEmpty())
     }
+
+    @Test
+    fun `Office 三种类型各拿自己的操作`() {
+        val docx = OperationKind.applicable(setOf(FileKind.Docx))
+        assertTrue(OperationKind.OfficeToText in docx, "docx 该能抽文字：$docx")
+        assertTrue(OperationKind.TextToPdf in docx, "docx 抽完就能排版印成 PDF：$docx")
+        assertTrue(OperationKind.XlsxToCsv !in docx, "docx 没有格子可转 CSV")
+        assertTrue(OperationKind.ImageToIco !in docx, "文档不该拿到图片操作：$docx")
+
+        val pptx = OperationKind.applicable(setOf(FileKind.Pptx))
+        assertTrue(OperationKind.OfficeToText in pptx && OperationKind.XlsxToCsv !in pptx, "pptx: $pptx")
+
+        val xlsx = OperationKind.applicable(setOf(FileKind.Xlsx))
+        assertTrue(OperationKind.XlsxToCsv in xlsx, "xlsx 该能转 CSV：$xlsx")
+        assertTrue(OperationKind.OfficeToText !in xlsx, "表格不是连着读的正文：$xlsx")
+
+        // 纯文本没有"丢图"这一说，抽取操作不给它
+        assertTrue(OperationKind.OfficeToText !in OperationKind.applicable(setOf(FileKind.Text)))
+        // docx 和 txt 混着选：只剩两条路都走得通的操作
+        assertEquals(
+            setOf(OperationKind.TextToPdf, OperationKind.PackZip),
+            OperationKind.applicable(setOf(FileKind.Docx, FileKind.Text)).toSet(),
+        )
+    }
 }

@@ -11,8 +11,10 @@ import com.fileforge.core.meta.ImageMeta
 import com.fileforge.core.model.FileKind
 import com.fileforge.core.util.SizeInput
 import com.fileforge.converter.data.WorkItem
+import com.fileforge.converter.data.FileSlices
 import com.tom_roush.pdfbox.io.MemoryUsageSetting
 import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.fileforge.core.office.Xlsx
 import java.io.File
 import java.text.DateFormat
 import java.util.Date
@@ -41,6 +43,8 @@ class MetaReader {
             when {
                 item.kind == FileKind.Gif -> facts += gifFacts(item.file)
                 item.kind == FileKind.Zip -> facts += zipFacts(item.file)
+                item.kind == FileKind.Docx || item.kind == FileKind.Pptx || item.kind == FileKind.Xlsx ->
+                    facts += officeFacts(item.file, item.kind)
                 item.kind == FileKind.Ico -> facts += icoFacts(item.file)
                 item.kind == FileKind.Pdf -> facts += pdfFacts(item.file)
                 item.kind.isVideo -> facts += videoFacts(item.file)
@@ -165,6 +169,39 @@ class MetaReader {
             runCatching { slices.close() }
         }
     }
+
+    /**
+     * Office 文档的详情：不转换也能先看一眼有多大、会丢什么。
+     *
+     * 只按部件区间读，不整包进堆 —— 带视频的 pptx 几百 MB 是常态。
+     */
+    private fun officeFacts(file: File, kind: FileKind): List<Pair<String, String>> =
+        if (kind == FileKind.Xlsx) {
+            OoxmlFile(file).use { pack ->
+                val strings = Xlsx.sharedStrings(pack.bytesOf(Xlsx.SHARED_STRINGS))
+                val styles = Xlsx.dateStyles(pack.bytesOf(Xlsx.STYLES))
+                val refs = pack.sheetRefs()
+                buildList {
+                    add("表" to "${refs.size} 张")
+                    refs.take(META_LINES).forEach { ref ->
+                        val bytes = ref.part?.let { pack.bytesOf(it) }
+                        val size = if (bytes == null) "部件读不出来"
+                        else Xlsx.sheet(ref.name, bytes, strings, styles).rows.let {
+                            "${it.size} 行 × ${(it.maxOfOrNull { row -> row.size } ?: 0)} 列"
+                        }
+                        add(ref.name to size)
+                    }
+                    if (refs.size > META_LINES) add("其余的表" to "${refs.size - META_LINES} 张未列出")
+                }
+            }
+        } else {
+            val text = OfficeSource.text(file, kind)
+            buildList {
+                add("正文" to "${text.text.count { it == '\n' }} 行 · ${text.text.length} 字")
+                if (text.losses.isEmpty()) add("转文字会丢" to "没检测到要丢的东西")
+                else add("转文字会丢" to text.losses.joinToString("、"))
+            }
+        }
 
     /** 图标里有几帧、每帧多大：一个 .ico 可以同时装 16 到 256 的好几张。 */
     private fun icoFacts(file: File): List<Pair<String, String>> {

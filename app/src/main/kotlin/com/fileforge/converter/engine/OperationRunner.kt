@@ -27,6 +27,7 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
     private val audio = AudioEngine(workspace)
     private val text = TextEngine(workspace)
     private val archives = ArchiveEngine()
+    private val office = OfficeEngine(workspace)
 
     suspend fun run(
         items: List<WorkItem>,
@@ -167,6 +168,12 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
             }
             is Operation.TextToPdf -> items.forEach { item ->
                 collect(item.name) { listOf(pdf.textToPdf(item, operation)) }
+            }
+            is Operation.OfficeToText -> items.forEach { item ->
+                collect(item.name) { listOf(office.toText(item)) }
+            }
+            is Operation.XlsxToCsv -> items.forEach { item ->
+                collect(item.name) { office.toCsv(item, operation.delimiter, operation.ending) }
             }
         }
 

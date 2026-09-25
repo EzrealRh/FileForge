@@ -20,12 +20,10 @@ import com.fileforge.converter.data.Workspace
  * 判断全在 `:core`（TextCodecs、Subtitles），这里只负责读写 —— 这两条路上没有任何安卓 API，
  * 所以判据都能在纯 JVM 上跑单测，真机只负责点按钮。
  */
-class TextEngine(private val workspace: Workspace) {
+/** 手机上没人拿几百 MB 的文本转编码或印成 PDF；这条是防爆内存的上限，不是功能限制。 */
+internal const val MAX_TEXT_BYTES = 64L * 1024 * 1024
 
-    private companion object {
-        /** 手机上没人拿几百 MB 的文本转编码；这条是防爆内存的上限，不是功能限制。 */
-        const val MAX_TEXT_BYTES = 64L * 1024 * 1024
-    }
+class TextEngine(private val workspace: Workspace) {
 
     /** 换编码，顺带统一换行风格。目标装不下的字要数出来，不能悄悄换成问号。 */
     fun convertText(item: WorkItem, operation: Operation.ConvertTextEncoding): EngineOutput {

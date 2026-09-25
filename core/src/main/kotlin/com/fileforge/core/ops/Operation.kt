@@ -343,6 +343,24 @@ sealed interface Operation {
         override val label get() = "印成 PDF"
     }
 
+    /**
+     * 从 .docx / .pptx 里抽正文文字，存成 UTF-8 的 txt。
+     *
+     * 图片、页眉页脚、脚注正文这些搬不过来，抽的时候会逐条写明丢了什么 ——
+     * 一份"看着挺全"少了脚注的文本，比一份写明少了三条脚注的更难被查出来。
+     */
+    data object OfficeToText : Operation {
+        override val label get() = "提取文档文字"
+    }
+
+    /** .xlsx 每张表转一份 CSV。日期照样式认出来的样子写，数字写法原样搬。 */
+    data class XlsxToCsv(
+        val delimiter: Delimiter = Delimiter.Comma,
+        val ending: LineEnding = LineEnding.Lf,
+    ) : Operation {
+        override val label get() = "表格转 CSV"
+    }
+
     /** 把 .ico 里的每一帧画面导成 PNG。 */
     data object IcoToImages : Operation {
         override val label get() = "导出图标里的画面"

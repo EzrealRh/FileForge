@@ -52,6 +52,8 @@ import com.tom_roush.pdfbox.pdmodel.encryption.StandardProtectionPolicy
 import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject
 import com.tom_roush.pdfbox.text.PDFTextStripper
 import com.tom_roush.pdfbox.util.Matrix
+import com.fileforge.core.model.FileKind
+import com.fileforge.core.office.Extracted
 import java.io.Closeable
 import java.io.File
 import kotlin.math.cos
@@ -566,7 +568,20 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
      * 把宽度那把尺子换成真字体量出来的数，以及把排好的行画上去。
      */
     fun textToPdf(item: WorkItem, operation: Operation.TextToPdf): EngineOutput {
-        val decoded = com.fileforge.core.text.TextCodecs.decodeForConversion(item.file.readBytes(), null)
+        // docx / pptx 先抽正文再排版：排的是抽出来的那份文字，所以"丢了什么"由抽取那一层说
+        val body = when (item.kind) {
+            FileKind.Docx, FileKind.Pptx -> OfficeSource.text(item.file, item.kind)
+            else -> {
+                require(item.file.length() <= MAX_TEXT_BYTES) {
+                    "这份文本 ${item.file.length() / 1024 / 1024} MB，超过 ${MAX_TEXT_BYTES / 1024 / 1024} MB 上限"
+                }
+                val decoded = com.fileforge.core.text.TextCodecs.decodeForConversion(item.file.readBytes(), null)
+                Extracted(
+                    decoded.text,
+                    listOf("按 ${decoded.encoding.label} 读" + if (decoded.hadBom) "（源带 BOM）" else ""),
+                )
+            }
+        }
         val document = PDDocument()
         var handle: FontHandle? = null
         val missing = intArrayOf(0)
@@ -581,10 +596,10 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
                 .coerceIn(0, (minOf(rectangle.width, pageHeight) / 4).toInt())
                 .toFloat()
             val size = operation.fontSize.toFloat()
-            handle = fontFor(document, decoded.text.take(4000))
+            handle = fontFor(document, body.text.take(4000))
             val font = handle.font
             val layout = TextLayoutPlanner.layout(
-                text = decoded.text,
+                text = body.text,
                 pageWidth = rectangle.width,
                 pageHeight = pageHeight - if (operation.numberPages) size * 2.5f else 0f,
                 margin = margin,
@@ -616,7 +631,7 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
             val output = workspace.newStagingFile("pdf")
             document.save(output)
             val notes = ArrayList<String>()
-            notes += "按 ${decoded.encoding.label} 读" + if (decoded.hadBom) "（源带 BOM）" else ""
+            notes += body.losses
             notes += "${layout.pageCount} 页 · ${size.toInt()}pt · ${operation.paper.label}"
             if (missing[0] > 0) notes += "选中字体没有 ${missing[0]} 个字，这些位置会缺字"
             layout.notes.forEach { notes += it }
