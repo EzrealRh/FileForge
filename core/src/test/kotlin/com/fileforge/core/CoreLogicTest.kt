@@ -5,12 +5,15 @@ import com.fileforge.core.model.BatchLineage
 import com.fileforge.core.model.DayGroup
 import com.fileforge.core.model.FileKind
 import com.fileforge.core.naming.OutputNaming
+import com.fileforge.core.ops.Operation
 import com.fileforge.core.ops.OperationKind
 import com.fileforge.core.pdf.PageGroups
 import com.fileforge.core.pdf.PageRangeException
 import com.fileforge.core.pdf.PdfCompressPlan
 import com.fileforge.core.pdf.PageRangeParser
 import com.fileforge.core.pdf.SplitPlanner
+import com.fileforge.core.text.SubtitleFormat
+import com.fileforge.core.text.TextEncoding
 import com.fileforge.core.util.SizeInput
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -371,5 +374,37 @@ class CrossConversionCatalogTest {
     @Test
     fun `混选时只留两边都能做的操作`() {
         assertTrue(OperationKind.applicable(setOf(FileKind.Gif, FileKind.Pdf)).isEmpty())
+    }
+
+    @Test
+    fun `清元数据只给 JPEG 和 PNG，别的支持不了的容器不给入口`() {
+        assertTrue(OperationKind.CleanMetadata in OperationKind.applicable(setOf(FileKind.Jpeg)))
+        assertTrue(OperationKind.CleanMetadata in OperationKind.applicable(setOf(FileKind.Png)))
+        // 混选一张 GIF 就该把入口拿掉，不然批量跑起来必然有一半报错
+        assertFalse(OperationKind.CleanMetadata in OperationKind.applicable(setOf(FileKind.Png, FileKind.Gif)))
+        for (kind in listOf(FileKind.WebP, FileKind.Bmp, FileKind.Heic, FileKind.Avif, FileKind.Gif)) {
+            assertFalse(OperationKind.CleanMetadata in OperationKind.applicable(setOf(kind)), "$kind 还没做，不该给入口")
+        }
+    }
+}
+
+class OperationLabelTest {
+
+    @Test
+    fun `操作名要真把参数拼进去，不能留下没展开的模板`() {
+        // 界面按钮上写的就是这些字符串，`${target.label}` 没展开会直接糊在用户脸上
+        listOf(
+            Operation.ConvertTextEncoding(target = TextEncoding.Gbk, bom = true),
+            Operation.ConvertTextEncoding(target = TextEncoding.Utf8),
+            Operation.ConvertSubtitle(SubtitleFormat.Vtt),
+            Operation.EncryptPdf("1234"),
+            Operation.DecryptPdf("1234"),
+        ).forEach {
+            assertFalse(it.label.contains('$'), "「${it.label}」里有没展开的模板")
+            assertFalse(it.label.contains('{'), "「${it.label}」里有没展开的模板")
+        }
+        assertEquals("转成 GBK（简体中文）（带 BOM）", Operation.ConvertTextEncoding(target = TextEncoding.Gbk, bom = true).label)
+        assertEquals("转成 UTF-8", Operation.ConvertTextEncoding(target = TextEncoding.Utf8).label)
+        assertEquals("字幕转为 WebVTT", Operation.ConvertSubtitle(SubtitleFormat.Vtt).label)
     }
 }

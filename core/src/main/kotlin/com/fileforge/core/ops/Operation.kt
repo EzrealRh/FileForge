@@ -171,7 +171,7 @@ sealed interface Operation {
         val bom: Boolean = false,
         val ending: LineEnding = LineEnding.Lf,
     ) : Operation {
-        override val label get() = if (bom) "转成 ${'$'}{target.label}（带 BOM）" else "转成 ${'$'}target.label"
+        override val label get() = if (bom) "转成 ${target.label}（带 BOM）" else "转成 ${target.label}"
     }
 
     /** 字幕 / 歌词转格式。源格式由扩展名和各解析器定，转过去会丢什么由格式自己声明。 */
@@ -179,7 +179,7 @@ sealed interface Operation {
         val target: SubtitleFormat = SubtitleFormat.Srt,
         val source: TextEncoding? = null,
     ) : Operation {
-        override val label get() = "字幕转为 ${'$'}target.label"
+        override val label get() = "字幕转为 ${target.label}"
     }
 
     /**
@@ -244,6 +244,15 @@ sealed interface Operation {
     /** 提取文字层成 txt；spec 留空表示全文，多段用页码范围写。 */
     data class PdfToText(val spec: String = "") : Operation {
         override val label get() = "提取文字"
+    }
+
+    /**
+     * 清掉图片里的身份信息（EXIF / GPS / 机型 / 软件 / 注释），像素数据**一字节都不重编码**。
+     *
+     * 没有参数：要清什么由段的性质决定，见 [com.fileforge.core.meta.ImageMeta]。
+     */
+    data object CleanMetadata : Operation {
+        override val label get() = "清除元数据"
     }
 }
 

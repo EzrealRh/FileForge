@@ -30,6 +30,7 @@ enum class OperationKind(val label: String, val hint: String) {
     ConvertTextEncoding("文本转编码", "GBK / UTF-8 / Big5 互转，顺带统一换行"),
     ConvertSubtitle("字幕转格式", "SRT / VTT / LRC / ASS 互转"),
     ExtractAudio("提取音频", "把视频里的声音拿出来"),
+    CleanMetadata("清除图片元数据", "删掉 EXIF / GPS / 机型 / 注释，像素不重新编码"),
     ;
 
     companion object {
@@ -56,6 +57,9 @@ enum class OperationKind(val label: String, val hint: String) {
             ConvertTextEncoding, ConvertSubtitle -> fileKind == FileKind.Text
             // 只有真带画面的类型才给"提取音频"，否则用户会对一个纯音频文件点它
             ExtractAudio -> fileKind.isVideo
+            // 只放开了 JPEG 和 PNG：这两种容器的清理能做到段级照抄。
+            // GIF / WebP / HEIC 的元数据规则各不相同，没做透就不给入口，免得产出一张坏图
+            CleanMetadata -> fileKind == FileKind.Jpeg || fileKind == FileKind.Png
         }
     }
 }

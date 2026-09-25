@@ -1,0 +1,10 @@
+make=MakeTest
+model=ModelTest-1
+date_time=2026:01:02 03:04:05
+orientation=6
+gps_lat=30.0,15.0,30.0
+gps_lon=120.0,6.0,0.0
+gps_refs=N,E
+markers=APP0,APP1,APP2,COM
+bytes=1155
+scan_sha=f0afae99bc66d836ba868301534b480009da1dd2b57e480eaf0c7754d3a5f63c
