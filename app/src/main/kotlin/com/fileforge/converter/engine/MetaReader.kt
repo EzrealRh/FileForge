@@ -3,6 +3,7 @@ package com.fileforge.converter.engine
 import android.graphics.BitmapFactory
 import android.media.MediaExtractor
 import android.media.MediaFormat
+import com.fileforge.core.audio.AudioPlan
 import com.fileforge.core.gif.GifDecoder
 import com.fileforge.core.model.FileKind
 import com.fileforge.core.util.SizeInput
@@ -38,6 +39,7 @@ class MetaReader {
                 item.kind == FileKind.Gif -> facts += gifFacts(item.file)
                 item.kind == FileKind.Pdf -> facts += pdfFacts(item.file)
                 item.kind.isVideo -> facts += videoFacts(item.file)
+                item.kind.isAudio -> facts += audioFacts(item.file)
                 item.kind.isImage -> facts += imageFacts(item.file)
                 else -> Unit
             }
@@ -163,6 +165,28 @@ class MetaReader {
                     format.integerOrNull(MediaFormat.KEY_CHANNEL_COUNT)?.let { add("声道" to "$it") }
                     format.integerOrNull(MediaFormat.KEY_SAMPLE_RATE)?.let { add("采样率" to "${it / 1000} kHz") }
                 }
+            }
+        } finally {
+            runCatching { extractor.release() }
+        }
+    }
+
+    /** 纯音频文件详情：不写这一条的话 M4A 和 WAV 在列表里只看得出扩展名。 */
+    private fun audioFacts(file: File): List<Pair<String, String>> {
+        val extractor = MediaExtractor()
+        return try {
+            extractor.setDataSource(file.absolutePath)
+            val mimes = (0 until extractor.trackCount)
+                .map { runCatching { extractor.getTrackFormat(it).stringOrNull(MediaFormat.KEY_MIME) }.getOrNull() }
+            val track = AudioPlan.pickAudioTrack(mimes)
+            if (track < 0) return listOf("音轨" to "读不到音频轨")
+            val format = extractor.getTrackFormat(track)
+            buildList {
+                add("编码" to (mimes[track]?.substringAfter('/')?.uppercase() ?: "未知"))
+                format.longOrNull(MediaFormat.KEY_DURATION)?.let { add("时长" to "%.1f 秒".format(it / 1_000_000f)) }
+                format.integerOrNull(MediaFormat.KEY_SAMPLE_RATE)?.let { add("采样率" to "${it / 1000} kHz") }
+                format.integerOrNull(MediaFormat.KEY_CHANNEL_COUNT)?.let { add("声道" to "$it") }
+                format.integerOrNull(MediaFormat.KEY_BIT_RATE)?.let { add("码率" to "${it / 1000} kbps") }
             }
         } finally {
             runCatching { extractor.release() }

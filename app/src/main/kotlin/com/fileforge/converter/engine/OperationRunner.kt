@@ -24,6 +24,7 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
     private val gifs = GifEngine(workspace, images)
     private val pdf = PdfEngine(context, workspace)
     private val video = VideoEngine(workspace, images)
+    private val audio = AudioEngine(workspace)
 
     suspend fun run(
         items: List<WorkItem>,
@@ -114,6 +115,11 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
             }
             is Operation.VideoToImage -> items.forEach { item ->
                 collect(item.name) { listOf(video.still(item, operation)) }
+            }
+            is Operation.AudioConvert -> items.forEach { item ->
+                collect(item.name) {
+                    listOf(audio.convert(item, operation) { percent -> onProgress(percent, item.name) })
+                }
             }
         }
 

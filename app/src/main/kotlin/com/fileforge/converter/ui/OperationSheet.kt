@@ -41,6 +41,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.fileforge.core.audio.AudioTarget
 import com.fileforge.core.model.FileKind
 import com.fileforge.core.ops.ImageFormat
 import com.fileforge.core.ops.Operation
@@ -154,6 +155,8 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
     var firstFrameOnly by mutableStateOf(false)
     var videoFormat by mutableStateOf(VideoFormat.Mp4)
     var videoByTarget by mutableStateOf(false)
+    var audioTarget by mutableStateOf(AudioTarget.M4a)
+    var audioByTarget by mutableStateOf(false)
     var bitrate by mutableStateOf(2500f)
     var startSecondText by mutableStateOf("")
     var durationSecondText by mutableStateOf("")
@@ -324,6 +327,24 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
                 }
                 Summary("硬解硬编，全程不进 Java 堆；WebM 只出画面不带音轨；不改分辨率")
             }
+            OperationKind.ConvertAudio, OperationKind.ExtractAudio -> {
+                Segmented("目标格式", AudioTarget.entries.map { it.label }, audioTarget.ordinal) {
+                    audioTarget = AudioTarget.entries[it]
+                }
+                Segmented("取法", listOf("跟随源码率", "按目标体积"), if (audioByTarget) 1 else 0) {
+                    audioByTarget = it == 1
+                }
+                if (audioByTarget) {
+                    SizeField("目标体积 MB", targetSizeText) { targetSizeText = it }
+                    Summary("按时长反推码率，落在 64~320 kbps 之间（系统 AAC 编码器就吃这个范围）。")
+                }
+                if (kind == OperationKind.ExtractAudio) {
+                    Summary("源音轨本来就是 AAC 时直接搬出来，不重编、无损；其它编码会解码重编。")
+                } else {
+                    Summary("WAV 是解码出来的无损裸数据，成品会比 M4A 大一大截。")
+                }
+                Summary("系统没有 MP3 编码器，所以转不成 mp3 —— 只给 M4A 和 WAV 两个目标。")
+            }
         }
     }
 
@@ -345,7 +366,8 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
         val needsTarget = kind == OperationKind.SplitPdfBySize ||
             (kind == OperationKind.CompressImage && targetSizeText.isNotBlank()) ||
             (kind == OperationKind.CompressVideo && videoByTarget) ||
-            (kind == OperationKind.CompressPdf && pdfByTarget)
+            (kind == OperationKind.CompressPdf && pdfByTarget) ||
+            ((kind == OperationKind.ConvertAudio || kind == OperationKind.ExtractAudio) && audioByTarget)
         if (needsTarget && SizeInput.parse(targetSizeText) == null) return "目标体积写成 10 或 1.5MB 这样"
         if (kind == OperationKind.ExtractPdfPages && pageSpec.isBlank()) return "先写要取哪些页"
         if (kind == OperationKind.RemovePdfPages && pageSpec.isBlank()) return "先写要删哪些页"
@@ -403,6 +425,9 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
             OperationKind.CompressVideo -> Operation.CompressVideo(
                 videoFormat, bitrate.roundToInt(), 0, 96,
                 if (videoByTarget) targetBytes else null,
+            )
+            OperationKind.ConvertAudio, OperationKind.ExtractAudio -> Operation.AudioConvert(
+                audioTarget, if (audioByTarget) targetBytes else null,
             )
         }
     }

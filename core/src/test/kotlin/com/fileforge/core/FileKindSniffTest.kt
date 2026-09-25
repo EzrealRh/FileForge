@@ -101,10 +101,29 @@ class FileKindSniffTest {
     }
 
     @Test
-    fun `音频现在还没有可做的操作时不许凭空冒出来`() {
-        // 音频类型进得来工作台，但操作目录没配音频操作之前，可用列表必须是空的：
-        // 给一个"点了必崩"的操作比给一个"暂时不能做"更糟
-        assertEquals(emptyList<Any>(), OperationKind.applicable(setOf(FileKind.Mp3)))
-        assertTrue(OperationKind.applicable(setOf(FileKind.Pdf)).all { it.name.isNotEmpty() })
+    fun `音频只拿到音频操作`() {
+        // 这一条钉的是"别把不相干的操作摆在音频上"：图片转换、PDF、GIF 那些
+        // 混进来就是点了必崩的按钮
+        listOf(FileKind.Mp3, FileKind.Aac, FileKind.M4a, FileKind.Flac, FileKind.Ogg, FileKind.Wav).forEach {
+            assertEquals(listOf(OperationKind.ConvertAudio), OperationKind.applicable(setOf(it)), "$it 只该给音频转换")
+        }
+    }
+
+    @Test
+    fun `视频能提取音频而图片不能`() {
+        val video = OperationKind.applicable(setOf(FileKind.Mp4))
+        assertTrue(OperationKind.ExtractAudio in video, "MP4 该能提取音频")
+        assertTrue(OperationKind.ConvertAudio !in video, "视频本身不是音频转换的输入")
+        val image = OperationKind.applicable(setOf(FileKind.Jpeg))
+        assertFalse(OperationKind.ExtractAudio in image)
+        assertFalse(OperationKind.ConvertAudio in image)
+    }
+
+    @Test
+    fun `混选时只留两边都能做的操作`() {
+        // 选了一个 mp3 一个 jpg：没有任何共同操作，界面应当什么都不给，
+        // 而不是摆一个只对一半文件有效、跑完静默跳过另一半的按钮
+        assertEquals(emptyList<Any>(), OperationKind.applicable(setOf(FileKind.Mp3, FileKind.Jpeg)))
+        assertTrue(OperationKind.applicable(setOf(FileKind.Pdf)).isNotEmpty())
     }
 }

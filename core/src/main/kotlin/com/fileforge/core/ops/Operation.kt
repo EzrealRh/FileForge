@@ -1,5 +1,6 @@
 package com.fileforge.core.ops
 
+import com.fileforge.core.audio.AudioTarget
 import com.fileforge.core.pdf.PageNumberPlan
 import com.fileforge.core.pdf.StampSpot
 
@@ -124,6 +125,19 @@ sealed interface Operation {
         val targetBytes: Long? = null,
     ) : Operation {
         override val label get() = if (targetBytes != null) "压到 ${targetLabel(targetBytes)} 以内" else "压缩视频"
+    }
+
+    /**
+     * 音频转格式 / 从视频里提声音。目标只有两个是安卓真的编得出来、解得开的：
+     * M4A(AAC) 和 WAV —— 系统没有 MP3 编码器，所以"转成 mp3"这条做不了，不给选项。
+     * 给 targetBytes 就按时长反推码率（见 [com.fileforge.core.audio.AudioPlan]）。
+     */
+    data class AudioConvert(
+        val target: AudioTarget = AudioTarget.M4a,
+        val targetBytes: Long? = null,
+    ) : Operation {
+        override val label get() = if (targetBytes != null) "转成 ${target.label}（约 ${targetLabel(targetBytes)}）"
+        else "转成 ${target.label}"
     }
 
     /**
