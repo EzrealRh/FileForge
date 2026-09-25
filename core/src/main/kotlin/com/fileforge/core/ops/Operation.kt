@@ -254,6 +254,19 @@ sealed interface Operation {
     data object CleanMetadata : Operation {
         override val label get() = "清除元数据"
     }
+
+    /** 多份文件压成一个 zip。包名取第一份文件的名字，条目名重名会自动编号。 */
+    data object PackArchive : Operation {
+        override val label get() = "打包成 ZIP"
+    }
+
+    /**
+     * 解开 zip。一次给出一批产物，目录结构压进文件名而不真的建目录 ——
+     * 既因为工作台是平的，也因为不拿条目名拼路径就结构性地挡掉了 `../../` 那类穿越。
+     */
+    data object UnpackArchive : Operation {
+        override val label get() = "解压"
+    }
 }
 
 enum class PdfPaper(val label: String) { A4("A4"), A5("A5"), Letter("Letter"), FitImage("按图片尺寸") }

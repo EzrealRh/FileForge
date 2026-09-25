@@ -107,9 +107,13 @@ class FileKindSniffTest {
     @Test
     fun `音频只拿到音频操作`() {
         // 这一条钉的是"别把不相干的操作摆在音频上"：图片转换、PDF、GIF 那些
-        // 混进来就是点了必崩的按钮
+        // 混进来就是点了必崩的按钮。PackZip 是唯一的例外 —— 打包对任何类型都成立。
         listOf(FileKind.Mp3, FileKind.Aac, FileKind.M4a, FileKind.Flac, FileKind.Ogg, FileKind.Wav).forEach {
-            assertEquals(listOf(OperationKind.ConvertAudio), OperationKind.applicable(setOf(it)), "$it 只该给音频转换")
+            assertEquals(
+                listOf(OperationKind.ConvertAudio, OperationKind.PackZip),
+                OperationKind.applicable(setOf(it)),
+                "$it 只该给音频转换和打包",
+            )
         }
     }
 
@@ -124,10 +128,10 @@ class FileKindSniffTest {
     }
 
     @Test
-    fun `混选时只留两边都能做的操作`() {
-        // 选了一个 mp3 一个 jpg：没有任何共同操作，界面应当什么都不给，
-        // 而不是摆一个只对一半文件有效、跑完静默跳过另一半的按钮
-        assertEquals(emptyList<Any>(), OperationKind.applicable(setOf(FileKind.Mp3, FileKind.Jpeg)))
+    fun `音频加图片的混选只剩打包`() {
+        // 选了一个 mp3 一个 jpg：没有任何共同的转换操作，界面不该摆一个只对一半文件有效、
+        // 跑完静默跳过另一半的按钮。唯一例外是打包 —— 把不相干的两类装进一个包正是它的用途。
+        assertEquals(listOf(OperationKind.PackZip), OperationKind.applicable(setOf(FileKind.Mp3, FileKind.Jpeg)))
         assertTrue(OperationKind.applicable(setOf(FileKind.Pdf)).isNotEmpty())
     }
 }

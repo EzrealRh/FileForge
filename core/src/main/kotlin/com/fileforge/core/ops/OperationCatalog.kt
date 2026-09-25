@@ -31,6 +31,8 @@ enum class OperationKind(val label: String, val hint: String) {
     ConvertSubtitle("字幕转格式", "SRT / VTT / LRC / ASS 互转"),
     ExtractAudio("提取音频", "把视频里的声音拿出来"),
     CleanMetadata("清除图片元数据", "删掉 EXIF / GPS / 机型 / 注释，像素不重新编码"),
+    PackZip("打包成 ZIP", "把选中的几份压成一个包"),
+    UnpackZip("解压 ZIP", "解出里面的文件，路径压进文件名"),
     ;
 
     companion object {
@@ -60,6 +62,9 @@ enum class OperationKind(val label: String, val hint: String) {
             // 只放开了 JPEG 和 PNG：这两种容器的清理能做到段级照抄。
             // GIF / WebP / HEIC 的元数据规则各不相同，没做透就不给入口，免得产出一张坏图
             CleanMetadata -> fileKind == FileKind.Jpeg || fileKind == FileKind.Png
+            // 打包对类型无要求：任何文件都能塞进 zip，混选更是常见诉求（把发票 pdf 和照片一起发人）
+            PackZip -> true
+            UnpackZip -> fileKind == FileKind.Zip
         }
     }
 }

@@ -372,8 +372,10 @@ class CrossConversionCatalogTest {
     }
 
     @Test
-    fun `混选时只留两边都能做的操作`() {
-        assertTrue(OperationKind.applicable(setOf(FileKind.Gif, FileKind.Pdf)).isEmpty())
+    fun `GIF 与 PDF 混选时只剩打包`() {
+        // GIF 和 PDF 没有共同的转换操作；唯一活下来的是打包 —— 把不相干的两类一起装进一个包
+        // 本来就是压缩包的用途，所以它不属于"半可用按钮"
+        assertEquals(listOf(OperationKind.PackZip), OperationKind.applicable(setOf(FileKind.Gif, FileKind.Pdf)))
     }
 
     @Test
@@ -385,6 +387,19 @@ class CrossConversionCatalogTest {
         for (kind in listOf(FileKind.WebP, FileKind.Bmp, FileKind.Heic, FileKind.Avif, FileKind.Gif)) {
             assertFalse(OperationKind.CleanMetadata in OperationKind.applicable(setOf(kind)), "$kind 还没做，不该给入口")
         }
+    }
+
+    @Test
+    fun `打包对类型不设限，解压只给 zip`() {
+        // 打包是"什么都能塞进去"的：把发票 pdf 和照片一起发人是常见诉求
+        assertTrue(OperationKind.PackZip in OperationKind.applicable(setOf(FileKind.Pdf, FileKind.Jpeg, FileKind.Unknown)))
+        assertTrue(OperationKind.PackZip in OperationKind.applicable(setOf(FileKind.Zip)))
+        assertTrue(OperationKind.UnpackZip in OperationKind.applicable(setOf(FileKind.Zip)))
+        assertFalse(OperationKind.UnpackZip in OperationKind.applicable(setOf(FileKind.Pdf)), "不是 zip 就别给解压按钮")
+        assertFalse(
+            OperationKind.UnpackZip in OperationKind.applicable(setOf(FileKind.Zip, FileKind.Pdf)),
+            "混选时不能给一个必然半失败的按钮",
+        )
     }
 }
 
