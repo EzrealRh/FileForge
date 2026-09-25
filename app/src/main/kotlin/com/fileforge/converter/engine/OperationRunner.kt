@@ -153,6 +153,12 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
             is Operation.CsvToJson -> items.forEach { item ->
                 collect(item.name) { listOf(text.csvToJson(item, operation)) }
             }
+            is Operation.XmlToJson -> items.forEach { item ->
+                collect(item.name) { listOf(text.xmlToJson(item, operation)) }
+            }
+            is Operation.JsonToXml -> items.forEach { item ->
+                collect(item.name) { listOf(text.jsonToXml(item, operation)) }
+            }
         }
 
         coroutineContext.ensureActive()

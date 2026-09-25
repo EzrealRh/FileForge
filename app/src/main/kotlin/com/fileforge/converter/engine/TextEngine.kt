@@ -2,6 +2,7 @@ package com.fileforge.converter.engine
 
 import com.fileforge.core.data.Csv
 import com.fileforge.core.data.TableBridge
+import com.fileforge.core.data.Xml
 import com.fileforge.core.json.Json
 import com.fileforge.core.json.JsonException
 import com.fileforge.core.json.JsonRender
@@ -142,6 +143,47 @@ class TextEngine(private val workspace: Workspace) {
             writeText(item, text, "json"),
             notes.joinToString(" · "),
         )
+    }
+
+    /** XML → JSON。约定（子元素成数组、`@` 属性、`#text`）在 `:core` 的 Xml 头部写着。 */
+    fun xmlToJson(item: WorkItem, operation: Operation.XmlToJson): EngineOutput {
+        val text = readText(item)
+        val json = Xml.parse(text)
+        val root = json.members.keys.firstOrNull() ?: "根"
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "", "json"),
+            writeText(item, JsonRender.render(json, indent = operation.indent), "json"),
+            "根元素 $root · ${countElements(json)} 个节点 · 注释与处理指令按约定丢掉",
+        )
+    }
+
+    /** JSON → XML。根元素名默认跟源文件名，键名必须能当标签名，不能的就报错而不是改名。 */
+    fun jsonToXml(item: WorkItem, operation: Operation.JsonToXml): EngineOutput {
+        val json = parseJson(item)
+        val root = operation.root.trim().ifBlank { OutputNaming.stem(item.name) }
+        val xml = try {
+            Xml.render(json, root = root, indent = operation.indent)
+        } catch (bad: IllegalArgumentException) {
+            throw IllegalArgumentException(bad.message ?: "这份 JSON 的键名不能当 XML 标签用")
+        }
+        val name = OutputNaming.sanitize(root).ifBlank { "root" }
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "", "xml"),
+            writeText(item, xml, "xml"),
+            "根元素 $name · ${countElements(json)} 个节点",
+        )
+    }
+
+    /** 数一棵树里有多少个值节点，给结果说明用（"转成功了"得有个可看的量）。 */
+    private fun countElements(json: Json): Int = when {
+        json.members.isNotEmpty() -> json.members.values.sumOf { countElements(it) } + 1
+        json.arrayValue.isNotEmpty() -> json.arrayValue.sumOf { countElements(it) } + 1
+        else -> 1
+    }
+
+    private fun readText(item: WorkItem): String {
+        val decoded = TextCodecs.decodeForConversion(read(item), null)
+        return decoded.text
     }
 
     private fun parseJson(item: WorkItem): Json {

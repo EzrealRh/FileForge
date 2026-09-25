@@ -48,6 +48,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.fileforge.core.audio.AudioTarget
 import com.fileforge.core.data.Delimiter
+import com.fileforge.core.data.Xml
 import com.fileforge.core.meta.ImageMeta
 import com.fileforge.core.meta.MetaReport
 import com.fileforge.core.model.FileKind
@@ -197,6 +198,7 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
     var csvEnding by mutableStateOf(LineEnding.Lf)
     var csvHeader by mutableStateOf(true)
     var csvInfer by mutableStateOf(false)
+    var xmlRoot by mutableStateOf("")
 
     private val encodingOptions get() = listOf("自动检测") + TextEncoding.entries.map { it.label }
 
@@ -483,6 +485,29 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
                 Summary("分隔符按引号以外的票数自动认（逗号 / 分号 / 制表符 / 竖线），引号里的逗号不会骗到它。")
                 Summary("列数不齐照样转，缺的格子留空，并在结果里报是第几行 —— 那通常是数据错了而不是格式错了。")
             }
+            OperationKind.XmlToJson -> {
+                Segmented("缩进宽度", listOf("1", "2", "4", "8"), listOf(1, 2, 4, 8).indexOf(jsonIndent.roundToInt())) {
+                    jsonIndent = listOf(1f, 2f, 4f, 8f)[it]
+                }
+                Summary("对应关系是约定：子元素一律成数组（只有一个也是），属性名前面加 @，元素自己的文字进 #text。")
+                Summary("注释、处理指令会丢掉；带 DTD 或实体定义的一律不解析 —— 实体能让转换工具去访问别人写的地址。")
+                Summary("命名空间前缀原样留在名字里，不展开成 URI。")
+            }
+            OperationKind.JsonToXml -> {
+                OutlinedTextField(
+                    value = xmlRoot,
+                    onValueChange = { xmlRoot = it },
+                    label = { Text("根元素名（留空用文件名）") },
+                    singleLine = true,
+                    supportingText = { Text("留空就是 ${OutputNaming.stem(items.first().name)}。顶层只有一个键时，那个键直接当根元素。") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Segmented("缩进宽度", listOf("1", "2", "4", "8"), listOf(1, 2, 4, 8).indexOf(jsonIndent.roundToInt())) {
+                    jsonIndent = listOf(1f, 2f, 4f, 8f)[it]
+                }
+                Summary("数组写成一组同名元素；键名不能当 XML 标签的会直接报错让你改名，不会悄悄换成别的。")
+                Summary("空数组留一个空元素，空值写成自闭合标签。")
+            }
             OperationKind.CleanMetadata -> {
                 val reports = remember(items) { items.map { it.name to metaReportOf(it) } }
                 reports.forEach { (name, report) ->
@@ -540,6 +565,9 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
         if (kind == OperationKind.RemovePdfPages && pageSpec.isBlank()) return "先写要删哪些页"
         if (kind == OperationKind.MergePdfs && items.size < 2) return "合并 PDF 至少选两个文件"
         if (kind == OperationKind.PdfWatermark && watermarkText.isBlank()) return "先写要盖的水印文字"
+        if (kind == OperationKind.JsonToXml && xmlRoot.isNotBlank() && !Xml.isElementName(xmlRoot.trim())) {
+            return "根元素名「${xmlRoot.trim()}」不能当 XML 标签用"
+        }
         if (kind == OperationKind.EncryptPdf) PdfSecurity.validate(pdfUserPw, pdfOwnerPw, pdfAllowed)?.let { return it }
         if (startSecondText.isNotBlank() && startSecondText.toFloatOrNull() == null) return "开始秒数不是数字"
         if (durationSecondText.isNotBlank() && durationSecondText.toFloatOrNull() == null) return "取多少秒不是数字"
@@ -612,6 +640,8 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
             )
             OperationKind.JsonToCsv -> Operation.JsonToCsv(csvDelimiter, csvEnding, csvQuoteAll)
             OperationKind.CsvToJson -> Operation.CsvToJson(csvHeader, csvInfer, jsonIndent.roundToInt())
+            OperationKind.XmlToJson -> Operation.XmlToJson(jsonIndent.roundToInt())
+            OperationKind.JsonToXml -> Operation.JsonToXml(xmlRoot.trim(), jsonIndent.roundToInt())
         }
     }
 }
