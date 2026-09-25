@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.provider.Settings
+import com.fileforge.core.naming.OutputNaming
 import java.io.File
 
 /**
@@ -113,11 +114,25 @@ class MediaStorePublisher(private val context: Context) {
         return runCatching {
             val dir = topLevelDir
             if (!dir.exists() && !dir.mkdirs()) error("建不出 ${dir.absolutePath}")
-            val target = File(dir, item.name)
+            val target = freeTarget(dir, item.name)
             item.file.inputStream().use { input -> target.outputStream().use { output -> input.copyTo(output) } }
             MediaScannerConnection.scanFile(context, arrayOf(target.absolutePath), null, null)
             target.absolutePath
         }.getOrNull()
+    }
+
+    /**
+     * 顶层直写没有 MediaStore 那套自动避让，同名会**静默覆盖上一次的成品** ——
+     * 同一个文件转两次是很正常的操作。所以自己补序号，走 `:core` 里那份和
+     * 工作台共用、且已被单测覆盖的命名规则。
+     */
+    private fun freeTarget(dir: File, requested: String): File {
+        val taken = HashSet<String>()
+        var name = requested
+        while (File(dir, name).also { taken.add(name) }.exists()) {
+            name = OutputNaming.unique(requested, taken)
+        }
+        return File(dir, name)
     }
 
     /** MediaStore 自己报的地址最可信；某些 ROM 不填 DATA 才退回拼接。 */
