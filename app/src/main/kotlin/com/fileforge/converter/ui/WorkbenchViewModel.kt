@@ -495,7 +495,7 @@ class WorkbenchViewModel(app: Application) : AndroidViewModel(app) {
         }
         val handler = runCatching { view.resolveActivity(app.packageManager) }.getOrNull()
         if (handler == null) {
-            notify("这台机器上没有能打开 ${item.kind.mimeType} 的应用，改用分享")
+            notify("${item.name} 没有能直接打开它的应用，改用分享")
             share(listOf(item))
             return
         }
