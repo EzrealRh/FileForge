@@ -25,6 +25,7 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
     private val pdf = PdfEngine(context, workspace)
     private val video = VideoEngine(workspace, images)
     private val audio = AudioEngine(workspace)
+    private val text = TextEngine(workspace)
 
     suspend fun run(
         items: List<WorkItem>,
@@ -121,6 +122,12 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
             }
             is Operation.VideoToImage -> items.forEach { item ->
                 collect(item.name) { listOf(video.still(item, operation)) }
+            }
+            is Operation.ConvertTextEncoding -> items.forEach { item ->
+                collect(item.name) { listOf(text.convertText(item, operation)) }
+            }
+            is Operation.ConvertSubtitle -> items.forEach { item ->
+                collect(item.name) { listOf(text.convertSubtitle(item, operation)) }
             }
             is Operation.AudioConvert -> items.forEach { item ->
                 collect(item.name) {

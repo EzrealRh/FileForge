@@ -1,6 +1,7 @@
 package com.fileforge.converter.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -23,7 +24,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
@@ -49,6 +53,11 @@ import com.fileforge.core.ops.Operation
 import com.fileforge.core.ops.OperationKind
 import com.fileforge.core.ops.PdfPaper
 import com.fileforge.core.ops.VideoFormat
+import com.fileforge.core.text.LineEnding
+import com.fileforge.core.text.LineEndings
+import com.fileforge.core.text.SubtitleFormat
+import com.fileforge.core.text.TextCodecs
+import com.fileforge.core.text.TextEncoding
 import com.fileforge.core.pdf.PdfPermission
 import com.fileforge.core.pdf.PdfSecurity
 import com.fileforge.core.pdf.StampSpot
@@ -166,6 +175,19 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
 
     /** 勾选项 = 还允许的权限。默认只留"允许打印"，其余三项关着。 */
     var pdfAllowed by mutableStateOf(setOf(PdfPermission.Print))
+
+    /** -1 表示"按内容自动认"；其余是 TextEncoding.entries 的下标。 */
+    var textSource by mutableStateOf(-1)
+    var textTarget by mutableStateOf(TextEncoding.Utf8)
+    var textBom by mutableStateOf(false)
+    var textEnding by mutableStateOf(LineEnding.Lf)
+    var subtitleTarget by mutableStateOf(SubtitleFormat.Srt)
+    var subtitleSource by mutableStateOf(-1)
+
+    private val encodingOptions get() = listOf("自动检测") + TextEncoding.entries.map { it.label }
+
+    private fun encodingAt(index: Int): TextEncoding? = TextEncoding.entries.getOrNull(index)
+
     var bitrate by mutableStateOf(2500f)
     var startSecondText by mutableStateOf("")
     var durationSecondText by mutableStateOf("")
@@ -354,6 +376,27 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
                 }
                 Summary("系统没有 MP3 编码器，所以转不成 mp3 —— 只给 M4A 和 WAV 两个目标。")
             }
+            OperationKind.ConvertTextEncoding -> {
+                PickerRow("源编码", encodingOptions, textSource + 1) { textSource = it - 1 }
+                PickerRow("目标编码", TextEncoding.entries.map { it.label }, textTarget.ordinal) {
+                    textTarget = TextEncoding.entries[it]
+                }
+                Segmented("BOM 头", listOf("不加", "加"), if (textBom) 1 else 0) { textBom = it == 1 }
+                Segmented("换行风格", LineEnding.entries.map { it.label }, LineEnding.entries.indexOf(textEnding)) {
+                    textEnding = LineEnding.entries[it]
+                }
+                Summary("源编码选「自动检测」时只在一种编码能完全读通的情况下才转；读不通会直接报错让你指定，不会硬转出一份乱码。")
+                Summary("UTF-8 什么都装得下；目标装不下的字会算出来告诉你，不会悄悄换成问号。")
+
+            }
+            OperationKind.ConvertSubtitle -> {
+                PickerRow("源编码", encodingOptions, subtitleSource + 1) { subtitleSource = it - 1 }
+                PickerRow("目标格式", SubtitleFormat.entries.map { it.label }, subtitleTarget.ordinal) {
+                    subtitleTarget = SubtitleFormat.entries[it]
+                }
+                Summary("源格式按扩展名认，认不出会按内容试；输出一律写 UTF-8（播放器对非 UTF-8 字幕普遍直接显示乱码）。")
+                Summary(subtitleLimitsNote(subtitleTarget))
+            }
             OperationKind.EncryptPdf -> {
                 OutlinedTextField(
                     value = pdfUserPw,
@@ -480,6 +523,10 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
             )
             // 密码原样传，不做 trim：首尾空格可能就是用户密码的一部分
             OperationKind.EncryptPdf -> Operation.EncryptPdf(pdfUserPw, pdfOwnerPw, pdfAllowed)
+            OperationKind.ConvertTextEncoding -> Operation.ConvertTextEncoding(
+                encodingAt(textSource), textTarget, textBom, textEnding,
+            )
+            OperationKind.ConvertSubtitle -> Operation.ConvertSubtitle(subtitleTarget, encodingAt(subtitleSource))
             OperationKind.DecryptPdf -> Operation.DecryptPdf(pdfOpenPw)
         }
     }
@@ -516,6 +563,46 @@ private fun IntSlider(
             valueRange = range,
             steps = maxOf(0, ((range.endInclusive - range.start) / step).roundToInt() - 1),
         )
+    }
+}
+
+/** 目标格式装不下什么 —— 按格式的静态能力说，不猜具体文件。 */
+private fun subtitleLimitsNote(target: SubtitleFormat): String = buildString {
+    append("转到 ${target.label}：")
+    val loses = ArrayList<String>()
+    if (!target.keepsEndTime) loses += "没有结束时间"
+    if (!target.keepsLineBreaks) loses += "多行并成一行"
+    if (target.resolutionMs > 1) loses += "时间精度到 ${target.resolutionMs} 毫秒"
+    append(if (loses.isEmpty()) "不丢东西" else "会丢" + loses.joinToString("、"))
+}
+
+/**
+ * 下拉选择器。编码有八九种，塞进 SegmentedButtonRow 会被挤成一串省略号，
+ * 所以选项多于四个时用这个。
+ */
+@Composable
+private fun PickerRow(label: String, options: List<String>, selected: Int, onSelect: (Int) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Column {
+        Text(label, style = MaterialTheme.typography.bodyMedium)
+        Spacer(Modifier.height(6.dp))
+        Box {
+            OutlinedButton(onClick = { open = true }, modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    options.getOrElse(selected) { "选一个" },
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                options.forEachIndexed { index, option ->
+                    DropdownMenuItem(
+                        text = { Text(if (index == selected) "✓  $option" else option) },
+                        onClick = { onSelect(index); open = false },
+                    )
+                }
+            }
+        }
     }
 }
 

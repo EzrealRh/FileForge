@@ -1,6 +1,9 @@
 package com.fileforge.core.ops
 
 import com.fileforge.core.audio.AudioTarget
+import com.fileforge.core.text.LineEnding
+import com.fileforge.core.text.SubtitleFormat
+import com.fileforge.core.text.TextEncoding
 import com.fileforge.core.pdf.PageNumberPlan
 import com.fileforge.core.pdf.PdfPermission
 import com.fileforge.core.pdf.StampSpot
@@ -156,6 +159,27 @@ sealed interface Operation {
     ) : Operation {
         override val label get() = if (targetBytes != null) "转成 ${target.label}（约 ${targetLabel(targetBytes)}）"
         else "转成 ${target.label}"
+    }
+
+    /**
+     * 文本编码转换：换编码、要不要 BOM、顺带统一换行风格。
+     * 解不出来的字符数会在结果说明里报出来 —— 转错的产物是"能打开的乱码"。
+     */
+    data class ConvertTextEncoding(
+        val source: TextEncoding? = null,
+        val target: TextEncoding = TextEncoding.Utf8,
+        val bom: Boolean = false,
+        val ending: LineEnding = LineEnding.Lf,
+    ) : Operation {
+        override val label get() = if (bom) "转成 ${'$'}{target.label}（带 BOM）" else "转成 ${'$'}target.label"
+    }
+
+    /** 字幕 / 歌词转格式。源格式由扩展名和各解析器定，转过去会丢什么由格式自己声明。 */
+    data class ConvertSubtitle(
+        val target: SubtitleFormat = SubtitleFormat.Srt,
+        val source: TextEncoding? = null,
+    ) : Operation {
+        override val label get() = "字幕转为 ${'$'}target.label"
     }
 
     /**

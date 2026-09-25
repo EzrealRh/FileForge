@@ -30,8 +30,8 @@ enum class SubtitleFormat(
     /** 转到这个格式会丢掉什么。界面上照这个列，别让用户以为是无损转换。 */
     fun losses(cues: List<Cue>): List<String> {
         val out = ArrayList<String>()
-        if (!keepsEndTime) out += "结束时间（$label 只有开始时间，再转回去时按默认停留时长补）"
-        if (!keepsLineBreaks) out += "多行正文会并成一行"
+        if (!keepsEndTime && cues.isNotEmpty()) out += "结束时间（$label 只有开始时间，再转回去时按默认停留时长补）"
+        if (!keepsLineBreaks && cues.any { it.lines.size > 1 }) out += "多行正文会并成一行"
         if (cues.any { it.startMs % resolutionMs != 0L || it.endMs % resolutionMs != 0L }) {
             out += "时间轴精度降到 ${resolutionMs} 毫秒"
         }
@@ -83,6 +83,27 @@ object Subtitles {
         }
     }
 
+    /** 从 from 转到 to 会丢什么：目标格式的损失，加上精度变粗这一条。 */
+    fun lossesBetween(from: SubtitleFormat, to: SubtitleFormat, cues: List<Cue>): List<String> {
+        val out = ArrayList(to.losses(cues))
+        if (to.resolutionMs > from.resolutionMs) {
+            out += "时间轴精度从 ${from.resolutionMs} 毫秒降到 ${to.resolutionMs} 毫秒"
+        }
+        return out.distinct()
+    }
+
+    /** 只有 VTT 和 ASS 有强制的文本签名；SRT / LRC 没有，只能靠解析。 */
+    private fun signature(source: String): SubtitleFormat? {
+        val head = source.trimStart()
+        val first = head.lineSequence().firstOrNull()?.trim().orEmpty()
+        if (first.startsWith("WEBVTT")) return SubtitleFormat.Vtt
+        if (head.hasAssSection()) return SubtitleFormat.Ass
+        return null
+    }
+
+    private fun String.hasAssSection(): Boolean =
+        lineSequence().any { it.trim() == "[Script Info]" || it.trim() == "[Events]" || it.trim() == "[V4+ Styles]" }
+
     /** 转换前的问题清单（不是异常）：时间倒挂、重叠、空正文，界面上要能列出来。 */
     fun problems(cues: List<Cue>): List<String> {
         val out = ArrayList<String>()
@@ -94,6 +115,32 @@ object Subtitles {
         val overlapping = (1 until ordered.size).count { ordered[it].startMs < ordered[it - 1].endMs }
         if (overlapping > 0) out += "$overlapping 条与上一条时间重叠"
         return out
+    }
+
+    /**
+     * 认源格式。优先级：文件里的**格式签名** > 扩展名 > 逐个试解析。
+     *
+     * 签名必须排在扩展名前面，因为 VTT 的时间轴写法 SRT 解析器也认（两者都认
+     * `A --> B`，小数点逗号都收）—— 只看扩展名的话，一个后缀写错的 .srt
+     * 会被当成 SRT 复制一遍还报成功，用户以为转好了。
+     */
+    fun detect(fileName: String, source: String): Pair<SubtitleFormat, SubtitleFormat?> {
+        val suffix = fileName.substringAfterLast('.', "")
+        val byName = SubtitleFormat.entries.firstOrNull { it.extension.equals(suffix, ignoreCase = true) }
+        val bySignature = signature(source)?.takeIf { runCatching { parse(it, source) }.isSuccess }
+        if (bySignature != null) return bySignature to byName
+        if (byName != null && runCatching { parse(byName, source) }.isSuccess) return byName to null
+        val tried = ArrayList<String>()
+        for (candidate in SubtitleFormat.entries) {
+            if (candidate == byName) continue
+            if (runCatching { parse(candidate, source) }.isSuccess) return candidate to byName
+            tried += candidate.label
+        }
+        // 扩展名说是一种、内容按哪种都解不通 —— 两边都报出来，别只说"格式不对"
+        val detail = byName?.let { runCatching { parse(it, source) }.exceptionOrNull()?.message }
+        val claimed = byName?.label ?: "未知"
+        val reason = if (detail == null) "" else "（$detail）"
+        throw Bad(1, "扩展名写的是 $claimed，但按 ${tried.joinToString("/")} 都解不通$reason")
     }
 
     // ---- 分块解析（SRT 与 VTT 共用）------------------------------------------

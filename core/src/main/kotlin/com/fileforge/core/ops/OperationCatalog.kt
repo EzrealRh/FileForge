@@ -27,6 +27,8 @@ enum class OperationKind(val label: String, val hint: String) {
     VideoToImage("视频抽帧成图片", "指定秒数取那一帧，做封面"),
     CompressVideo("压缩视频", "硬件转码，可按目标体积反推码率"),
     ConvertAudio("音频转格式", "MP3 / FLAC / OGG 转 M4A 或 WAV"),
+    ConvertTextEncoding("文本转编码", "GBK / UTF-8 / Big5 互转，顺带统一换行"),
+    ConvertSubtitle("字幕转格式", "SRT / VTT / LRC / ASS 互转"),
     ExtractAudio("提取音频", "把视频里的声音拿出来"),
     ;
 
@@ -50,6 +52,8 @@ enum class OperationKind(val label: String, val hint: String) {
             VideoToGif, VideoToImage -> fileKind.isVideo
             CompressVideo -> fileKind.isVideo
             ConvertAudio -> fileKind.isAudio
+            // 两种都只认"这是个文本文件"，具体是哪种字幕交给解析器判
+            ConvertTextEncoding, ConvertSubtitle -> fileKind == FileKind.Text
             // 只有真带画面的类型才给"提取音频"，否则用户会对一个纯音频文件点它
             ExtractAudio -> fileKind.isVideo
         }

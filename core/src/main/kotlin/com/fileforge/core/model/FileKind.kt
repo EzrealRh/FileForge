@@ -4,7 +4,7 @@ package com.fileforge.core.model
 enum class FileKind {
     Pdf, Png, Jpeg, Gif, WebP, Bmp, Heic, Avif, Mp4, WebM, Mkv, QuickTime,
     Mp3, Aac, M4a, Flac, Ogg, Wav,
-    Zip, Unknown;
+    Zip, Text, Unknown;
 
     val isImage: Boolean get() = this in IMAGE_KINDS
     val isVideo: Boolean get() = this in VIDEO_KINDS
@@ -31,6 +31,7 @@ enum class FileKind {
         Ogg -> "audio/ogg"
         Wav -> "audio/wav"
         Zip -> "application/zip"
+        Text -> "text/plain"
         Unknown -> "application/octet-stream"
     }
 
@@ -58,6 +59,7 @@ enum class FileKind {
         Ogg -> "OGG"
         Wav -> "WAV"
         Zip -> "ZIP"
+        Text -> "文本"
         Unknown -> "文件"
     }
 
@@ -108,8 +110,29 @@ object FileTypeSniffer {
             u(0) == 0xFF && (u(1) and 0xE0) == 0xE0 && (u(1) and 0xF6) == 0xF0 -> FileKind.Aac
             u(0) == 0xFF && (u(1) and 0xE0) == 0xE0 -> FileKind.Mp3
             u(0) == 0x50 && u(1) == 0x4B && u(2) == 0x03 && u(3) == 0x04 -> FileKind.Zip
+            looksLikeText(header) -> FileKind.Text
             else -> FileKind.Unknown
         }
+    }
+
+    /**
+     * 纯文本判据：**没有 NUL 字节**，且控制字符占比极低。
+     *
+     * 不用"能不能按 UTF-8 解码"来判 —— GBK 的中文按 UTF-8 解是失败的，那样
+     * 最需要转编码的文件反而认不出来。NUL 是二进制最稳定的特征（`file`、git 都这么判）。
+     * 文本类文件（txt/md/log/csv/json/srt/vtt/lrc/ass）都归到这里，具体是哪种
+     * 由扩展名和各解析器自己说，不在类型层猜。
+     */
+    fun looksLikeText(header: ByteArray): Boolean {
+        if (header.isEmpty()) return false
+        var controls = 0
+        for (b in header) {
+            val v = b.toInt() and 0xFF
+            if (v == 0) return false
+            // 制表、换行、垂直制表、换页、回车是正常文本里会出现的控制字符，其余记一笔
+            if (v < 0x20 && v != 0x09 && v != 0x0A && v != 0x0B && v != 0x0C && v != 0x0D) controls++
+        }
+        return controls * 20 <= header.size
     }
 
     private fun isoBrandToKind(brand: String) = when {

@@ -168,6 +168,42 @@ class SubtitlesTest {
     }
 
     @Test
+    fun `源格式先信扩展名再信内容`() {
+        assertEquals(SubtitleFormat.Srt to null, Subtitles.detect("电影.srt", srt).let { it.first to it.second })
+        // 扩展名说 srt、内容是 VTT：按内容判，并把"扩展名说的是什么"一起带出去
+        val vtt = """
+            WEBVTT
+
+            00:00:20.000 --> 00:00:24.400
+            字幕
+        """.trimIndent()
+        val found = Subtitles.detect("电影.srt", vtt)
+        assertEquals(SubtitleFormat.Vtt, found.first)
+        assertEquals(SubtitleFormat.Srt, found.second, "要能报出扩展名与内容不一致")
+        // 扩展名没帮上忙时靠内容认
+        assertEquals(SubtitleFormat.Srt, Subtitles.detect("无名", srt).first)
+    }
+
+    @Test
+    fun `两边都对不上时报错带上两边的说法`() {
+        val bad = assertThrows(Subtitles.Bad::class.java) { Subtitles.detect("x.srt", "这根本不是什么字幕") }
+        assertTrue(bad.message!!.contains("SRT"), bad.message)
+        assertTrue(bad.message!!.contains("解不通"), bad.message)
+    }
+
+    @Test
+    fun `格式自己说清会丢什么`() {
+        val cues = Subtitles.parse(SubtitleFormat.Srt, srt)
+        val lrc = SubtitleFormat.Lrc.losses(cues)
+        assertTrue(lrc.any { it.contains("结束时间") }, lrc.toString())
+        assertTrue(lrc.any { it.contains("多行") }, lrc.toString())
+        assertTrue(SubtitleFormat.Vtt.losses(cues).isEmpty(), "SRT 转 VTT 不丢东西")
+        // 精度只在该格式真的会截时才报
+        assertTrue(SubtitleFormat.Lrc.losses(listOf(Cue(20_000, 24_000, listOf("整十毫秒")))).none { it.contains("精度") })
+        assertTrue(SubtitleFormat.Lrc.losses(listOf(Cue(20_005, 24_005, listOf("有毫秒零头")))).any { it.contains("精度") })
+    }
+
+    @Test
     fun `问题清单只报不拦`() {
         val cues = listOf(
             Cue(10_000, 5_000, listOf("倒挂")),

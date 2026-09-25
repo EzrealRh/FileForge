@@ -6,15 +6,15 @@ import java.nio.charset.StandardCharsets
 import java.nio.charset.UnsupportedCharsetException
 
 /** 文本编码选项。charsetName 直接交给 `Charset.forName`，Android 与桌面 JVM 都自带这些。 */
-enum class TextEncoding(val label: String, val charsetName: String) {
-    Utf8("UTF-8", "UTF-8"),
-    Gb18030("GB18030（简体中文，最全）", "GB18030"),
-    Gbk("GBK（简体中文）", "GBK"),
-    Big5("Big5（繁体中文）", "Big5"),
-    ShiftJis("Shift_JIS（日文）", "Shift_JIS"),
-    Latin1("ISO-8859-1（西欧单字节）", "ISO-8859-1"),
-    Utf16Le("UTF-16 小端", "UTF-16LE"),
-    Utf16Be("UTF-16 大端", "UTF-16BE"),
+enum class TextEncoding(val label: String, val charsetName: String, val shortTag: String) {
+    Utf8("UTF-8", "UTF-8", "utf8"),
+    Gb18030("GB18030（简体中文，最全）", "GB18030", "gb18030"),
+    Gbk("GBK（简体中文）", "GBK", "gbk"),
+    Big5("Big5（繁体中文）", "Big5", "big5"),
+    ShiftJis("Shift_JIS（日文）", "Shift_JIS", "sjis"),
+    Latin1("ISO-8859-1（西欧单字节）", "ISO-8859-1", "latin1"),
+    Utf16Le("UTF-16 小端", "UTF-16LE", "utf16le"),
+    Utf16Be("UTF-16 大端", "UTF-16BE", "utf16be"),
     ;
 }
 
@@ -217,6 +217,28 @@ object TextCodecs {
 
     class EncodeResult(val bytes: ByteArray, val dropped: Int) {
         val clean: Boolean get() = dropped == 0
+    }
+
+    /**
+     * 决定"按哪个源编码读"，读不干净就拒绝产出。
+     *
+     * 为什么不能猜着往下走：GBK 和 Big5 的字节序列互相都能"解得通"（两边都是双字节编码，
+     * 凑得出合法码位），猜错的产物是一份**能打开的乱码**，用户不会知道已经坏了。
+     * 所以用户指定了源编码时，解不出字符就必须报错让他换，而不是硬转。
+     */
+    fun decodeForConversion(bytes: ByteArray, requested: TextEncoding?): Decoded {
+        if (requested != null) {
+            val result = decode(bytes, requested)
+            if (!result.clean) {
+                error("按 ${requested.label} 读有 ${result.replaced} 个位置读不出来，这份可能不是 ${requested.label}，换个源编码再试")
+            }
+            return result
+        }
+        val guess = recognize(bytes)
+        if (!guess.clean) {
+            error("认不出这份的编码（按 ${guess.encoding.label} 读有 ${guess.replaced} 个位置读不出来），请手工指定源编码")
+        }
+        return guess
     }
 
     /** 解完之后重新数一遍：能原样解回来才敢说没丢。 */

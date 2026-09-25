@@ -37,7 +37,11 @@ class FileKindSniffTest {
         assertEquals(FileKind.Heic, FileTypeSniffer.sniff(h(4 to s("ftyp"), 8 to s("mif1"))))
         assertEquals(FileKind.Avif, FileTypeSniffer.sniff(h(4 to s("ftyp"), 8 to s("avif"))))
         assertEquals(FileKind.Zip, FileTypeSniffer.sniff(h(0 to listOf(0x50, 0x4B, 3, 4))))
-        assertEquals(FileKind.Unknown, FileTypeSniffer.sniff(h(0 to s("who knows"))))
+        // 纯 ASCII 现在是"文本"而不是"未知" —— 转编码、转字幕都靠这一格进来。
+        // 注意夹具要用真实字节：h() 造的数组后面补的是零，那在判据里就是二进制
+        assertEquals(FileKind.Text, FileTypeSniffer.sniff("who knows what this is".toByteArray()))
+        assertEquals(FileKind.Text, FileTypeSniffer.sniff("1\n00:00:01,000 --> 00:00:02,000\n字幕\n".toByteArray()))
+        assertEquals(FileKind.Unknown, FileTypeSniffer.sniff(h(0 to listOf(0x01, 0x00, 0x7F, 0x00, 0x11, 0x22))), "带 NUL 的才算二进制")
     }
 
     @Test

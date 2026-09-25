@@ -119,6 +119,28 @@ class TextCodecTest {
     }
 
     @Test
+fun `指定了源编码就读不干净时必须拒绝而不是硬转`() {
+        // 猜错编码的产物是"能打开的乱码"，用户不会知道坏了 —— 所以宁可不产出
+        val wrong = runCatching { TextCodecs.decodeForConversion(gbkCn, TextEncoding.Utf8) }
+        assertTrue(wrong.isFailure, "把 GBK 指定成 UTF-8 必须报错")
+        assertTrue(wrong.exceptionOrNull()!!.message!!.contains("读不出来"), wrong.exceptionOrNull()!!.message)
+        assertEquals(cn, TextCodecs.decodeForConversion(gbkCn, TextEncoding.Gb18030).text)
+        assertEquals(cn, TextCodecs.decodeForConversion(utf8Cn, null).text, "自动检测要能认出 UTF-8")
+        assertEquals(cn, TextCodecs.decodeForConversion(gbkCn, null).text, "自动检测也要能认出 GBK 系")
+    }
+
+    @Test
+    fun `纯文本判据靠 NUL 而不是靠能不能解码`() {
+        assertTrue(looksText(gbkCn), "GBK 中文按 UTF-8 解不通，但必须是文本")
+        assertTrue(looksText(utf8Cn))
+        assertTrue(looksText(bytes(0xEF, 0xBB, 0xBF) + "你好".toByteArray()))
+        assertFalse(looksText(bytes(0x89, 0x50, 0x4E, 0x47, 0, 0)))
+        assertFalse(looksText(bytes(0xFF, 0xD8, 0, 0x00, 0x01)))
+    }
+
+    private fun looksText(header: ByteArray) = com.fileforge.core.model.FileTypeSniffer.looksLikeText(header)
+
+    @Test
     fun `界面列出的编码这台机器都得有`() {
         // 安卓（ICU）和桌面 JDK 都带这一整套。哪天某个平台缺了，界面要按 available() 把它藏掉，
         // 而不是等用户选了之后在解码时崩 —— 这条断言就是那个前提的哨兵
