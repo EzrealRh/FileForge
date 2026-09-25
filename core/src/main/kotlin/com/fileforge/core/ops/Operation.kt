@@ -353,12 +353,25 @@ sealed interface Operation {
         override val label get() = "提取文档文字"
     }
 
-    /** .xlsx 每张表转一份 CSV。日期照样式认出来的样子写，数字写法原样搬。 */
-    data class XlsxToCsv(
+    /** .xlsx 每张表转一份 CSV。日期照样式认出来的样子写，数字写法原样搬。 */    data class XlsxToCsv(
         val delimiter: Delimiter = Delimiter.Comma,
         val ending: LineEnding = LineEnding.Lf,
     ) : Operation {
         override val label get() = "表格转 CSV"
+    }
+
+    /**
+     * Markdown → HTML 的一份完整页面（带 charset，浏览器双击就能看）。
+     *
+     * 没有参数：CSS 与模板是另一件事，这里只做忠实的语法转换。
+     */
+    data object MdToHtml : Operation {
+        override val label get() = "转成 HTML"
+    }
+
+    /** Markdown → 纯文本：吃掉标记，列表记号与表格分列留下。 */
+    data object MdToText : Operation {
+        override val label get() = "去掉标记"
     }
 
     /** 把 .ico 里的每一帧画面导成 PNG。 */

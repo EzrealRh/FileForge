@@ -39,6 +39,8 @@ enum class OperationKind(val label: String, val hint: String) {
     TextToPdf("文本印成 PDF", "自动断行分页，中文可在字之间断"),
     OfficeToText("Word 演示提取文字", "docx / pptx 抽正文，丢了什么逐条写明"),
     XlsxToCsv("表格转 CSV", "每张表一份 CSV，日期不再是序列号"),
+    MdToHtml("Markdown 转 HTML", "出一份带 charset 的完整页面；认不出标记会直说"),
+    MdToText("Markdown 去标记", "吃掉标记，列表记号与表格分列留着"),
     ImageToIco("做成图标 ICO", "一次出 16/32/48/256 多个尺寸"),
     IcoToImages("图标拆成图片", "把 .ico 里的每个画面导成 PNG"),
     XmlToJson("XML 转 JSON", "属性加 @、子元素成数组；带 DTD 的不解析"),
@@ -83,8 +85,9 @@ enum class OperationKind(val label: String, val hint: String) {
             PackZip -> true
             UnpackZip -> fileKind == FileKind.Zip
             // 数据格式这一族只看"是不是文本"，具体是不是合法 JSON / 长得对不对交给引擎判，
-            // 判不动会直说 —— 与字幕那族同一个路子，不在类型层猜
-            FormatJson, JsonToCsv, CsvToJson, XmlToJson, JsonToXml -> fileKind == FileKind.Text
+            // 判不动会直说 —— 与字幕那族同一个路子，不在类型层猜。Markdown 同理：
+            // 纯文本里没有任何记号时"转 HTML"没意义，引擎会拒而不是硬出一页
+            FormatJson, JsonToCsv, CsvToJson, XmlToJson, JsonToXml, MdToHtml, MdToText -> fileKind == FileKind.Text
         }
     }
 }

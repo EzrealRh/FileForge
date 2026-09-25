@@ -535,6 +535,15 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
                 Summary("数字照文件里的写法原样搬：1.50 不会变成 1.5，007 不会变成 7。")
                 Summary("公式给的是文件里存着的**算过的结果**；没算过的格子（比如别的工具刚写完还没打开过的）会是空格，并写明有几格。")
             }
+            OperationKind.MdToHtml -> {
+                Summary("认 CommonMark 加上 GFM 常用的表格、任务列表、删除线；围栏代码带语言名。")
+                Summary("成品是一份完整网页（带 charset），浏览器双击就能看；认不出任何 Markdown 记号时会直接说明，不硬转。")
+                Summary("脚注与四格缩进的代码块这两种写法这里不认，会照字面留下并在结果里写明。")
+            }
+            OperationKind.MdToText -> {
+                Summary("标记吃掉，正文留下：列表还是带记号，表格改成制表符分列。")
+                Summary("链接的地址与标题、图片本体在纯文本里没处放，会逐条写明丢了几处。")
+            }
             OperationKind.IcoToImages -> {
                 Summary("PNG 内嵌的那种直接把内嵌字节原样取出，不重新编码；老式位图（DIB）的要重建像素再编 PNG。")
                 Summary("一个图标里有几个尺寸就出几张图，名字带序号。")
@@ -708,6 +717,8 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
             OperationKind.ImageToIco -> Operation.ImageToIco(icoSizes())
             OperationKind.OfficeToText -> Operation.OfficeToText
             OperationKind.XlsxToCsv -> Operation.XlsxToCsv(csvDelimiter, csvEnding)
+            OperationKind.MdToHtml -> Operation.MdToHtml
+            OperationKind.MdToText -> Operation.MdToText
             OperationKind.IcoToImages -> Operation.IcoToImages
         }
     }

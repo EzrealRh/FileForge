@@ -172,6 +172,55 @@ class TextEngine(private val workspace: Workspace) {
         )
     }
 
+    /**
+     * Markdown → HTML 页面。
+     *
+     * 包一层完整文档（DOCTYPE + `<meta charset>`）不是啰嗦：一份只写着正文片段的 .html 交给浏览器，
+     * 它会按系统默认编码去猜，中文十次有九次猜错 —— 那副样子是"文件坏了"而不是"编码没声明"。
+     */
+    fun markdownToHtml(item: WorkItem): EngineOutput {
+        val source = requireMarkdown(readText(item))
+        val rendered = com.fileforge.core.doc.Markdown.toHtml(source)
+        val page = buildString {
+            append("<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"utf-8\" />\n<title>")
+            append(com.fileforge.core.doc.Markdown.htmlEscape(OutputNaming.stem(item.name)))
+            append("</title>\n</head>\n<body>\n")
+            append(rendered.text)
+            append("</body>\n</html>\n")
+        }
+        val notes = ArrayList<String>()
+        notes += "${rendered.text.lines().size} 行"
+        notes += rendered.notes
+        notes += "包了 DOCTYPE 与 charset，浏览器直接打开不会把中文猜成乱码"
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "", "html"),
+            writeText(item, page, "html"),
+            notes.joinToString(" · "),
+        )
+    }
+
+    /** Markdown → 纯文本：标记吃掉，列表记号与表格分列留着。 */
+    fun markdownToText(item: WorkItem): EngineOutput {
+        val source = requireMarkdown(readText(item))
+        val rendered = com.fileforge.core.doc.Markdown.toPlainText(source)
+        val notes = ArrayList<String>()
+        notes += "${rendered.text.count { it == '\n' }} 行"
+        notes += rendered.notes
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "", "txt"),
+            writeText(item, rendered.text, "txt"),
+            notes.joinToString(" · "),
+        )
+    }
+
+    private fun requireMarkdown(text: String): String {
+        require(com.fileforge.core.doc.Markdown.looksLikeMarkdown(text)) {
+            "这份文本里没找到任何 Markdown 记号（# 标题、- 列表、``` 代码、> 引用、| 表格），" +
+                "硬转只会产出一份看着一样、少了星号的文件。要换编码请用「文本转编码」"
+        }
+        return text
+    }
+
     /** 数一棵树里有多少个值节点，给结果说明用（"转成功了"得有个可看的量）。 */
     private fun countElements(json: Json): Int = when {
         json.members.isNotEmpty() -> json.members.values.sumOf { countElements(it) } + 1
