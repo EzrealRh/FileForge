@@ -19,6 +19,7 @@ import com.fileforge.core.pdf.PdfSecurity
 import com.fileforge.core.pdf.PdfTier
 import com.fileforge.core.pdf.SplitPlanner
 import com.fileforge.core.pdf.StampFrame
+import com.fileforge.core.pdf.TextLayoutPlanner
 import com.fileforge.core.pdf.StampSpot
 import com.fileforge.core.pdf.TextFit
 import com.fileforge.core.pdf.WatermarkPlan
@@ -558,6 +559,124 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
     }
 
     /** 提取文字层。spec 留空取全文；给了范围就逐页抽，免得把不连续的页混成一段。 */
+    /**
+     * 纯文本印成 PDF。
+     *
+     * 断行与分页的规矩全在 `:core` 的 TextLayoutPlanner（那边可单测）；这里只做两件事：
+     * 把宽度那把尺子换成真字体量出来的数，以及把排好的行画上去。
+     */
+    fun textToPdf(item: WorkItem, operation: Operation.TextToPdf): EngineOutput {
+        val decoded = com.fileforge.core.text.TextCodecs.decodeForConversion(item.file.readBytes(), null)
+        val document = PDDocument()
+        var handle: FontHandle? = null
+        val missing = intArrayOf(0)
+        try {
+            val rectangle = when (operation.paper) {
+                PdfPaper.A5 -> PDRectangle.A5
+                PdfPaper.Letter -> PDRectangle.LETTER
+                else -> PDRectangle.A4                        // 文本没有"按图片尺寸"这一说，按 A4 走
+            }
+            val pageHeight = rectangle.height
+            val margin = operation.marginPt
+                .coerceIn(0, (minOf(rectangle.width, pageHeight) / 4).toInt())
+                .toFloat()
+            val size = operation.fontSize.toFloat()
+            handle = fontFor(document, decoded.text.take(4000))
+            val font = handle.font
+            val layout = TextLayoutPlanner.layout(
+                text = decoded.text,
+                pageWidth = rectangle.width,
+                pageHeight = pageHeight - if (operation.numberPages) size * 2.5f else 0f,
+                margin = margin,
+                size = size,
+                lineHeightFactor = operation.lineHeight,
+                firstLineIndent = if (operation.firstLineIndent) size * 2f else 0f,
+            ) { text, fontSize -> measure(font, text, fontSize) }
+
+            layout.pages.forEachIndexed { index, page ->
+                val pdPage = PDPage(rectangle)
+                document.addPage(pdPage)
+                val stream = PDPageContentStream(document, pdPage)
+                stream.beginText()
+                stream.setFont(font, size)
+                stream.setNonStrokingColor(0f, 0f, 0f)
+                // 每行自己定位置，不用 setLeading + newLine 的相对推进：段首缩进让各行 x 不同，
+                // 相对推进只能跟着第一行的 x 走，缩进就会一路传染到整页
+                page.lines.forEach { line ->
+                    if (line.text.isEmpty()) return@forEach                  // 空行不画，位置由下一行的矩阵带过去
+                    stream.setTextMatrix(Matrix.getTranslateInstance(line.x, pageHeight - line.y))
+                    stream.showText(onlyDrawable(font, line.text, missing))
+                }
+                stream.endText()
+                if (operation.numberPages) {
+                    drawPageNumber(stream, font, size, rectangle, margin, index + 1, layout.pages.size)
+                }
+                stream.close()
+            }
+            val output = workspace.newStagingFile("pdf")
+            document.save(output)
+            val notes = ArrayList<String>()
+            notes += "按 ${decoded.encoding.label} 读" + if (decoded.hadBom) "（源带 BOM）" else ""
+            notes += "${layout.pageCount} 页 · ${size.toInt()}pt · ${operation.paper.label}"
+            if (missing[0] > 0) notes += "选中字体没有 ${missing[0]} 个字，这些位置会缺字"
+            layout.notes.forEach { notes += it }
+            return EngineOutput(OutputNaming.tagged(item.name, "", "pdf"), output, notes.joinToString(" · "))
+        } finally {
+            runCatching { handle?.close() }
+            runCatching { document.close() }
+        }
+    }
+
+    /**
+     * 一行有多长。字体里没有那个字时按一个字宽占位 —— 缺几个由 [onlyDrawable] 数，
+     * 这里再数一遍会把同一批字报两次。
+     */
+    private fun measure(
+        font: com.tom_roush.pdfbox.pdmodel.font.PDFont,
+        text: String,
+        size: Float,
+    ): Float = runCatching { font.getStringWidth(text) / 1000f * size }.getOrElse { text.length * size }
+
+    /**
+     * 把字体画不出来的字剔掉。
+     *
+     * PDFBox 在 showText 里遇到编码不出来的字符会直接抛异常，让整个任务失败 ——
+     * 与其崩在半路留一份写了一半的 PDF，不如把能画的都画上、把缺字数量如实报出来。
+     */
+    private fun onlyDrawable(
+        font: com.tom_roush.pdfbox.pdmodel.font.PDFont,
+        text: String,
+        missing: IntArray,
+    ): String {
+        if (runCatching { font.getStringWidth(text); true }.getOrDefault(false)) return text
+        val kept = StringBuilder()
+        text.forEach { ch ->
+            if (runCatching { font.getStringWidth(ch.toString()); true }.getOrDefault(false)) kept.append(ch) else missing[0]++
+        }
+        return kept.toString()
+    }
+
+    /** 页码画在页面底部正中，跟正文同一个内容流：同一页开两条流会互相覆盖。 */
+    private fun drawPageNumber(
+        stream: PDPageContentStream,
+        font: com.tom_roush.pdfbox.pdmodel.font.PDFont,
+        size: Float,
+        rectangle: PDRectangle,
+        margin: Float,
+        number: Int,
+        total: Int,
+    ) {
+        val text = "$number / $total"
+        val width = measure(font, text, size * 0.9f)
+        stream.beginText()
+        stream.setFont(font, size * 0.9f)
+        stream.setNonStrokingColor(0.45f, 0.45f, 0.45f)
+        // 页码放进下边距这条带子里：贴着纸边打印机会吃掉一半（不可打印区就有 5mm ≈ 14pt）
+        stream.newLineAtOffset((rectangle.width - width) / 2f, (margin - size * 1.5f).coerceAtLeast(size))
+        stream.showText(text)
+        stream.endText()
+    }
+
     fun toText(item: WorkItem, spec: String): EngineOutput {
         val document = loadForReading(item.file)
         try {

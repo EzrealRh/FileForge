@@ -201,6 +201,11 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
     var csvInfer by mutableStateOf(false)
     var xmlRoot by mutableStateOf("")
     var icoSizesText by mutableStateOf("16,32,48,256")
+    var textSize by mutableStateOf(11f)
+    var textLeading by mutableStateOf(1.4f)
+    var textMargin by mutableStateOf(56f)
+    var textIndent by mutableStateOf(true)
+    var textNumber by mutableStateOf(true)
 
     private val encodingOptions get() = listOf("自动检测") + TextEncoding.entries.map { it.label }
 
@@ -487,6 +492,19 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
                 Summary("分隔符按引号以外的票数自动认（逗号 / 分号 / 制表符 / 竖线），引号里的逗号不会骗到它。")
                 Summary("列数不齐照样转，缺的格子留空，并在结果里报是第几行 —— 那通常是数据错了而不是格式错了。")
             }
+            OperationKind.TextToPdf -> {
+                Segmented("纸张", listOf("A4", "A5", "Letter"), listOf(PdfPaper.A4, PdfPaper.A5, PdfPaper.Letter).indexOf(paper)) {
+                    paper = listOf(PdfPaper.A4, PdfPaper.A5, PdfPaper.Letter)[it]
+                }
+                IntSlider("字号", textSize, 7f..24f, { "%.0f pt".format(it) }) { textSize = it }
+                IntSlider("行距", textLeading, 1.0f..2.5f, { "%.1f 倍".format(it) }, step = 0.1f) { textLeading = it }
+                IntSlider("页边距", textMargin, 0f..120f, { "%.0f pt".format(it) }, step = 4f) { textMargin = it }
+                Segmented("首行缩进", listOf("不缩", "缩两字"), if (textIndent) 1 else 0) { textIndent = it == 1 }
+                Segmented("页码", listOf("不加", "加在页脚中间"), if (textNumber) 1 else 0) { textNumber = it == 1 }
+                Summary("中文按字断行，收尾标点不会顶到行首；英文仍按整词断。")
+                Summary("源编码自动认（认不干净会直接报错，不硬转成乱码）；中文字形从系统字体里取，取不到就报错，不会画成一堆方框。")
+                Summary("一行的字排到栏宽就换行，排满一页就翻页，页数不用你管。")
+            }
             OperationKind.ImageToIco -> {
                 OutlinedTextField(
                     value = icoSizesText,
@@ -667,6 +685,9 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
             OperationKind.CsvToJson -> Operation.CsvToJson(csvHeader, csvInfer, jsonIndent.roundToInt())
             OperationKind.XmlToJson -> Operation.XmlToJson(jsonIndent.roundToInt())
             OperationKind.JsonToXml -> Operation.JsonToXml(xmlRoot.trim(), jsonIndent.roundToInt())
+            OperationKind.TextToPdf -> Operation.TextToPdf(
+                textSize.roundToInt(), paper, textMargin.roundToInt(), textLeading, textIndent, textNumber,
+            )
             OperationKind.ImageToIco -> Operation.ImageToIco(icoSizes())
             OperationKind.IcoToImages -> Operation.IcoToImages
         }

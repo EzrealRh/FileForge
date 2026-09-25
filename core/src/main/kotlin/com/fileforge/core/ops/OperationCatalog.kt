@@ -36,6 +36,7 @@ enum class OperationKind(val label: String, val hint: String) {
     FormatJson("JSON 格式化", "缩进或压平、键排序；数字原文不被改写"),
     JsonToCsv("JSON 转 CSV", "对象数组拆成表，会丢什么都先说明"),
     CsvToJson("CSV 转 JSON", "首行当列名；默认不猜类型，007 不会变成 7"),
+    TextToPdf("文本印成 PDF", "自动断行分页，中文可在字之间断"),
     ImageToIco("做成图标 ICO", "一次出 16/32/48/256 多个尺寸"),
     IcoToImages("图标拆成图片", "把 .ico 里的每个画面导成 PNG"),
     XmlToJson("XML 转 JSON", "属性加 @、子元素成数组；带 DTD 的不解析"),
@@ -66,7 +67,7 @@ enum class OperationKind(val label: String, val hint: String) {
             CompressVideo -> fileKind.isVideo
             ConvertAudio -> fileKind.isAudio
             // 两种都只认"这是个文本文件"，具体是哪种字幕交给解析器判
-            ConvertTextEncoding, ConvertSubtitle -> fileKind == FileKind.Text
+            ConvertTextEncoding, ConvertSubtitle, TextToPdf -> fileKind == FileKind.Text
             // 只有真带画面的类型才给"提取音频"，否则用户会对一个纯音频文件点它
             ExtractAudio -> fileKind.isVideo
             // 只放开了 JPEG 和 PNG：这两种容器的清理能做到段级照抄。

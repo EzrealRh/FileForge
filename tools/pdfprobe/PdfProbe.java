@@ -35,6 +35,11 @@ import org.apache.pdfbox.text.PDFTextStripper;
 import org.apache.pdfbox.pdmodel.encryption.AccessPermission;
 import org.apache.pdfbox.pdmodel.encryption.InvalidPasswordException;
 import org.apache.pdfbox.pdmodel.encryption.StandardProtectionPolicy;
+import com.fileforge.core.pdf.TextLayout;
+import com.fileforge.core.pdf.TextLayoutPlanner;
+import com.fileforge.core.pdf.TextLine;
+import com.fileforge.core.pdf.TextPage;
+import kotlin.jvm.functions.Function2;
 
 /**
  * PDF 语义实验台：只在本机 JVM 上跑，用桌面版 PDFBox 2.0.27。pdfbox-android 是同版本 PDFBox 的
@@ -57,6 +62,7 @@ public final class PdfProbe {
             case "verify" -> verify(new File(args[1]));
             case "stamp" -> verifyStamping(new File(args[1]));
             case "security" -> verifySecurity(new File(args[1]));
+            case "textlayout" -> verifyTextLayout(new File(args[1]), new File(args[2]));
             default -> throw new IllegalArgumentException("unknown cmd " + args[0]);
         }
     }
@@ -331,6 +337,11 @@ public final class PdfProbe {
         }
     }
 
+    /** 探针专用的断言：说明在前、条件在后，读起来像句子。与 expect 同义，只是参数顺序反。 */
+    private static void report(String what, boolean ok) {
+        expect(ok, what);
+    }
+
     private static void expect(boolean ok, String what) {
         System.out.println((ok ? "  通过：" : "  失败：") + what);
         if (!ok) throw new AssertionError(what);
@@ -346,6 +357,113 @@ public final class PdfProbe {
         if (dict == root) return true;
         COSBase parent = dict.getItem(COSName.PARENT);
         return parent != null && reachesRoot(root, deref(parent), depth + 1);
+    }
+
+    /**
+     * 文本 → PDF 的宽度模型。
+     *
+     * core 里的 TextLayoutPlanner 信的是"字体报的宽度就是画出来占的宽度"，这一条单测测不到 ——
+     * 它手里只有假尺子。这里把真尺子（PDType0Font.getStringWidth）接回**同一个**排版器（编译
+     * :core:jar 进 classpath，不重写第二套断行规则），画成 PDF 再渲染成图，数墨迹的边界。
+     *
+     * 两个方向都要查：宽度报少了字会印到边距外，报多了每行提前断、纸面右边豁口。所以除了"不出血"，
+     * 还有一条"最长行必须接近栏宽" —— 否则把字号调到 1pt 也能顺利通过溢出检查。
+     */
+    private static void verifyTextLayout(File fontFile, File out) throws Exception {
+        StringBuilder text = new StringBuilder();
+        String cjk = "文件工坊把图片、文档、音频都放在手机上处理，一个字都不上传；断行要能在字之间断，收尾标点不许顶到行首。";
+        String latin = "The quick brown fox jumps over the lazy dog while converting pdf images and fonts. ";
+        for (int p = 0; p < 60; p++) {
+            text.append(cjk).append(latin).append(cjk).append((char) 10);
+            if (p % 4 == 3) text.append((char) 10);
+        }
+        String body = text.toString();
+
+        float pageW = 595f, pageH = 842f, margin = 56f, size = 11f;
+        float indent = size * 2f;
+        float content = pageW - margin * 2;
+        try (PDDocument doc = new PDDocument()) {
+            PDType0Font font = PDType0Font.load(
+                doc, java.nio.file.Files.newInputStream(fontFile.toPath()), true);
+            Function2<String, Float, Float> widthOf = (chunk, pt) -> {
+                try {
+                    return font.getStringWidth(chunk) / 1000f * pt;
+                } catch (IOException e) {
+                    throw new IllegalStateException("这个字体量不出「" + chunk + "」", e);
+                }
+            };
+            TextLayout plan = TextLayoutPlanner.INSTANCE.layout(
+                body, pageW, pageH, margin, size, 1.4f, indent, widthOf);
+
+            int drawn = 0;
+            float modelRightMost = 0f;
+            for (TextPage page : plan.getPages()) {
+                PDPage pdPage = new PDPage(new PDRectangle(pageW, pageH));
+                doc.addPage(pdPage);
+                PDPageContentStream stream = new PDPageContentStream(doc, pdPage);
+                stream.beginText();
+                stream.setFont(font, size);
+                stream.setNonStrokingColor(0f, 0f, 0f);
+                for (TextLine line : page.getLines()) {
+                    if (line.getText().isEmpty()) continue;
+                    stream.setTextMatrix(Matrix.getTranslateInstance(line.getX(), pageH - line.getY()));
+                    stream.showText(line.getText());
+                    drawn++;
+                    modelRightMost = Math.max(modelRightMost, line.getX() + widthOf.invoke(line.getText(), size));
+                }
+                stream.endText();
+                stream.close();
+            }
+            doc.save(out);
+
+            report("排出了多页而不是挤成一页（页数=" + plan.getPageCount() + "）", plan.getPageCount() > 3);
+            report("每行都画了上去（" + drawn + " 行）", drawn > 100);
+            report("排版器认为没有一行装不下（notes=" + plan.getNotes() + "）", plan.getNotes().isEmpty());
+            double dpr = 150 / 72.0;
+            PDFRenderer renderer = new PDFRenderer(doc);
+            for (int i = 0; i < doc.getNumberOfPages(); i++) {
+                int[] box = bounds(renderer.renderImageWithDPI(i, 150));
+                double left = box[0] / dpr, right = box[2] / dpr, top = box[1] / dpr, bottom = box[3] / dpr;
+                report("第 " + (i + 1) + " 页左侧不出血（inkLeft=" + pt(left) + "）", left >= margin - 2.5);
+                report("第 " + (i + 1) + " 页右侧不越边距（inkRight=" + pt(right) + "，上限 " + pt(content + margin) + "）",
+                    content + margin + 2.5 >= right);
+                report("第 " + (i + 1) + " 页顶部不越边距（inkTop=" + pt(top) + "）", top >= margin - 6);
+                report("第 " + (i + 1) + " 页底部不越边距（inkBottom=" + pt(bottom) + "）", bottom <= pageH - margin + 6);
+            }
+            report("最长行用掉了栏宽的大部分（模型右端=" + pt(modelRightMost) + "，栏尾=" + pt(margin + content) + "）",
+                modelRightMost >= margin + content - size * 2.5);
+            String extracted = nonWhitespace(textOf(out, false));
+            String wanted = nonWhitespace(body);
+            report("文字层抽回来的字数与源文本相当（抽出 " + extracted.length() + " / 应有 " + wanted.length() + "）",
+                wanted.length() * 0.98 <= extracted.length());
+        }
+    }
+
+    /** 墨迹包围盒：{minX, minY, maxX, maxY}，全白图返回全 0。 */
+    private static int[] bounds(BufferedImage image) {
+        int minX = Integer.MAX_VALUE, minY = Integer.MAX_VALUE, maxX = -1, maxY = -1;
+        for (int y = 0; y < image.getHeight(); y++) {
+            for (int x = 0; x < image.getWidth(); x++) {
+                int rgb = image.getRGB(x, y);
+                boolean dark = ((rgb >> 16) & 0xFF) < 245 || ((rgb >> 8) & 0xFF) < 245 || (rgb & 0xFF) < 245;
+                if (!dark) continue;
+                if (x < minX) minX = x;
+                if (x > maxX) maxX = x;
+                if (y < minY) minY = y;
+                if (y > maxY) maxY = y;
+            }
+        }
+        if (maxX < 0) return new int[]{0, 0, 0, 0};
+        return new int[]{minX, minY, maxX, maxY};
+    }
+
+    private static String pt(double value) { return String.format("%.1f", value); }
+
+    /** 把所有空白剔掉：比"抽回来多少字"时两边口径要一致，也不靠正则转义。 */
+    private static String nonWhitespace(String value) {
+        StringBuilder out = new StringBuilder();
+        value.chars().filter(c -> !Character.isWhitespace(c)).forEach(out::appendCodePoint);
+        return out.toString();
     }
 
     private static double[] inkFraction(File file) throws Exception {

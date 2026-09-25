@@ -327,6 +327,22 @@ sealed interface Operation {
         }
     }
 
+    /**
+     * 纯文本印成 PDF：自动断行（中文可在字之间断）、自动分页。
+     *
+     * [lineHeight] 是行距倍数，[marginPt] 是四边页边距（pt），[numberPages] 决定要不要页脚页码。
+     */
+    data class TextToPdf(
+        val fontSize: Int = 11,
+        val paper: PdfPaper = PdfPaper.A4,
+        val marginPt: Int = 56,
+        val lineHeight: Float = 1.4f,
+        val firstLineIndent: Boolean = true,
+        val numberPages: Boolean = true,
+    ) : Operation {
+        override val label get() = "印成 PDF"
+    }
+
     /** 把 .ico 里的每一帧画面导成 PNG。 */
     data object IcoToImages : Operation {
         override val label get() = "导出图标里的画面"

@@ -165,6 +165,9 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
             is Operation.IcoToImages -> items.forEach { item ->
                 collect(item.name) { images.icoToImages(item, ::staging) }
             }
+            is Operation.TextToPdf -> items.forEach { item ->
+                collect(item.name) { listOf(pdf.textToPdf(item, operation)) }
+            }
         }
 
         coroutineContext.ensureActive()
