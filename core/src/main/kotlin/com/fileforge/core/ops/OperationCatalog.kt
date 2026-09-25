@@ -41,6 +41,8 @@ enum class OperationKind(val label: String, val hint: String) {
     XlsxToCsv("表格转 CSV", "每张表一份 CSV，日期不再是序列号"),
     MdToHtml("Markdown 转 HTML", "出一份带 charset 的完整页面；认不出标记会直说"),
     MdToText("Markdown 去标记", "吃掉标记，列表记号与表格分列留着"),
+    HtmlToText("网页抽文字", "段落列表表格留着，脚本样式页眉丢掉"),
+    HtmlToMarkdown("网页转 Markdown", "标题、列表、表格、链接写成标记；补了几处标签会说明"),
     ImageToIco("做成图标 ICO", "一次出 16/32/48/256 多个尺寸"),
     IcoToImages("图标拆成图片", "把 .ico 里的每个画面导成 PNG"),
     XmlToJson("XML 转 JSON", "属性加 @、子元素成数组；带 DTD 的不解析"),
@@ -71,9 +73,9 @@ enum class OperationKind(val label: String, val hint: String) {
             CompressVideo -> fileKind.isVideo
             ConvertAudio -> fileKind.isAudio
             // 两种都只认"这是个文本文件"，具体是哪种字幕交给解析器判
-            ConvertTextEncoding, ConvertSubtitle -> fileKind == FileKind.Text
-            // 印成 PDF 走同一套排版：docx / pptx 先把正文抽出来，抽出来的是什么就是什么
-            TextToPdf -> fileKind == FileKind.Text || fileKind == FileKind.Docx || fileKind == FileKind.Pptx
+            ConvertTextEncoding, ConvertSubtitle -> fileKind.isTextual
+            // 印成 PDF 走同一套排版：docx / pptx 先把正文抽出来，网页先把标记剔掉，抽出来的是什么就是什么
+            TextToPdf -> fileKind.isTextual || fileKind == FileKind.Docx || fileKind == FileKind.Pptx
             OfficeToText -> fileKind == FileKind.Docx || fileKind == FileKind.Pptx
             XlsxToCsv -> fileKind == FileKind.Xlsx
             // 只有真带画面的类型才给"提取音频"，否则用户会对一个纯音频文件点它
@@ -86,8 +88,12 @@ enum class OperationKind(val label: String, val hint: String) {
             UnpackZip -> fileKind == FileKind.Zip
             // 数据格式这一族只看"是不是文本"，具体是不是合法 JSON / 长得对不对交给引擎判，
             // 判不动会直说 —— 与字幕那族同一个路子，不在类型层猜。Markdown 同理：
-            // 纯文本里没有任何记号时"转 HTML"没意义，引擎会拒而不是硬出一页
-            FormatJson, JsonToCsv, CsvToJson, XmlToJson, JsonToXml, MdToHtml, MdToText -> fileKind == FileKind.Text
+            // 纯文本里没有任何记号时"转 HTML"没意义，引擎会拒而不是硬出一页。
+            // .html 也算这一族：很多人把网页存成 .txt，反向那两条（抽文字 / 转 MD）本来就要给它
+            FormatJson, JsonToCsv, CsvToJson, XmlToJson, JsonToXml, MdToHtml, MdToText -> fileKind.isTextual
+            // 网页那两条反过来也宽松：类型说 Text 但内容满是标签的文件照样能抽，
+            // 真没有 HTML 标记时引擎会直说"这不是网页"，不硬出一份少了尖括号的文件
+            HtmlToText, HtmlToMarkdown -> fileKind.isTextual
         }
     }
 }

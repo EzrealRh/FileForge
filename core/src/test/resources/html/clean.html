@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>页面标题</title>
+  <style>p { color: #f00 }</style>
+  <script>var 不该出现 = "<p>也不是结构</p>";</script>
+</head>
+<body>
+  <h1>一级</h1>
+  <h3>三级</h3>
+  <p>一段里有<strong>粗</strong>、<em>斜</em>、<code>码</code>、<del>废</del>，
+     还有<a href="https://example.com">一个链接</a>与<img src="a.png" alt="图注">。</p>
+  <p>第二段的第二行<br>换行接着写。</p>
+  <ul>
+    <li>苹果
+      <ul><li>鸭梨</li><li>雪梨</li></ul>
+    </li>
+    <li>桃</li>
+  </ul>
+  <ol>
+    <li>第一步</li>
+    <li>第二步</li>
+  </ol>
+  <blockquote><p>引用里的话</p></blockquote>
+  <pre><code class="language-kotlin">fun main() {
+    println("甲 &lt;乙&gt;")
+}</code></pre>
+  <table>
+    <tr><th>名称</th><th>数量</th></tr>
+    <tr><td>苹果</td><td>3</td></tr>
+    <tr><td>梨</td><td>12</td></tr>
+  </table>
+  <hr>
+  <p>实体验证：&amp; &lt; &gt; &quot; &#8212; 10&deg;C &nbsp;结束。</p>
+  <p>数学式子 a &lt; b 且 c &gt; d 不该被当标签。</p>
+  <p>标记字符 *星号* _下划线_ #井号 [方括号] `反引号` 1. 行首的数字点 以及 &lt;tag&gt; 与 | 竖线。</p>
+</body>
+</html>

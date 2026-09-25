@@ -1,14 +1,22 @@
 package com.fileforge.core.model
 
+import com.fileforge.core.doc.Html
+
 /** 文件真实类型，只看头部魔数，不信扩展名。 */
 enum class FileKind {
     Pdf, Png, Jpeg, Gif, WebP, Bmp, Heic, Avif, Mp4, WebM, Mkv, QuickTime,
     Mp3, Aac, M4a, Flac, Ogg, Wav,
-    Zip, Ico, Docx, Xlsx, Pptx, Text, Unknown;
+    Zip, Ico, Docx, Xlsx, Pptx, Text, Html, Unknown;
 
     val isImage: Boolean get() = this in IMAGE_KINDS
     val isVideo: Boolean get() = this in VIDEO_KINDS
     val isAudio: Boolean get() = this in AUDIO_KINDS
+
+    /**
+     * 能不能当文本处理。网页单独占一类只为把角标和 mime 说对，
+     * 可用的操作跟纯文本是同一套 —— 很多人把网页存成 .txt，两边都得能抽文字。
+     */
+    val isTextual: Boolean get() = this == Text || this == Html
 
     /** 分享和写 MediaStore 都要用；认不出的一律按二进制流给。 */
     val mimeType: String get() = when (this) {
@@ -36,6 +44,7 @@ enum class FileKind {
         Xlsx -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         Pptx -> "application/vnd.openxmlformats-officedocument.presentationml.presentation"
         Text -> "text/plain"
+        Html -> "text/html"
         Unknown -> "application/octet-stream"
     }
 
@@ -68,6 +77,7 @@ enum class FileKind {
         Xlsx -> "XLSX"
         Pptx -> "PPTX"
         Text -> "文本"
+        Html -> "HTML"
         Unknown -> "文件"
     }
 
@@ -122,6 +132,7 @@ object FileTypeSniffer {
             u(0) == 0xFF && (u(1) and 0xE0) == 0xE0 && (u(1) and 0xF6) == 0xF0 -> FileKind.Aac
             u(0) == 0xFF && (u(1) and 0xE0) == 0xE0 -> FileKind.Mp3
             u(0) == 0x50 && u(1) == 0x4B && u(2) == 0x03 && u(3) == 0x04 -> FileKind.Zip
+            looksLikeHtml(header) -> FileKind.Html
             looksLikeText(header) -> FileKind.Text
             else -> FileKind.Unknown
         }
@@ -145,6 +156,23 @@ object FileTypeSniffer {
             if (v < 0x20 && v != 0x09 && v != 0x0A && v != 0x0B && v != 0x0C && v != 0x0D) controls++
         }
         return controls * 20 <= header.size
+    }
+
+    /**
+     * 网页没有魔数可看，只能认标记：第一个实义字符是 `<`，且开头这一截里出现常见的容器标签。
+     *
+     * 判据宁紧勿松：`<?xml` 开头直接不算（XML 是另一族，svg 也长这样），普通文本更不该被标成 HTML。
+     * 真网页被当成纯文本没什么损失 —— "网页抽文字"两条操作对纯文本同样开放，引擎自己会判有没有标记。
+     */
+    fun looksLikeHtml(header: ByteArray): Boolean {
+        var at = if (header.size >= 3 && (header[0].toInt() and 0xFF) == 0xEF &&
+            (header[1].toInt() and 0xFF) == 0xBB && (header[2].toInt() and 0xFF) == 0xBF
+        ) 3 else 0                                                      // UTF-8 BOM 先跳掉
+        while (at < header.size && (header[at].toInt() and 0xFF) <= 0x20) at++
+        if (at >= header.size || header[at] != '<'.code.toByte()) return false
+        // XML 声明开头的是另一族（svg 也长这样），别抢它的角标
+        if (String(header, at, 5, Charsets.ISO_8859_1) == "<?xml") return false
+        return Html.looksLikeHtml(String(header, at, header.size - at, Charsets.ISO_8859_1))
     }
 
     /**

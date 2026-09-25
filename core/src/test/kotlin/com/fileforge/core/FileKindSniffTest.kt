@@ -181,4 +181,32 @@ class FileKindSniffTest {
             OperationKind.applicable(setOf(FileKind.Docx, FileKind.Text)).toSet(),
         )
     }
+
+    @Test
+    fun `网页认标记，且与普通文本共用同一族操作`() {
+        assertEquals(FileKind.Html, FileTypeSniffer.sniff("<!DOCTYPE html>\n<html>\n<head><title>甲</title>".toByteArray()))
+        assertEquals(FileKind.Html, FileTypeSniffer.sniff("   \n\r<html lang=\"zh\"><body>甲</body></html>".toByteArray()))
+        assertEquals(FileKind.Html, FileTypeSniffer.sniff("<div><p>只有正文片段的一张网页</p></div>".toByteArray()))
+        // 带 BOM 也一样：浏览器存出来的网页十分有三字节的头
+        assertEquals(
+            FileKind.Html,
+            FileTypeSniffer.sniff(byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte()) + "<html><body>甲</body></html>".toByteArray()),
+        )
+
+        // 这几份都不是网页：开头不是 '<'、是 XML 的另一族、或者只是写着尖括号的普通文字
+        assertEquals(FileKind.Text, FileTypeSniffer.sniff("甲 <html> 只是文档里提了一句".toByteArray()))
+        assertEquals(FileKind.Text, FileTypeSniffer.sniff("数学式子 a<b 且 c>d".toByteArray()))
+        assertEquals(FileKind.Text, FileTypeSniffer.sniff("<?xml version=\"1.0\"?><svg></svg>".toByteArray()))
+        assertEquals(FileKind.Text, FileTypeSniffer.sniff("# 一级标题\n- 项目".toByteArray()))
+
+        val html = OperationKind.applicable(setOf(FileKind.Html))
+        assertTrue(OperationKind.HtmlToText in html && OperationKind.HtmlToMarkdown in html, "网页该有这两条：$html")
+        assertTrue(OperationKind.ConvertTextEncoding in html, "网页也要能换编码：$html")
+        assertTrue(OperationKind.TextToPdf in html, "网页能印成 PDF：$html")
+        // 网页与纯文本混着选：这两条对两边都成立（引擎自己判有没有标签）
+        assertTrue(
+            setOf(OperationKind.HtmlToText, OperationKind.HtmlToMarkdown)
+                .all { it in OperationKind.applicable(setOf(FileKind.Html, FileKind.Text)) },
+        )
+    }
 }

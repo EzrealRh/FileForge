@@ -181,6 +181,12 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
             is Operation.MdToText -> items.forEach { item ->
                 collect(item.name) { listOf(text.markdownToText(item)) }
             }
+            is Operation.HtmlToText -> items.forEach { item ->
+                collect(item.name) { listOf(text.htmlToText(item)) }
+            }
+            is Operation.HtmlToMarkdown -> items.forEach { item ->
+                collect(item.name) { listOf(text.htmlToMarkdown(item)) }
+            }
         }
 
         coroutineContext.ensureActive()

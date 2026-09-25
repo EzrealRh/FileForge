@@ -353,7 +353,8 @@ sealed interface Operation {
         override val label get() = "提取文档文字"
     }
 
-    /** .xlsx 每张表转一份 CSV。日期照样式认出来的样子写，数字写法原样搬。 */    data class XlsxToCsv(
+    /** .xlsx 每张表转一份 CSV。日期照样式认出来的样子写，数字写法原样搬。 */
+    data class XlsxToCsv(
         val delimiter: Delimiter = Delimiter.Comma,
         val ending: LineEnding = LineEnding.Lf,
     ) : Operation {
@@ -372,6 +373,20 @@ sealed interface Operation {
     /** Markdown → 纯文本：吃掉标记，列表记号与表格分列留下。 */
     data object MdToText : Operation {
         override val label get() = "去掉标记"
+    }
+
+    /**
+     * 网页 → 纯文本：段落空行、列表记号、表格分列留着，脚本样式与页眉丢掉。
+     *
+     * 网页几乎都不是合法 XML，所以这里按浏览器那套补全没闭合的标签，补了几处会写在结果说明里。
+     */
+    data object HtmlToText : Operation {
+        override val label get() = "网页抽文字"
+    }
+
+    /** 网页 → Markdown：认得出结构的写成标记，认不出的（表单、内嵌框架）退化成文字并说出来。 */
+    data object HtmlToMarkdown : Operation {
+        override val label get() = "网页转 Markdown"
     }
 
     /** 把 .ico 里的每一帧画面导成 PNG。 */

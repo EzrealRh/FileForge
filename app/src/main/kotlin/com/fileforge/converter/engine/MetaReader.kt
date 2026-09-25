@@ -300,6 +300,7 @@ class MetaReader {
         FileKind.Xlsx -> "XLSX 表格"
         FileKind.Pptx -> "PPTX 演示"
         FileKind.Text -> "文本文件"
+        FileKind.Html -> "HTML 网页"
         FileKind.Mp3 -> "MP3 音频"
         FileKind.Aac -> "AAC 音频"
         FileKind.M4a -> "M4A 音频"

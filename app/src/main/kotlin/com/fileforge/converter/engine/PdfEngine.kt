@@ -54,6 +54,7 @@ import com.tom_roush.pdfbox.text.PDFTextStripper
 import com.tom_roush.pdfbox.util.Matrix
 import com.fileforge.core.model.FileKind
 import com.fileforge.core.office.Extracted
+import com.fileforge.core.doc.Html
 import com.fileforge.core.doc.Markdown
 import java.io.Closeable
 import java.io.File
@@ -578,12 +579,18 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
                 }
                 val decoded = com.fileforge.core.text.TextCodecs.decodeForConversion(item.file.readBytes(), null)
                 val notes = ArrayList(listOf("按 ${decoded.encoding.label} 读" + if (decoded.hadBom) "（源带 BOM）" else ""))
-                // 带 Markdown 记号的文本直接印会把 # 与 ** 一起印到纸上；先吃标记，并写明吃了
-                val body = if (Markdown.looksLikeMarkdown(decoded.text)) {
-                    notes += "先按 Markdown 去掉标记再排版（源文本里有标题/列表/代码那类记号）"
-                    Markdown.toPlainText(decoded.text).text
-                } else {
-                    decoded.text
+                // 带记号的文本直接印会把 # 与 ** 或整个 <div> 一起印到纸上；先吃掉，并写明吃了
+                // 先判网页：<!doctype>、<div> 这种记号普通文章里不会出现，比 Markdown 那套更具体
+                val body = when {
+                    Html.looksLikeHtml(decoded.text) -> {
+                        notes += "先按网页抽掉标签再排版（源文件里有 HTML 标签）"
+                        Html.toPlainText(decoded.text).text
+                    }
+                    Markdown.looksLikeMarkdown(decoded.text) -> {
+                        notes += "先按 Markdown 去掉标记再排版（源文本里有标题/列表/代码那类记号）"
+                        Markdown.toPlainText(decoded.text).text
+                    }
+                    else -> decoded.text
                 }
                 Extracted(body, notes)
             }

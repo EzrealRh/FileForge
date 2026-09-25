@@ -221,6 +221,39 @@ class TextEngine(private val workspace: Workspace) {
         return text
     }
 
+    /**
+     * 网页 → 纯文本：段落、列表记号、表格分列都留着，脚本样式与页眉丢掉。
+     *
+     * 标签没闭合会被按浏览器的补法补上，补了几处写在结果说明里 —— 那说明源文件本身写坏了，
+     * 抽出来的结构可能不是作者想的那样，不能装作没发生。
+     */
+    fun htmlToText(item: WorkItem): EngineOutput {
+        val rendered = com.fileforge.core.doc.Html.toPlainText(requireHtml(readText(item)))
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "", "txt"),
+            writeText(item, rendered.text, "txt"),
+            (listOf("${rendered.text.count { it == '\n' }} 行") + rendered.notes).joinToString(" · "),
+        )
+    }
+
+    /** 网页 → Markdown：标题、列表、表格、链接写成标记；表单与内嵌框架只剩文字，也会说出来。 */
+    fun htmlToMarkdown(item: WorkItem): EngineOutput {
+        val rendered = com.fileforge.core.doc.Html.toMarkdown(requireHtml(readText(item)))
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "", "md"),
+            writeText(item, rendered.text, "md"),
+            (listOf("${rendered.text.lines().size} 行") + rendered.notes).joinToString(" · "),
+        )
+    }
+
+    private fun requireHtml(text: String): String {
+        require(com.fileforge.core.doc.Html.looksLikeHtml(text)) {
+            "这份文件里没找到 HTML 标签（<!doctype>、<html>、<p>、<div> 这些），它本来就是纯文本。" +
+                "要去掉 Markdown 标记请用「Markdown 去标记」"
+        }
+        return text
+    }
+
     /** 数一棵树里有多少个值节点，给结果说明用（"转成功了"得有个可看的量）。 */
     private fun countElements(json: Json): Int = when {
         json.members.isNotEmpty() -> json.members.values.sumOf { countElements(it) } + 1

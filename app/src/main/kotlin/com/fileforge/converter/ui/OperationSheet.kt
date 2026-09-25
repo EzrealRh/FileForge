@@ -544,6 +544,16 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
                 Summary("标记吃掉，正文留下：列表还是带记号，表格改成制表符分列。")
                 Summary("链接的地址与标题、图片本体在纯文本里没处放，会逐条写明丢了几处。")
             }
+            OperationKind.HtmlToText -> {
+                Summary("段落空行、列表记号、表格分列都留着；脚本、样式与页眉里那些不是给人读的字会丢掉并写明几段。")
+                Summary("标签没闭合的按浏览器那套补上，补了几处会说出来 —— 那说明源文件本身写坏了。")
+                Summary("实体认常用的一批（&amp; &nbsp; &#8212; 与老式不带分号的 &amp），认不出的照字面留着并计数。")
+            }
+            OperationKind.HtmlToMarkdown -> {
+                Summary("标题、列表、表格、链接、图片、代码块写成 Markdown 标记；加粗斜体删除线照写。")
+                Summary("表单控件与内嵌框架里放不进标记的东西，只留文字并写明几处。")
+                Summary("成品里的 `*` `_` `<` 都是转义过的字面字符，别人再读这份 Markdown 不会把正文读成标记。")
+            }
             OperationKind.IcoToImages -> {
                 Summary("PNG 内嵌的那种直接把内嵌字节原样取出，不重新编码；老式位图（DIB）的要重建像素再编 PNG。")
                 Summary("一个图标里有几个尺寸就出几张图，名字带序号。")
@@ -719,6 +729,8 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
             OperationKind.XlsxToCsv -> Operation.XlsxToCsv(csvDelimiter, csvEnding)
             OperationKind.MdToHtml -> Operation.MdToHtml
             OperationKind.MdToText -> Operation.MdToText
+            OperationKind.HtmlToText -> Operation.HtmlToText
+            OperationKind.HtmlToMarkdown -> Operation.HtmlToMarkdown
             OperationKind.IcoToImages -> Operation.IcoToImages
         }
     }
