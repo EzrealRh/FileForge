@@ -132,6 +132,7 @@ class OfficeFixtureTest {
         val bytes = resource("deck.pptx")
         val slides = entriesOf(bytes).map { it.name }.filter { it.startsWith("ppt/slides/slide") && it.endsWith(".xml") }.sorted()
         File(dir, "deck.pptx.txt").writeBytes(slides.joinToString("") { OfficeText.pptxSlide(partOf(bytes, it)).text }.toByteArray())
-        assertTrue(dir.listFiles()?.size == 3, "三份产物都要落盘")
+        assertTrue(listOf("prose.docx.txt", "tables.docx.txt", "deck.pptx.txt").all { File(dir, it).length() > 0L },
+            "三份产物都要落盘")
     }
 }

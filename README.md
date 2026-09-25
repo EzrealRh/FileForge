@@ -52,8 +52,9 @@ core/   纯 Kotlin，无安卓依赖，可 JVM 单测
   core/archive/  zip 的读与写：EOCD 从尾部倒找、zip64 哨兵值、名字编码（UTF-8 标志位缺失时按 UTF-8→GBK→CP437 退）、本地头先占位再回填；解压决策（压平名字、跳过口令与符号链接、体积上限）
   core/data/   ICO 图标的目录与 DIB/PNG 两种内嵌载荷、CSV 的读写（RFC 4180 引号、分隔符按引号外的票猜、BOM 与 CRLF）、JSON↔表的桥（列取并集、嵌套压成一格文本、会丢什么逐条声明）、XML↔JSON（约定：子元素成数组、属性加 @、文字进 #text；带 DTD 一律不解析）
   core/text/   编码识别与严格解码、换行风格、字幕四方格式的时间轴
-  core/office/ OOXML（docx / pptx）读取：按部件名判类型、按文件自己的大纲取页序（不靠文件名排序）、
-               正文走树抽字（一段一行、表格拍平成制表符、修订删掉的字与域代码不混进正文、丢了什么逐条声明）
+  core/office/ OOXML（docx / xlsx / pptx）读取：按部件名判类型、按文件自己的大纲取页序表序（不靠文件名排序）、
+               正文走树抽字（一段一行、表格拍平成制表符、修订删掉的字与域代码不混进正文、丢了什么逐条声明）、
+               工作簿按格子引用对位（稀疏行列不错位）、样式里的日期序列号转成 ISO（数字写法一律原样搬）
   core/audio/  音频直通判据、码率反推、WAV 文件头
   core/update/ GitHub release 解析、版本号比较、选哪个 apk 下发
   core/ops/    操作目录与参数模型
@@ -80,12 +81,16 @@ tools/verify_data.py           拿 Python 复核 Kotlin 的数据产物：三份
                                跑法：先 `./gradlew :core:test` 落盘，再 `python tools/verify_data.py`
 tools/verify_xml.py            拿 ElementTree 复核 Kotlin 写出的 XML：打得开、读回来是同一棵树、特殊字符全以实体写出
                                跑法：先 `./gradlew :core:test` 落盘，再 `python tools/verify_xml.py`
-tools/make_office_fixtures.py  手工拼 OOXML 部件再用标准库 zipfile 装成 docx/pptx 夹具（本机没有 Word），
-                               每个部件生成前先过一遍 ElementTree，期望值按"一行一段"写成 .expect
+tools/make_office_fixtures.py  手工拼 OOXML 部件再用标准库 zipfile 装成 docx/pptx 夹具，book.xlsx 交给
+                               **openpyxl** 压（本机没有 Word，让真实现去压文件比手写更像真文件）；
+                               每个部件生成前先过一遍 ElementTree，期望值按"一行一段"写成 .expect/.truth
 tools/verify_office.py         拿 **pandoc**（自带一套完全独立的 docx/pptx 读取器）复核 Kotlin 抽出的文本：
                                段落逐字逐序相同，两处规矩不同的地方（段内制表符、文本框、幻灯片表格）
                                作为声明过的差异写死在脚本里，漂了就会红
                                跑法：先 `./gradlew :core:test` 落盘，再 `python tools/verify_office.py`
+tools/verify_xlsx.py           拿 **openpyxl** 复核 Kotlin 读的 xlsx：表名与表序、每张格子逐字相同、日期从
+                               序列号变成 ISO、带逗号的格子经 `csv` 标准库读回原文、稀疏行列对位
+                               跑法：先 `./gradlew :core:test` 落盘，再 `python tools/verify_xlsx.py`
 tools/verify_meta_clean.py  拿 Pillow（另一套完整实现）复核清元数据的产物：打得开、像素逐点相同、
                              身份信息已清空、ICC 一个字节没改。先 `./gradlew :core:test` 落盘再跑
                              跑法：`python tools/verify_meta_clean.py`
@@ -105,7 +110,7 @@ tools/updateprobe/ 应用内更新验证台：直接拿 :core 那份真代码打
 
 已经在 CI 之外真跑过的：
 
-- `./gradlew :core:test` 288 个用例全绿：页码解析（多段/开放端点/倒序/越界/坏输入）、按体积分组（含"试探次数远小于页数"的复杂度约束、强非单调 measure 的 fuzz）、按份数均分不重不漏、压缩档位阶梯单调、命名补零与重名、大小解析、GIF 编解码、像素预算截断、disposal 与透明槽往返、视频码率反推、多图合成 GIF 的画布夹算（外接矩形/最长边/帧数×像素预算/兜底不兼容）、日期分组与批次血缘、跨类型操作的可用矩阵、页码与水印排版（起始偏移、三种样式、四个位置、旋转页的视觉坐标换算、平铺格子中心、字号反算与夹取）、版本号比较与 release 解析（用线上抓下来的真回包当夹具）、图片元数据（拆段、EXIF/TIFF 读取、清理前后像素 sha256 相等）、纯文本排版（中文在字之间断、收尾标点不顶行首、开括号不留行尾、500 字长串不卡死、每页行数与基线坐标、段首缩进既排窄也整行右移、单字比栏宽还宽要报溢出而不是静悄悄）
+- `./gradlew :core:test` 305 个用例全绿：页码解析（多段/开放端点/倒序/越界/坏输入）、按体积分组（含"试探次数远小于页数"的复杂度约束、强非单调 measure 的 fuzz）、按份数均分不重不漏、压缩档位阶梯单调、命名补零与重名、大小解析、GIF 编解码、像素预算截断、disposal 与透明槽往返、视频码率反推、多图合成 GIF 的画布夹算（外接矩形/最长边/帧数×像素预算/兜底不兼容）、日期分组与批次血缘、跨类型操作的可用矩阵、页码与水印排版（起始偏移、三种样式、四个位置、旋转页的视觉坐标换算、平铺格子中心、字号反算与夹取）、版本号比较与 release 解析（用线上抓下来的真回包当夹具）、图片元数据（拆段、EXIF/TIFF 读取、清理前后像素 sha256 相等）、纯文本排版（中文在字之间断、收尾标点不顶行首、开括号不留行尾、500 字长串不卡死、每页行数与基线坐标、段首缩进既排窄也整行右移、单字比栏宽还宽要报溢出而不是静悄悄）
 - 应用内更新用 `bash tools/updateprobe/run.sh` 打了线上真接口，**全程不带任何凭据**，14 条断言全过：匿名就能读到发布页（所以应用内更新零配置）、没有 User-Agent 会 403 所以头必须带、选包选到 `*-release.apk`（7.6MB）而不是 debug（25MB）、下载端点是 api 域名、**手动跟 302 到 release-assets 域名后，远端包与本机构建产物的 `classes.dex` / `AndroidManifest.xml` / `resources.arsc` 条目 CRC 三项全等**。这里踩过一次坑：最早那条判据是"前 4KB 逐字节相同"，但重新打包会换 zip 时间戳导致体积相同而字节不同 —— 那是判据写错，不是产物错，所以改成比条目 CRC
 - GIF 解码器逐像素比对 **Pillow 生成的 4 份夹具**（含交错帧、多帧、40x40x200 色），真值也来自 Pillow
 - GIF 编码器输出经 **Pillow 与 omggif 两个第三方解码器**验证：mincode=2 的 6000 像素码流全部还原一致；把 4 份夹具重编码后交给 Pillow 读回，3 份 0 差异，`rich`（跨帧 792 色压到 256 色）最大色差 40，属于调色板收敛的预期损失
@@ -144,6 +149,13 @@ tools/updateprobe/ 应用内更新验证台：直接拿 :core 那份真代码打
   文本框里的字 Kotlin 收（pandoc 走 `mc:Choice` 那条备用写法就不收）、幻灯片里的表 Kotlin 收（pandoc 的 pptx 读取器不认 `a:tbl`）。
   这条第三方对照也逮到两处错：一处是**夹具自己**（超链接被挂成 body 的直接孩子，那在 OOXML 里不合法，pandoc 直接当没有这段）；
   另一处是实现（嵌套段落被收了两次尾，文本框里那段自己换一次行、外面那段又补一次，于是每个文本框前面凭空多一个空行）
+- xlsx 这一族换了 **openpyxl** 当参照物：夹具由它压（真实现压出来的文件比手写的更像会碰到的文件），
+  `.truth` 记的是它**读回来**看到的格子，Kotlin 的产物由 `tools/verify_xlsx.py` 用 `csv` 标准库读回来逐格比对，
+  10 条判据全过（反向把一个日期格改回序列号 `45047`，两条判据立刻变红）。
+  这条链子当场纠了两处：一是**Excel 1900 纪元的算法** —— 原先按"1899-12-31 加 (序号-1) 天"推，
+  算出来第 1 天落在 1899-12-31，与 openpyxl 存在文件里的序号对不上（45047 必须是 2023-05-01），改成"61 以后按 1899-12-30 起算、
+  1~59 单独算、60 那格照 Excel 的写法给出不存在的 1900-02-29"；二是**格式码判日期**：跳方括号段时拿同一种字符去找结尾
+  （`[红色]yyyy` 里再找 `[`），结果带颜色段的日期格式被判成非日期，改成找配对的 `]`
 
 还没验证的（需要真机跑一次）：
 

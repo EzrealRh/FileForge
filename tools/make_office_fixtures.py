@@ -10,8 +10,12 @@
   tables.docx  表格、文本框、图片、脚注引用 —— 这些 pandoc 有它自己的规矩，只跟自家期望比
   deck.pptx    两页幻灯片，每页多个形状
 
+另外还压一份 book.xlsx 交给 **openpyxl**（真实现压出来的比手写的更像会碰到的文件），
+参照值 `book.xlsx.truth` 记的是 openpyxl **读回来**看到的格子，不是我以为写进去的。
+
 输出到 core/src/test/resources/office/。用法：python tools/make_office_fixtures.py
 """
+import datetime
 import io
 import os
 import zipfile
@@ -258,6 +262,78 @@ def write_zip(name, parts):
     return names
 
 
+def build_book(path):
+    """用 openpyxl 压一份真 xlsx 当参照物：表名、日期、自定义日期格式、稀疏行、空表都有。
+
+    故意不放公式：openpyxl 压出来的文件里没有"算过的结果"，那一格的取值规矩两端本来就不同，
+    由 Kotlin 侧自己用手写部件的单测钉住。
+    """
+    try:
+        from openpyxl import Workbook
+    except ImportError:
+        print("  跳过 book.xlsx：本机没有 openpyxl（pip install openpyxl 后重跑本脚本）")
+        return False
+    wb = Workbook()
+    bill = wb.active
+    bill.title = "费用"
+    bill["A1"] = "项目"
+    bill["B1"] = "金额"
+    bill["C1"] = "发生日"
+    bill["A2"] = "打车"
+    bill["B2"] = 38.5
+    bill["C2"] = datetime.date(2023, 5, 1)
+    bill["C3"] = datetime.datetime(2024, 2, 29, 8, 30, 15)
+    bill["C3"].number_format = "yyyy-mm-dd hh:mm:ss"
+    bill["A4"] = "含中文的格子，带逗号,"
+    bill["C4"] = datetime.date(2021, 3, 4)
+    bill["C4"].number_format = 'yyyy"年"m"月"d"日"'      # 带字面文字的自定义格式：日期码在引号外面
+    bill["D5"] = "第五行只有 D 列有东西"                     # 行号与列号都跳过前面
+    bill["E6"] = 0.25
+    bill["B7"] = "纯文字"
+    bill["C7"].number_format = "0.00"                       # 没赋值的格子：样式是数字，值还是没有
+    empty = wb.create_sheet("空表")                          # 一张完全空的表
+    hidden = wb.create_sheet("第三张")
+    hidden["A1"] = "顺序要按工作簿声明的来"
+    wb.save(path)
+    print("  book.xlsx：由 openpyxl 压出，%d 字节" % os.path.getsize(path))
+    return True
+
+
+def book_truth(path):
+    """参照值 = openpyxl **读回来**看到的东西，按"一行一记录"写；日期一律展成 ISO 写法。"""
+    from openpyxl import load_workbook
+    wb = load_workbook(path)
+    out = []
+    for sheet in wb.worksheets:
+        rows = []
+        for row in sheet.iter_rows(values_only=True):
+            rows.append([render_cell(v) for v in row])
+        while rows and all(not cell for cell in rows[-1]):
+            rows.pop()
+        cells = ["# " + sheet.title]
+        cells += ["\t".join(row) for row in rows]
+        out.append("\n".join(cells))
+    return out
+
+
+def render_cell(value):
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "TRUE" if value else "FALSE"
+    if isinstance(value, datetime.datetime):
+        # openpyxl 把日期一律读成 datetime（Python 的类型系统决定的）：零点就还原成"只有日期"，
+        # 那才是文件里存的样子，也是 Excel 显示的样子
+        if (value.hour, value.minute, value.second) == (0, 0, 0):
+            return value.strftime("%Y-%m-%d")
+        return value.strftime("%Y-%m-%d %H:%M:%S")
+    if isinstance(value, datetime.date):
+        return value.strftime("%Y-%m-%d")
+    if isinstance(value, datetime.time):
+        return value.strftime("%H:%M:%S")
+    return str(value)
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     write_zip("prose.docx", [
@@ -288,6 +364,11 @@ def main():
         # 期望值按"一行一段"写成 .expect：两端的比对单位就是行，不各写一份解析器
         with io.open(os.path.join(OUT, name + ".expect"), "w", encoding="utf-8", newline="\n") as handle:
             handle.write("\n".join(lines) + "\n")
+    book = os.path.join(OUT, "book.xlsx")
+    if build_book(book):
+        blocks = book_truth(book)
+        with io.open(os.path.join(OUT, "book.xlsx.truth"), "w", encoding="utf-8", newline="\n") as handle:
+            handle.write("\n".join(blocks) + "\n")
     print("写到", os.path.normpath(OUT))
 
 
