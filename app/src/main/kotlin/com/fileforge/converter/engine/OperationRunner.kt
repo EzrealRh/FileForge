@@ -144,6 +144,15 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
             is Operation.UnpackArchive -> items.forEach { item ->
                 collect(item.name) { archives.unpack(item, operation, ::staging) }
             }
+            is Operation.FormatJson -> items.forEach { item ->
+                collect(item.name) { listOf(text.formatJson(item, operation)) }
+            }
+            is Operation.JsonToCsv -> items.forEach { item ->
+                collect(item.name) { listOf(text.jsonToCsv(item, operation)) }
+            }
+            is Operation.CsvToJson -> items.forEach { item ->
+                collect(item.name) { listOf(text.csvToJson(item, operation)) }
+            }
         }
 
         coroutineContext.ensureActive()

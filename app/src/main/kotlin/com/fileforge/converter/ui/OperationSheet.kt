@@ -47,6 +47,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.fileforge.core.audio.AudioTarget
+import com.fileforge.core.data.Delimiter
 import com.fileforge.core.meta.ImageMeta
 import com.fileforge.core.meta.MetaReport
 import com.fileforge.core.model.FileKind
@@ -186,6 +187,16 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
     var textEnding by mutableStateOf(LineEnding.Lf)
     var subtitleTarget by mutableStateOf(SubtitleFormat.Srt)
     var subtitleSource by mutableStateOf(-1)
+
+    var jsonPretty by mutableStateOf(true)
+    var jsonIndent by mutableStateOf(2f)
+    var jsonSort by mutableStateOf(false)
+    var jsonAscii by mutableStateOf(false)
+    var csvDelimiter by mutableStateOf(Delimiter.Comma)
+    var csvQuoteAll by mutableStateOf(false)
+    var csvEnding by mutableStateOf(LineEnding.Lf)
+    var csvHeader by mutableStateOf(true)
+    var csvInfer by mutableStateOf(false)
 
     private val encodingOptions get() = listOf("自动检测") + TextEncoding.entries.map { it.label }
 
@@ -439,6 +450,39 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
+            OperationKind.FormatJson -> {
+                Segmented("形态", listOf("压成一行", "缩进展开"), if (jsonPretty) 1 else 0) { jsonPretty = it == 1 }
+                if (jsonPretty) {
+                    PickerRow("缩进宽度", listOf("1", "2", "4", "8"), listOf(1, 2, 4, 8).indexOf(jsonIndent.roundToInt())) {
+                        jsonIndent = listOf(1f, 2f, 4f, 8f)[it]
+                    }
+                }
+                Segmented("键排序", listOf("保持原顺序", "按字母排"), if (jsonSort) 1 else 0) { jsonSort = it == 1 }
+                Segmented("非 ASCII", listOf("原样写 UTF-8", "转成 Unicode 转义"), if (jsonAscii) 1 else 0) { jsonAscii = it == 1 }
+                Summary("数字一律照抄原文：1.50 不会变成 1.5，大整数也不会丢位。键的先后顺序默认保持原样。")
+                Summary("这份不是合法 JSON 时会直接说清楚是哪一步读不下去，不会给你一个改坏了的文件。")
+            }
+            OperationKind.JsonToCsv -> {
+                PickerRow("分隔符", Delimiter.entries.map { it.label }, Delimiter.entries.indexOf(csvDelimiter)) {
+                    csvDelimiter = Delimiter.entries[it]
+                }
+                Segmented("换行", LineEnding.entries.map { it.label }, LineEnding.entries.indexOf(csvEnding)) {
+                    csvEnding = LineEnding.entries[it]
+                }
+                Segmented("引号", listOf("必要处才加", "每格都加"), if (csvQuoteAll) 1 else 0) { csvQuoteAll = it == 1 }
+                Summary("要最外层是数组的 JSON。数组里是对象就当一行、键当列名（列取并集）；是数组就按位置摆。")
+                Summary("CSV 只有文字：数字、真假、null 过去之后全成字符串；嵌套的对象与数组会被压成一格 JSON 文本。")
+                Summary("转过去会丢什么在结果说明里逐条写出来，不假装是无损转换。")
+            }
+            OperationKind.CsvToJson -> {
+                Segmented("首行", listOf("当普通数据行", "当列名"), if (csvHeader) 1 else 0) { csvHeader = it == 1 }
+                Segmented("类型识别", listOf("格子一律字符串", "认数字与真假"), if (csvInfer) 1 else 0) { csvInfer = it == 1 }
+                if (csvInfer) {
+                    Summary("认了类型之后，格子的**写法**就丢了：1.50 读回去是 1.5、1e3 读回去是 1000。007 这类前导零不会被认成数字，所以不受影响。")
+                }
+                Summary("分隔符按引号以外的票数自动认（逗号 / 分号 / 制表符 / 竖线），引号里的逗号不会骗到它。")
+                Summary("列数不齐照样转，缺的格子留空，并在结果里报是第几行 —— 那通常是数据错了而不是格式错了。")
+            }
             OperationKind.CleanMetadata -> {
                 val reports = remember(items) { items.map { it.name to metaReportOf(it) } }
                 reports.forEach { (name, report) ->
@@ -563,6 +607,11 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
             OperationKind.CleanMetadata -> Operation.CleanMetadata
             OperationKind.PackZip -> Operation.PackArchive
             OperationKind.UnpackZip -> Operation.UnpackArchive
+            OperationKind.FormatJson -> Operation.FormatJson(
+                jsonPretty, jsonIndent.roundToInt(), jsonSort, jsonAscii,
+            )
+            OperationKind.JsonToCsv -> Operation.JsonToCsv(csvDelimiter, csvEnding, csvQuoteAll)
+            OperationKind.CsvToJson -> Operation.CsvToJson(csvHeader, csvInfer, jsonIndent.roundToInt())
         }
     }
 }
