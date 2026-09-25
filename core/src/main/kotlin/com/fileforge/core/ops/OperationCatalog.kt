@@ -45,6 +45,7 @@ enum class OperationKind(val label: String, val hint: String) {
     HtmlToMarkdown("网页转 Markdown", "标题、列表、表格、链接写成标记；补了几处标签会说明"),
     CsvToXlsx("CSV 转 Excel", "写一份真 .xlsx；007 与 1.50 这类写法不会被猜成数字"),
     JsonToXlsx("JSON 转 Excel", "对象数组摊成表，列名取第一份对象的键"),
+    HtmlToCsv("网页表格转 CSV", "一张表一份 CSV；跨格按跨度占位，不把整行挤歪"),
     ImageToIco("做成图标 ICO", "一次出 16/32/48/256 多个尺寸"),
     IcoToImages("图标拆成图片", "把 .ico 里的每个画面导成 PNG"),
     XmlToJson("XML 转 JSON", "属性加 @、子元素成数组；带 DTD 的不解析"),
@@ -97,7 +98,7 @@ enum class OperationKind(val label: String, val hint: String) {
             // 真没有 HTML 标记时引擎会直说"这不是网页"，不硬出一份少了尖括号的文件
             HtmlToText, HtmlToMarkdown -> fileKind.isTextual
             // 反向那两条同理：是不是真表格交给引擎判（空文件、列数不齐都会直说），不在类型层猜
-            CsvToXlsx, JsonToXlsx -> fileKind.isTextual
+            CsvToXlsx, JsonToXlsx, HtmlToCsv -> fileKind.isTextual
         }
     }
 }

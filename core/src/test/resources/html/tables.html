@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head><meta charset="utf-8"><title>表格样本</title></head>
+<body>
+<table>
+  <caption>季度销量</caption>
+  <thead><tr><th>c11名称</th><th>c12数量</th><th>c13单价</th><th>c14备注</th></tr></thead>
+  <tbody>
+    <tr><td>c21苹果</td><td>c22三</td><td>c23带,逗号</td><td>c24说"引号"</td></tr>
+    <tr><td rowspan="2">c31竖着跨两行</td><td colspan="2">c32横着跨两格</td><td>c33跨完之后还有一格</td></tr>
+    <tr><td>c41第二行第一格</td><td>c42跳过被占的那列</td></tr>
+    <tr><td>c51甲<br>c55乙</td><td><p>c52第一段</p><p>c52第二段</p></td><td><ul><li>c53要点一</li><li>c53要点二</li></ul></td><td>c54尾格</td></tr>
+  </tbody>
+</table>
+
+<table>
+  <tr><th>t21外层</th><td>t22外面这格　<span style="color:red">带着内嵌表</span>：
+    <table><tr><th>t23内层甲</th><th>t24内层乙</th></tr><tr><td>t25内层的值</td><td>t26内层的第二个</td></tr></table>
+  </td></tr>
+</table>
+
+<table><td>x1散着的甲</td><td>x2散着的乙</td></table>
+
+<table><tr><td>y1只有这一格</td></tr><tr></tr></table>
+
+<table></table>
+</body>
+</html>

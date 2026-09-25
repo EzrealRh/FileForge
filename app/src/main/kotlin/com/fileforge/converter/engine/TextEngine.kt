@@ -23,6 +23,9 @@ import com.fileforge.converter.data.Workspace
 /** 手机上没人拿几百 MB 的文本转编码或印成 PDF；这条是防爆内存的上限，不是功能限制。 */
 internal const val MAX_TEXT_BYTES = 64L * 1024 * 1024
 
+/** 表题要进文件名，太长会把名字挤没。 */
+private const val MAX_TABLE_TAG = 24
+
 class TextEngine(private val workspace: Workspace) {
 
     /** 换编码，顺带统一换行风格。目标装不下的字要数出来，不能悄悄换成问号。 */
@@ -245,6 +248,44 @@ class TextEngine(private val workspace: Workspace) {
             (listOf("${rendered.text.lines().size} 行") + rendered.notes).joinToString(" · "),
         )
     }
+
+    /**
+     * 网页里的表逐张转 CSV：有表题的拿表题当文件名后缀，没有的按序号。
+     *
+     * 跨度（colspan / rowspan）按占位处理 —— 被盖住的位置留空格子。把跨格那一格只写一次、
+     * 后面的格子往前挤，行列数看着齐了，其实每一列都错位一格，那种错在成品里根本看不出来。
+     */
+    fun htmlToCsv(
+        item: WorkItem,
+        delimiter: com.fileforge.core.data.Delimiter,
+        ending: com.fileforge.core.text.LineEnding,
+    ): List<EngineOutput> {
+        val tables = com.fileforge.core.doc.Html.toTables(requireHtml(readText(item)))
+        val filled = tables.filter { it.rows.isNotEmpty() }
+        require(filled.isNotEmpty()) {
+            "这份网页里没有一张有格子的表" +
+                (tables.firstOrNull()?.notes?.let { "（${it.joinToString("；")}）" } ?: "（没找到 <table>）")
+        }
+        return filled.mapIndexed { position, table ->
+            val notes = ArrayList<String>()
+            notes += "${table.rows.size} 行 × ${table.rows.maxOf { it.size }} 列"
+            notes += table.notes
+            if (filled.size != tables.size) notes += "另有 ${tables.size - filled.size} 张空表没出文件"
+            EngineOutput(
+                OutputNaming.tagged(
+                    item.name,
+                    if (filled.size == 1) "" else tableTag(table, position),
+                    "csv",
+                ),
+                writeText(item, Csv.render(table.rows, delimiter, ending), "csv"),
+                notes.joinToString(" · "),
+            )
+        }
+    }
+
+    /** 表题是作者写的，拿来当文件名后缀；没有表题的按序号。只有一张表时不加后缀。 */
+    private fun tableTag(table: com.fileforge.core.doc.HtmlTable, position: Int): String =
+        if (table.named) OutputNaming.sanitize(table.name).take(MAX_TABLE_TAG) else "表${position + 1}"
 
     private fun requireHtml(text: String): String {
         require(com.fileforge.core.doc.Html.looksLikeHtml(text)) {

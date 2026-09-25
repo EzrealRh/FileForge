@@ -554,8 +554,19 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
                 Summary("表单控件与内嵌框架里放不进标记的东西，只留文字并写明几处。")
                 Summary("成品里的 `*` `_` `<` 都是转义过的字面字符，别人再读这份 Markdown 不会把正文读成标记。")
             }
-            OperationKind.CsvToXlsx -> {
-                Summary("写一份真 .xlsx（一张表，表名用文件名），Excel / WPS / Numbers 直接打得开。")
+            OperationKind.HtmlToCsv -> {
+                PickerRow("分隔符", Delimiter.entries.map { it.label }, Delimiter.entries.indexOf(csvDelimiter)) {
+                    csvDelimiter = Delimiter.entries[it]
+                }
+                Segmented("换行", LineEnding.entries.map { it.label }, LineEnding.entries.indexOf(csvEnding)) {
+                    csvEnding = LineEnding.entries[it]
+                }
+                Summary("网页里有几张表就出几份 CSV：有表题的拿表题当文件名后缀，没有的按序号；只有一张表时不加后缀。")
+                Summary("`colspan` / `rowspan` 按跨度占位 —— 被盖住的位置留空格子，而不是把整行往左挤一格。")
+                Summary("格子里的 `<br>` 与多个段落变成格内换行（CSV 里带引号），列表照记号写。")
+                Summary("表里嵌着表时，外面那张的格子里只剩文字，嵌着的另出一份文件。")
+            }
+            OperationKind.CsvToXlsx -> {                Summary("写一份真 .xlsx（一张表，表名用文件名），Excel / WPS / Numbers 直接打得开。")
                 Summary("格子类型只按字面判：能一字不差读回来的写法才写成数字，`007`、`1.50`、15 位以上的编号一律保持文字。")
                 Summary("以 `=` `+` `@` 开头的格子按文字存，不会被当成公式执行。")
             }
@@ -742,6 +753,7 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
             OperationKind.HtmlToText -> Operation.HtmlToText
             OperationKind.HtmlToMarkdown -> Operation.HtmlToMarkdown
             OperationKind.CsvToXlsx -> Operation.CsvToXlsx
+            OperationKind.HtmlToCsv -> Operation.HtmlToCsv(csvDelimiter, csvEnding)
             OperationKind.JsonToXlsx -> Operation.JsonToXlsx
             OperationKind.IcoToImages -> Operation.IcoToImages
         }

@@ -404,6 +404,18 @@ sealed interface Operation {
         override val label get() = "JSON 写成 Excel 表格"
     }
 
+    /**
+     * 网页里的表格逐张转成 CSV。
+     *
+     * `colspan` / `rowspan` 按跨度占位：被盖住的位置留空格子，而不是把整行往左挤。
+     */
+    data class HtmlToCsv(
+        val delimiter: Delimiter = Delimiter.Comma,
+        val ending: LineEnding = LineEnding.Lf,
+    ) : Operation {
+        override val label get() = "网页表格转 CSV"
+    }
+
     /** 把 .ico 里的每一帧画面导成 PNG。 */
     data object IcoToImages : Operation {
         override val label get() = "导出图标里的画面"

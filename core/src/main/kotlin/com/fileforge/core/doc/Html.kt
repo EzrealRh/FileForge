@@ -1,6 +1,18 @@
 package com.fileforge.core.doc
 
 /**
+ * 一张抽出来的表：名字、按跨度对好的格子，以及这张表的毛病。
+ *
+ * `named` 说清名字是哪儿来的：表题（作者写的）还是序号（我们补的）—— 拿名字起文件名的那一侧要分开对待。
+ */
+class HtmlTable(
+    val name: String,
+    val named: Boolean,
+    val rows: List<List<String>>,
+    val notes: List<String>,
+)
+
+/**
  * HTML → 纯文本 / Markdown。
  *
  * 网页转文字是转换器的高频项，而真网页几乎都不是合法 XML：标签不闭合、大小写混着写、
@@ -37,6 +49,178 @@ object Html {
         "<table", "<ul", "<ol", "<li", "<h1", "<h2", "<h3", "<a href", "<img", "<title", "<meta",
     )
 
+    /**
+     * 网页里的所有表，按出现的先后。
+     *
+     * 这里做的是**按跨度对位**：`colspan` / `rowspan` 会占住它盖到的那些位置，被盖到的格子留空。
+     * 不这么做的话，一个 `<td colspan="3">` 就把整行左移三格，出来的表"看着齐，其实整列错位" ——
+     * 那是转表格最容易出的、也最难在成品里看出来的错。
+     */
+    fun toTables(source: String): List<HtmlTable> {
+        val tally = EntityTally()
+        val built = HtmlTree.build(HtmlTokens.tokenize(source, tally))
+        val found = ArrayList<HtmlNode>()
+        collectTables(built.root, found)
+        val ctx = Ctx(markdown = false, Counted())
+        return found.mapIndexed { index, node -> oneTable(index, node, ctx) }
+    }
+
+    private fun collectTables(node: HtmlNode, out: ArrayList<HtmlNode>) {
+        node.children.forEach { child ->
+            if (child.name == "table") {
+                out += child
+                collectTables(child, out)                    // 嵌套表也单独出一张，同时在外层的格子里留文字
+            } else {
+                collectTables(child, out)
+            }
+        }
+    }
+
+    private fun oneTable(index: Int, node: HtmlNode, ctx: Ctx): HtmlTable {
+        val notes = ArrayList<String>()
+        val caption = node.children.firstOrNull { it.name == "caption" }?.let { text(it, ctx) }.orEmpty()
+        if (caption.isNotEmpty()) notes += "表题「$caption」只用来起文件名，不进格子"
+
+        val placed = placeTable(node, ctx)
+        val square = placed.rows
+        if (square.isEmpty()) notes += "这张表里没有格子"
+        if (placed.merged > 0) {
+            notes += "${placed.merged} 格带 colspan/rowspan，被它盖到的位置留了空格子（CSV 装不下跨格）"
+        }
+        if (placed.clamped > 0) notes += "${placed.clamped} 处跨度大得不合理（超过 $MAX_SPAN 格），按 $MAX_SPAN 算"
+        if (holdsTable(node)) notes += "这张表里嵌着表，外面这张只留格子里的文字，嵌着的另出一张"
+        return HtmlTable(name(index, caption), caption.isNotBlank(), square, notes)
+    }
+
+    /** 一张表摆好的方格，以及跨度上的两笔账。 */
+    private class Placed(val rows: List<List<String>>, val merged: Int, val clamped: Int)
+
+    /**
+     * 按跨度把格子摆进方格：`colspan` / `rowspan` 盖住的位置留空，后面的格子跳过它们。
+     *
+     * 纯文本、Markdown、CSV 三条输出共用这一处对位 —— 三条各摆一套，就会出现在"哪一格是第几列"
+     * 上互相不一样的表，那种不一致比摆错更难查。
+     */
+    private fun placeTable(node: HtmlNode, ctx: Ctx): Placed {
+        val grid = Grid()
+        var merged = 0
+        var clamped = 0
+        tableRows(node).forEachIndexed { rowAt, tr ->
+            var column = 0
+            tr.children.filter { it.name == "td" || it.name == "th" }.forEach { cell ->
+                while (grid.occupied(rowAt, column)) column++
+                val spanX = span(cell.attrs["colspan"]) { clamped++ }
+                val spanY = span(cell.attrs["rowspan"]) { clamped++ }
+                if (spanX > 1 || spanY > 1) merged++
+                grid.put(rowAt, column, text(cell, ctx))
+                for (dy in 0 until spanY) for (dx in 0 until spanX) {
+                    if (dy != 0 || dx != 0) grid.cover(rowAt + dy, column + dx)
+                }
+                column += spanX
+            }
+        }
+        return Placed(grid.square(), merged, clamped)
+    }
+
+    /** 一个格子里有没有嵌表（外面这张只能把它压成文字）。 */
+    private fun holdsTable(node: HtmlNode): Boolean = node.children.any {
+        it.name == "table" || holdsTable(it)
+    }
+
+    private fun name(index: Int, caption: String): String = caption.ifBlank { "第 ${index + 1} 张表" }
+
+    /**
+     * 这张表自己的行：碰到嵌进去的表就停（那些行属于里面那张）。
+     *
+     * 没有 `<tr>` 的散格子（`<table><td>甲</td><td>乙</td></table>`，网页里真这么写的不少）
+     * 按浏览器那样并成一行 —— 丢掉它就是静悄悄少一格。
+     */
+    private fun tableRows(node: HtmlNode): List<HtmlNode> {
+        val out = ArrayList<HtmlNode>()
+        val loose = ArrayList<HtmlNode>()
+        fun walk(from: HtmlNode) {
+            from.children.forEach { child ->
+                when {
+                    child.name == "tr" -> out += child
+                    child.name == "table" -> Unit
+                    child.name == "td" || child.name == "th" -> loose += child
+                    child.name in BLOCKS -> walk(child)
+                }
+            }
+        }
+        walk(node)
+        if (out.isEmpty() && loose.isNotEmpty()) out += HtmlNode("tr").apply { children += loose }
+        return out
+    }
+
+    private fun span(value: String?, clamp: () -> Unit): Int {
+        val raw = value?.trim()?.toIntOrNull() ?: return 1
+        if (raw < 1) return 1
+        if (raw > MAX_SPAN) {
+            clamp()
+            return MAX_SPAN
+        }
+        return raw
+    }
+
+    /**
+     * 对位用的方格：值与"被上一格的跨度盖住的位置"分开记，
+     * 这样空格子（真没有内容）与被盖住的位置不会混成一回事。
+     */
+    private class Grid {
+        private val cells = ArrayList<ArrayList<String?>>()
+        private val covered = HashSet<Long>()
+
+        private fun key(row: Int, column: Int) = (row.toLong() shl 32) or column.toLong()
+
+        private fun line(row: Int): ArrayList<String?> {
+            while (cells.size <= row) cells.add(ArrayList())
+            return cells[row]
+        }
+
+        fun occupied(row: Int, column: Int): Boolean =
+            cells.getOrNull(row)?.getOrNull(column) != null || key(row, column) in covered
+
+        fun cover(row: Int, column: Int) {
+            line(row)
+            covered += key(row, column)
+        }
+
+        fun put(row: Int, column: Int, text: String) {
+            val line = line(row)
+            while (line.size <= column) line.add(null)
+            line[column] = text
+        }
+
+        /** 补齐成方表：短的那几行右边给空格子。 */
+        fun square(): List<List<String>> {
+            val width = cells.maxOfOrNull { it.size } ?: 0
+            return cells.map { row -> List(width) { column -> row.getOrNull(column).orEmpty() } }
+        }
+    }
+
+    /** 一个单元格里的文字：块与块之间换成行（Excel 里就是格子内换行），列表与嵌套表照块级规矩排。 */
+    private fun text(cell: HtmlNode, ctx: Ctx): String {
+        val run = StringBuilder()
+        val parts = ArrayList<String>()
+        cell.children.forEach { child ->
+            if (child.name in DROP || child.name.isEmpty()) return@forEach
+            if (child.name in BLOCKS && child.name != "br" && child.name != "hr") {
+                if (run.isNotBlank()) { parts += run.toString().trim(); run.setLength(0) }
+                val inner = ArrayList<String>()
+                block(child, ctx, inner, "")
+                val body = inner.joinToString("\n").trim()
+                if (body.isNotEmpty()) parts += body
+            } else {
+                inline(child, run, ctx)
+            }
+        }
+        if (run.isNotBlank()) parts += run.toString().trim()
+        return parts.joinToString("\n")
+    }
+
+    private const val MAX_SPAN = 1000
+
     private class Ctx(val markdown: Boolean, val counted: Counted)
 
     private class Counted {
@@ -45,6 +229,7 @@ object Html {
         var dropped = 0
         var tables = 0
         var forms = 0
+        var clamped = 0
     }
 
     private fun render(source: String, markdown: Boolean): Rendered {
@@ -57,8 +242,9 @@ object Html {
         if (built.repaired > 0) notes += "源文件有 ${built.repaired} 处标签没按规矩闭合，按浏览器那套补的"
         if (tally.unknown > 0) notes += "${tally.unknown} 处实体没认出来，照字面留下了"
         if (counted.dropped > 0) notes += "${counted.dropped} 段脚本/样式/页眉内容丢掉（那不是给人读的文字）"
-        if (counted.tables > 0) notes += "${counted.tables} 张表按行拍平（合并单元格读不出跨度）"
+        if (counted.tables > 0) notes += "${counted.tables} 张表摆成方格：跨过的格子留空，格子里的换行并成空格"
         // 表单的值与选中项在属性里，两种输出都只剩标签文字 —— 退化了就得说，跟输出格式无关
+        if (counted.clamped > 0) notes += "${counted.clamped} 处跨度大得不合理（超过 $MAX_SPAN 格），按 $MAX_SPAN 算"
         if (counted.forms > 0) notes += "${counted.forms} 处表单控件只留下标签文字（填的值与选中项在属性里，读不出来）"
         if (!markdown) {
             if (counted.links > 0) notes += "${counted.links} 处链接只留下文字，地址在纯文本里没处放"
@@ -89,7 +275,15 @@ object Html {
         if (run.isNotBlank()) out += pad(run.toString().trim(), ctx, indent)
     }
 
-    private fun holdsBlock(node: HtmlNode) = node.children.any { it.name in BLOCKS || it.name in DROP }
+    /**
+     * 这个元素里面有没有块级东西（任何深度）。
+     *
+     * `html`、`body`、各种包装 `div` 都不在块级名单里，只看一层会漏掉 `<body><table>…</table></body>`
+     * 这种整页只有一张表的写法（邮件里全是），那样整张表会被当成一坨行内文字吞掉。
+     */
+    private fun holdsBlock(node: HtmlNode): Boolean = node.children.any {
+        it.name in BLOCKS || it.name in DROP || holdsBlock(it)
+    }
 
     private fun pad(rendered: String, ctx: Ctx, indent: String): String =
         if (ctx.markdown || indent.isEmpty()) rendered
@@ -174,43 +368,23 @@ object Html {
         return out.toString().trimEnd('\n')
     }
 
+    /** 纯文本 / Markdown 用的表：与 CSV 那条共用一套对位，格子里的换行并成空格。 */
     private fun table(node: HtmlNode, ctx: Ctx): String {
         ctx.counted.tables++
-        val rows = ArrayList<List<String>>()
-        node.children.forEach { row ->
-            if (row.name in BLOCKS && row.name != "tr") {
-                row.children.filter { it.name == "tr" }.forEach { tr -> rows += cells(tr, ctx) }
-            } else if (row.name == "tr") {
-                rows += cells(row, ctx)
-            }
-        }
+        val placed = placeTable(node, ctx)
+        ctx.counted.clamped += placed.clamped
+        val rows = placed.rows.map { row -> row.map { cell -> cell.replace("\n", " ").trim() } }
         if (rows.isEmpty()) return ""
         if (!ctx.markdown) return rows.joinToString("\n") { it.joinToString("\t") }
         val width = rows.maxOf { it.size }
-        fun line(cells: List<String>): String {
-            val filled = ArrayList(cells)
-            while (filled.size < width) filled += ""
-            return filled.joinToString(" | ", prefix = "| ", postfix = " |") {
-                it.replace("|", "\\|").ifBlank { " " }
-            }
+        fun line(cells: List<String>): String = cells.joinToString(" | ", prefix = "| ", postfix = " |") {
+            it.replace("|", "\\|").ifBlank { " " }
         }
         val out = ArrayList<String>()
         out += line(rows.first())
         out += "|" + List(width) { "---" }.joinToString("|") + "|"
         rows.drop(1).forEach { out += line(it) }
         return out.joinToString("\n")
-    }
-
-    private fun cells(row: HtmlNode, ctx: Ctx): List<String> {
-        val out = ArrayList<String>()
-        row.children.forEach { cell ->
-            if (cell.name in setOf("td", "th")) {
-                val run = StringBuilder()
-                children(cell, run, ctx)
-                out += run.toString().trim()
-            }
-        }
-        return out
     }
 
     private fun children(node: HtmlNode, into: StringBuilder, ctx: Ctx, raw: Boolean = false) {
