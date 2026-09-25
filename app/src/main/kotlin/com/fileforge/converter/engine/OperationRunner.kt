@@ -159,6 +159,12 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
             is Operation.JsonToXml -> items.forEach { item ->
                 collect(item.name) { listOf(text.jsonToXml(item, operation)) }
             }
+            is Operation.ImageToIco -> items.forEach { item ->
+                collect(item.name) { listOf(images.toIco(listOf(item), operation, ::staging)) }
+            }
+            is Operation.IcoToImages -> items.forEach { item ->
+                collect(item.name) { images.icoToImages(item, ::staging) }
+            }
         }
 
         coroutineContext.ensureActive()

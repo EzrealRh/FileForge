@@ -48,6 +48,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.fileforge.core.audio.AudioTarget
 import com.fileforge.core.data.Delimiter
+import com.fileforge.core.data.Ico
 import com.fileforge.core.data.Xml
 import com.fileforge.core.meta.ImageMeta
 import com.fileforge.core.meta.MetaReport
@@ -199,6 +200,7 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
     var csvHeader by mutableStateOf(true)
     var csvInfer by mutableStateOf(false)
     var xmlRoot by mutableStateOf("")
+    var icoSizesText by mutableStateOf("16,32,48,256")
 
     private val encodingOptions get() = listOf("自动检测") + TextEncoding.entries.map { it.label }
 
@@ -485,6 +487,23 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
                 Summary("分隔符按引号以外的票数自动认（逗号 / 分号 / 制表符 / 竖线），引号里的逗号不会骗到它。")
                 Summary("列数不齐照样转，缺的格子留空，并在结果里报是第几行 —— 那通常是数据错了而不是格式错了。")
             }
+            OperationKind.ImageToIco -> {
+                OutlinedTextField(
+                    value = icoSizesText,
+                    onValueChange = { icoSizesText = it },
+                    label = { Text("尺寸（逗号分隔）") },
+                    singleLine = true,
+                    supportingText = { Text("默认 16,32,48,256。每个尺寸都从原图缩出一帧正方形，最长 ${Ico.MAX_SIDE}") },
+                    isError = icoSizesText.isNotBlank() && icoSizes().isEmpty(),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Summary("一次出多个尺寸：系统按用途挑合适的那张，只给一个尺寸时在别的场合会被强制缩放而发虚。")
+                Summary("非方图先缩到短边等于目标尺寸、再居中裁方，不会拉扁。")
+            }
+            OperationKind.IcoToImages -> {
+                Summary("PNG 内嵌的那种直接把内嵌字节原样取出，不重新编码；老式位图（DIB）的要重建像素再编 PNG。")
+                Summary("一个图标里有几个尺寸就出几张图，名字带序号。")
+            }
             OperationKind.XmlToJson -> {
                 Segmented("缩进宽度", listOf("1", "2", "4", "8"), listOf(1, 2, 4, 8).indexOf(jsonIndent.roundToInt())) {
                     jsonIndent = listOf(1f, 2f, 4f, 8f)[it]
@@ -569,10 +588,16 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
             return "根元素名「${xmlRoot.trim()}」不能当 XML 标签用"
         }
         if (kind == OperationKind.EncryptPdf) PdfSecurity.validate(pdfUserPw, pdfOwnerPw, pdfAllowed)?.let { return it }
+        if (kind == OperationKind.ImageToIco && icoSizes().isEmpty()) return "尺寸要写 1~${Ico.MAX_SIDE} 之间的数，逗号分隔"
         if (startSecondText.isNotBlank() && startSecondText.toFloatOrNull() == null) return "开始秒数不是数字"
         if (durationSecondText.isNotBlank() && durationSecondText.toFloatOrNull() == null) return "取多少秒不是数字"
         return null
     }
+
+    /** 图标尺寸那一栏：只留合法值，重复的合并（引擎会按从大到小写目录）。 */
+    private fun icoSizes(): List<Int> =
+        icoSizesText.split(',', '，', ' ').mapNotNull { it.trim().toIntOrNull() }
+            .filter { it in 1..Ico.MAX_SIDE }.distinct()
 
     fun build(): Operation? {
         if (validation() != null) return null
@@ -642,6 +667,8 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
             OperationKind.CsvToJson -> Operation.CsvToJson(csvHeader, csvInfer, jsonIndent.roundToInt())
             OperationKind.XmlToJson -> Operation.XmlToJson(jsonIndent.roundToInt())
             OperationKind.JsonToXml -> Operation.JsonToXml(xmlRoot.trim(), jsonIndent.roundToInt())
+            OperationKind.ImageToIco -> Operation.ImageToIco(icoSizes())
+            OperationKind.IcoToImages -> Operation.IcoToImages
         }
     }
 }

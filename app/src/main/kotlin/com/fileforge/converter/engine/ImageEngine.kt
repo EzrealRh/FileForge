@@ -4,6 +4,8 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.os.Build
+import com.fileforge.core.data.Ico
+import com.fileforge.core.data.IcoImage
 import com.fileforge.core.meta.ImageMeta
 import com.fileforge.core.naming.OutputNaming
 import com.fileforge.core.ops.ImageFormat
@@ -127,6 +129,68 @@ class ImageEngine {
             staging(extension).apply { writeBytes(cleaned) },
             note,
         )
+    }
+
+    /**
+     * 图片做成 .ico：一张源图缩出多个尺寸写进同一份文件。
+     *
+     * 每个尺寸都先缩放到"短边等于目标边"再**居中裁方**：图标必须是方的，
+     * 只按最长边缩会让非方图变形。
+     */
+    fun toIco(items: List<WorkItem>, operation: Operation.ImageToIco, staging: (String) -> File): EngineOutput {
+        val sizes = operation.sizes.filter { it in 1..Ico.MAX_SIDE }.distinct()
+        require(sizes.isNotEmpty()) { "尺寸一个都不合法：要 1~${Ico.MAX_SIDE} 之间的数" }
+        val source = decode(items.first().file)
+        val images = sizes.sortedByDescending { it }.map { side ->
+            val square = centerCropSquare(source, side)
+            val pixels = IntArray(side * side)
+            square.getPixels(pixels, 0, side, 0, 0, side, side)   // 安卓的 API 是 (数组, 起点, 步长, 左, 上, 宽, 高)
+            if (square !== source) square.recycle()
+            IcoImage(side, side, pixels)
+        }
+        val bytes = Ico.write(images)
+        val file = staging("ico").apply { writeBytes(bytes) }
+        return EngineOutput(
+            OutputNaming.tagged(items.first().name, "图标", "ico"),
+            file,
+            "${sizes.sorted()} 共 ${sizes.size} 个尺寸 · ${SizeInput.format(bytes.size.toLong())}",
+        )
+    }
+
+    /**
+     * .ico 拆成图片。
+     *
+     * PNG 内嵌的那种**直接把内嵌字节交出去**：它本来就是一张完整 PNG，
+     * 再解一遍重编码只会掉画质。DIB 的那种才需要重建位图再编 PNG。
+     */
+    fun icoToImages(item: WorkItem, staging: (String) -> File): List<EngineOutput> {
+        val frames = Ico.read(item.file.readBytes())
+        return frames.mapIndexed { index, frame ->
+            val name = OutputNaming.part(item.name, index + 1, frames.size, "png")
+            val file = staging("png")
+            val embedded = frame.png
+            if (embedded != null) {
+                file.writeBytes(embedded)
+            } else {
+                val bitmap = Bitmap.createBitmap(frame.argb, frame.width, frame.height, Bitmap.Config.ARGB_8888)
+                file.writeBytes(encode(bitmap, ImageFormat.Png, 100))
+                bitmap.recycle()
+            }
+            EngineOutput(name, file, "${frame.width}×${frame.height}" + if (embedded != null) " · 内嵌 PNG 原样取出" else "")
+        }
+    }
+
+    /** 缩到短边等于 [side] 之后居中裁出 side×side。 */
+    private fun centerCropSquare(source: Bitmap, side: Int): Bitmap {
+        val shorter = minOf(source.width, source.height)
+        val ratio = side.toFloat() / shorter
+        val matrix = Matrix().apply { postScale(ratio, ratio) }
+        val scaled = Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
+        if (scaled !== source) source.recycle()
+        if (scaled.width == side && scaled.height == side) return scaled
+        val cropped = Bitmap.createBitmap(scaled, (scaled.width - side) / 2, (scaled.height - side) / 2, side, side)
+        scaled.recycle()
+        return cropped
     }
 
     private fun searchQuality(bitmap: Bitmap, format: ImageFormat, target: Long): ByteArray? {

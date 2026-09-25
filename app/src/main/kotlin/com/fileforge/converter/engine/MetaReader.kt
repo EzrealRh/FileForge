@@ -4,6 +4,7 @@ import android.graphics.BitmapFactory
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import com.fileforge.core.archive.ZipReader
+import com.fileforge.core.data.Ico
 import com.fileforge.core.audio.AudioPlan
 import com.fileforge.core.gif.GifDecoder
 import com.fileforge.core.meta.ImageMeta
@@ -40,6 +41,7 @@ class MetaReader {
             when {
                 item.kind == FileKind.Gif -> facts += gifFacts(item.file)
                 item.kind == FileKind.Zip -> facts += zipFacts(item.file)
+                item.kind == FileKind.Ico -> facts += icoFacts(item.file)
                 item.kind == FileKind.Pdf -> facts += pdfFacts(item.file)
                 item.kind.isVideo -> facts += videoFacts(item.file)
                 item.kind.isAudio -> facts += audioFacts(item.file)
@@ -164,6 +166,17 @@ class MetaReader {
         }
     }
 
+    /** 图标里有几帧、每帧多大：一个 .ico 可以同时装 16 到 256 的好几张。 */
+    private fun icoFacts(file: File): List<Pair<String, String>> {
+        val entries = Ico.directory(file.readBytes())
+        return buildList {
+            add("画面" to "${entries.size} 帧")
+            add("尺寸" to entries.joinToString(" ") { "${it.width}×${it.height}" })
+            add("内部格式" to if (entries.all { it.isPng }) "PNG 内嵌" else if (entries.any { it.isPng }) "PNG 与位图混着" else "位图 DIB")
+            add("位深" to "${entries.first().bitCount} 位")
+        }
+    }
+
     private fun pdfFacts(file: File): List<Pair<String, String>> = PDDocument.load(file, MemoryUsageSetting.setupTempFileOnly()).use { document ->
         buildList {
             add("页数" to "${document.numberOfPages}")
@@ -234,6 +247,7 @@ class MetaReader {
     private fun kindLabel(kind: FileKind): String = when (kind) {
         FileKind.Pdf -> "PDF 文档"
         FileKind.Gif -> "GIF 动图"
+        FileKind.Ico -> "ICO 图标"
         FileKind.WebP -> "WebP 图片"
         FileKind.Heic -> "HEIC 图片"
         FileKind.Avif -> "AVIF 图片"
