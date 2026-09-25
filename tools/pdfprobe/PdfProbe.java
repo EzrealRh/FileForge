@@ -32,6 +32,9 @@ import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.util.Matrix;
 import org.apache.pdfbox.rendering.PDFRenderer;
 import org.apache.pdfbox.text.PDFTextStripper;
+import org.apache.pdfbox.pdmodel.encryption.AccessPermission;
+import org.apache.pdfbox.pdmodel.encryption.InvalidPasswordException;
+import org.apache.pdfbox.pdmodel.encryption.StandardProtectionPolicy;
 
 /**
  * PDF 语义实验台：只在本机 JVM 上跑，用桌面版 PDFBox 2.0.27。pdfbox-android 是同版本 PDFBox 的
@@ -53,6 +56,7 @@ public final class PdfProbe {
             case "rotate" -> rotate(new File(args[1]), new File(args[2]), parsePages(args[3]), Integer.parseInt(args[4]));
             case "verify" -> verify(new File(args[1]));
             case "stamp" -> verifyStamping(new File(args[1]));
+            case "security" -> verifySecurity(new File(args[1]));
             default -> throw new IllegalArgumentException("unknown cmd " + args[0]);
         }
     }
@@ -169,6 +173,162 @@ public final class PdfProbe {
         }
         verifyStamping(dir);
         System.out.println("verify PASS");
+    }
+
+    /**
+     * 加密这件事，界面文案全靠猜是会骗人的：所有者密码留空时库会不会自己编一个、
+     * 用户密码够不够把保护去掉、勾了"禁止复制"之后自家"提取文字"还剩不剩得下东西 ——
+     * 这四条都直接决定界面上该有几个输入框、该说什么话。所以先量。
+     */
+    private static void verifySecurity(File dir) throws Exception {
+        dir.mkdirs();
+        File plain = new File(dir, "sec-plain.pdf");
+        makeInherited(plain);
+        expect(textOf(plain).contains("MARKER1"), "加密前的对照文件要抽得出字");
+
+        File locked = new File(dir, "sec-locked.pdf");
+        protectTo(plain, locked, "owner-pw", "user-pw", true, 128, true);
+        // 加密后的文件连"不带密码读一遍"都进不去，所以结构体检只能等解除保护之后再做
+        boolean blocked;
+        try (PDDocument ignored = PDDocument.load(locked)) {
+            blocked = false;
+        } catch (InvalidPasswordException error) {
+            blocked = true;
+        }
+        expect(blocked, "不设密码直接打开必须被拒（InvalidPasswordException）");
+
+        boolean userOpens = false;
+        boolean ownerOpens = false;
+        String extractUnderRestriction = "没跑到";
+        try (PDDocument doc = PDDocument.load(locked, "user-pw")) {
+            userOpens = true;
+            extractUnderRestriction = runStripper(doc);
+        } catch (Exception error) {
+            extractUnderRestriction = "抛 " + error.getClass().getSimpleName();
+        }
+        try (PDDocument doc = PDDocument.load(locked, "owner-pw")) {
+            ownerOpens = doc.isEncrypted();
+        } catch (Exception error) {
+            ownerOpens = false;
+        }
+        System.out.println("  用户密码能开=" + userOpens + " 所有者密码能开=" + ownerOpens
+                + " 限制复制下抽文字：" + describeExtract(extractUnderRestriction));
+        expect(userOpens, "用户密码要能打开");
+        expect(ownerOpens, "所有者密码也要能打开");
+
+        // 只给用户密码能不能去掉保护 —— 决定界面上要不要逼用户记住所有者密码
+        File unlocked = new File(dir, "sec-unlocked.pdf");
+        boolean removedWithUserPw = runCatching(() -> {
+            try (PDDocument doc = PDDocument.load(locked, "user-pw")) {
+                doc.setAllSecurityToBeRemoved(true);
+                doc.save(unlocked);
+            }
+        });
+        System.out.println("  只用用户密码能否解除保护：" + removedWithUserPw);
+        if (removedWithUserPw) {
+            try (PDDocument doc = PDDocument.load(unlocked)) {
+                expect(!doc.isEncrypted(), "解除后不该再标着已加密");
+                expect(textOf(unlocked).contains("MARKER1"), "解除保护不能把文字弄丢");
+            }
+        }
+
+        // 所有者密码留空：库会不会随机造一个（造了就等于用户自己再也解不开）
+        File blankOwner = new File(dir, "sec-blank-owner.pdf");
+        boolean blankOk = runCatching(() -> protectTo(plain, blankOwner, "", "user-pw", true, 128, true));
+        String blankOpensWith = "打不开";
+        if (blankOk) {
+            for (String guess : new String[]{"", "user-pw"}) {
+                try (PDDocument doc = PDDocument.load(blankOwner, guess)) {
+                    blankOpensWith = "密码「" + guess + "」能开";
+                    break;
+                } catch (Exception ignored) {
+                    // 换下一个
+                }
+            }
+        }
+        System.out.println("  所有者密码留空：加密" + (blankOk ? "成功" : "失败") + "，" + blankOpensWith);
+        expect(blankOk && blankOpensWith.contains("user-pw"),
+                "所有者密码留空时用户密码仍要能打开口袋（否则一个密码框就是锁死自己的陷阱）");
+
+        // 留空所有者密码会留下含糊状态，所以实现里的做法是"两个都填同一个"。这条路必须验一遍
+        File samePw = new File(dir, "sec-same-pw.pdf");
+        protectTo(plain, samePw, "solo-pw", "solo-pw", true, 128, true);
+        boolean unlockSame = runCatching(() -> {
+            try (PDDocument doc = PDDocument.load(samePw, "solo-pw")) {
+                doc.setAllSecurityToBeRemoved(true);
+                doc.save(new File(dir, "sec-same-unlocked.pdf"));
+            }
+        });
+        expect(unlockSame, "只填一个密码（所有者=用户）时必须能自己解开");
+        strict(new File(dir, "sec-same-unlocked.pdf"), true);
+
+        // 权限位在 PDFBox 2.0.27 里是"给阅读器看的建议"，不拦自家抽取 —— 界面文案据此写。
+        // 这条断言是为了哪天库改成强制时立刻发现，好去改话术
+        try (PDDocument doc = PDDocument.load(locked, "user-pw")) {
+            expect(runStripper(doc).contains("MARKER1"),
+                    "PDFBox 当前不强制「禁止复制」权限位（界面如实这么写；这条翻了就说明库开始拦了）");
+        }
+
+        // AES 与位长的约束
+        String smallKey = "128 位 AES 通过";
+        try {
+            protectTo(plain, new File(dir, "sec-aes-40.pdf"), "owner-pw", "user-pw", false, 40, true);
+        } catch (Exception error) {
+            smallKey = "40 位 + AES 被拒：" + error.getClass().getSimpleName();
+        }
+        String rc4 = "40 位 RC4 通过";
+        try {
+            protectTo(plain, new File(dir, "sec-rc4-40.pdf"), "owner-pw", "user-pw", false, 40, false);
+        } catch (Exception error) {
+            rc4 = "40 位 RC4 被拒：" + error.getClass().getSimpleName();
+        }
+        System.out.println("  " + smallKey + "；" + rc4);
+        System.out.println("security 量完");
+    }
+
+    private static String describeExtract(String outcome) {
+        if (outcome.startsWith("抛 ")) return outcome;
+        return outcome.trim().isEmpty() ? "抽出空（被权限挡住）" : "仍抽得出字";
+    }
+
+    private static String runStripper(PDDocument doc) throws Exception {
+        PDFTextStripper stripper = new PDFTextStripper();
+        return stripper.getText(doc);
+    }
+
+    private static boolean runCatching(ThrowingRunnable block) {
+        try {
+            block.run();
+            return true;
+        } catch (Exception error) {
+            System.out.println("  （失败原因 " + error.getClass().getSimpleName() + ": "
+                    + String.valueOf(error.getMessage()).trim() + "）");
+            return false;
+        }
+    }
+
+    private interface ThrowingRunnable {
+        void run() throws Exception;
+    }
+
+    /** 和安卓侧要写的完全同一套 API 调用，只是换成桌面版类名前缀。 */
+    private static void protectTo(File source, File target, String owner, String user,
+                                  boolean restrict, int keyLength, boolean aes) throws Exception {
+        AccessPermission permission = new AccessPermission();
+        if (restrict) {
+            permission.setCanPrint(false);
+            permission.setCanExtractContent(false);
+            permission.setCanModify(false);
+            permission.setCanModifyAnnotations(false);
+            permission.setCanFillInForm(false);
+        }
+        StandardProtectionPolicy policy = new StandardProtectionPolicy(owner, user, permission);
+        policy.setEncryptionKeyLength(keyLength);
+        policy.setPreferAES(aes);
+        try (PDDocument doc = PDDocument.load(source)) {
+            doc.protect(policy);
+            doc.save(target);
+        }
     }
 
     private static void expect(boolean ok, String what) {
