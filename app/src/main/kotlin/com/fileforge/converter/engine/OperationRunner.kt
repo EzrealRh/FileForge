@@ -94,6 +94,12 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
                     }
                 }
             }
+            is Operation.EncryptPdf -> items.forEach { item ->
+                collect(item.name) { listOf(pdf.encrypt(item, operation)) }
+            }
+            is Operation.DecryptPdf -> items.forEach { item ->
+                collect(item.name) { listOf(pdf.decrypt(item, operation)) }
+            }
             is Operation.CompressGif -> items.forEach { item ->
                 collect(item.name) { listOf(gifs.compress(item, operation)) }
             }

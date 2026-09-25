@@ -14,6 +14,8 @@ import com.fileforge.core.pdf.PageGroups
 import com.fileforge.core.pdf.PageNumberPlan
 import com.fileforge.core.pdf.PageRangeParser
 import com.fileforge.core.pdf.PdfCompressPlan
+import com.fileforge.core.pdf.PdfPermission
+import com.fileforge.core.pdf.PdfSecurity
 import com.fileforge.core.pdf.PdfTier
 import com.fileforge.core.pdf.SplitPlanner
 import com.fileforge.core.pdf.StampFrame
@@ -43,7 +45,9 @@ import com.tom_roush.pdfbox.pdmodel.font.PDType0Font
 import com.tom_roush.pdfbox.pdmodel.font.PDType1Font
 import com.tom_roush.pdfbox.pdmodel.graphics.state.PDExtendedGraphicsState
 import com.tom_roush.pdfbox.pdmodel.graphics.image.JPEGFactory
+import com.tom_roush.pdfbox.pdmodel.encryption.AccessPermission
 import com.tom_roush.pdfbox.pdmodel.encryption.InvalidPasswordException
+import com.tom_roush.pdfbox.pdmodel.encryption.StandardProtectionPolicy
 import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject
 import com.tom_roush.pdfbox.text.PDFTextStripper
 import com.tom_roush.pdfbox.util.Matrix
@@ -685,6 +689,94 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
         return target.length()
     }
 
+    /**
+     * 加密码 + 权限限制。产物一律 128 位 AES。
+     *
+     * 所有者密码留空时按打开密码填同一个：PDFBox 遇到空的所有者密码会**自己造一个随机值**，
+     * 用户看不见也记不住，以后连自己都解不开（实测过）。
+     * 权限位是"给阅读器看的约定"而不是锁 —— 实测勾了不允许复制，抽取器照样抽得出字，
+     * 所以界面上按 [com.fileforge.core.pdf.PdfSecurity.ADVISORY_NOTE] 那句话说，不吹成加密锁。
+     */
+    fun encrypt(item: WorkItem, operation: Operation.EncryptPdf): EngineOutput {
+        PdfSecurity.validate(operation.userPassword, operation.ownerPassword, operation.granted)
+            ?.let { error(it) }
+        val source = loadForReading(item.file)
+        try {
+            require(!source.isEncrypted) { "这份 PDF 已经带密码了，先去密码再加新的" }
+            val permission = AccessPermission().apply {
+                setCanPrint(PdfPermission.Print in operation.granted)
+                setCanExtractContent(PdfPermission.Copy in operation.granted)
+                setCanModify(PdfPermission.Modify in operation.granted)
+                setCanModifyAnnotations(PdfPermission.Modify in operation.granted)
+                setCanFillInForm(PdfPermission.FillForms in operation.granted)
+            }
+            val policy = StandardProtectionPolicy(
+                PdfSecurity.ownerPasswordFor(operation.ownerPassword, operation.userPassword),
+                operation.userPassword,
+                permission,
+            ).apply {
+                encryptionKeyLength = AES_KEY_LENGTH
+                isPreferAES = true
+            }
+            source.protect(policy)
+            val output = workspace.newStagingFile("pdf")
+            source.save(output)
+            if (operation.userPassword.isNotBlank()) {
+                // 回读验一遍加密真的生效了：设了打开密码却还能直接打开，是最坏的一种"成功"
+                val opensWithoutPassword = runCatching {
+                    PDDocument.load(output, scratchSetting()).use { }
+                }.isSuccess
+                require(!opensWithoutPassword) { "加密没生效：不设密码仍然打得开" }
+            }
+            val opensWith = if (operation.userPassword.isBlank()) "不用密码就能打开" else "要打开密码"
+            return EngineOutput(
+                OutputNaming.tagged(item.name, "加密", "pdf"),
+                output,
+                "$opensWith · ${PdfSecurity.summarize(operation.granted)} · ${source.numberOfPages} 页",
+            )
+        } finally {
+            runCatching { source.close() }
+        }
+    }
+
+    /** 去掉密码，产出一份明文副本（原文件不动）。 */
+    fun decrypt(item: WorkItem, operation: Operation.DecryptPdf): EngineOutput {
+        val source = loadWithPassword(item.file, operation.password)
+        try {
+            require(source.isEncrypted) { "这份 PDF 本来就没有密码，不用去" }
+            source.setAllSecurityToBeRemoved(true)
+            val output = workspace.newStagingFile("pdf")
+            source.save(output)
+            // 存完回读一次确认真的解开了。这类产物"看起来正常"和"真的正常"只差一个标志位，
+            // 不验就会交出一份还是要密码的文件（encrypt 那边同理）
+            val stillLocked = runCatching {
+                PDDocument.load(output, scratchSetting()).use { it.isEncrypted }
+            }.getOrDefault(true)
+            require(!stillLocked) { "解除密码没生效，产物仍然要密码才能打开" }
+            return EngineOutput(
+                OutputNaming.tagged(item.name, "去密码", "pdf"),
+                output,
+                "${source.numberOfPages} 页 · 已不带密码保护",
+            )
+        } finally {
+            runCatching { source.close() }
+        }
+    }
+
+    /** 带密码读源文件。密码错、和没给密码，是两句不同的话。 */
+    private fun loadWithPassword(file: File, password: String): PDDocument = runCatching {
+        PDDocument.load(file, password, scratchSetting())
+    }.getOrElse { error ->
+        val wrongPassword = generateSequence<Throwable>(error) { it.cause }.any { it is InvalidPasswordException }
+        throw IllegalArgumentException(
+            when {
+                !wrongPassword -> "这份 PDF 读不了，可能已损坏：${error.message ?: error.javaClass.simpleName}"
+                password.isBlank() -> "这份 PDF 有密码保护，把打开密码填进来"
+                else -> "密码不对。注意要填的是打开密码（用户密码），所有者密码不能用来打开"
+            },
+        )
+    }
+
     private fun paperRectangle(paper: PdfPaper, image: PDImageXObject): PDRectangle = when (paper) {
         PdfPaper.A4 -> PDRectangle.A4
         PdfPaper.A5 -> PDRectangle.A5
@@ -698,7 +790,7 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
     }.getOrElse { error ->
         val needsPassword = generateSequence<Throwable>(error) { it.cause }.any { it is InvalidPasswordException }
         throw IllegalArgumentException(
-            if (needsPassword) "这份 PDF 有密码保护，先去掉密码再来"
+            if (needsPassword) "这份 PDF 有密码保护：先用「PDF 去密码」填对打开密码，再来做这一步"
             else "这份 PDF 读不了，可能已损坏：${error.message ?: error.javaClass.simpleName}",
         )
     }
@@ -708,6 +800,7 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
         MemoryUsageSetting.setupTempFileOnly().setTempDir(workspace.pdfScratch)
 
     private companion object {
+        const val AES_KEY_LENGTH = 128
         const val MAX_IMAGE_PIXELS = 12_000_000L
         val PROCESSABLE = setOf("DeviceRGB", "DeviceGray")
 

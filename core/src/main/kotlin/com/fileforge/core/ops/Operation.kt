@@ -2,6 +2,7 @@ package com.fileforge.core.ops
 
 import com.fileforge.core.audio.AudioTarget
 import com.fileforge.core.pdf.PageNumberPlan
+import com.fileforge.core.pdf.PdfPermission
 import com.fileforge.core.pdf.StampSpot
 
 enum class ImageFormat(val extension: String, val label: String) {
@@ -125,6 +126,23 @@ sealed interface Operation {
         val targetBytes: Long? = null,
     ) : Operation {
         override val label get() = if (targetBytes != null) "压到 ${targetLabel(targetBytes)} 以内" else "压缩视频"
+    }
+
+    /**
+     * 给 PDF 加打开密码和权限限制。所有者密码留空时按打开密码填同一个
+     * （留空会让库随机造一个，用户以后自己解不开）。
+     */
+    data class EncryptPdf(
+        val userPassword: String,
+        val ownerPassword: String = "",
+        val granted: Set<PdfPermission> = emptySet(),
+    ) : Operation {
+        override val label get() = if (userPassword.isBlank()) "限制操作" else "加密码"
+    }
+
+    /** 去掉 PDF 的密码保护，产出一份明文副本。 */
+    data class DecryptPdf(val password: String) : Operation {
+        override val label get() = "去掉密码"
     }
 
     /**

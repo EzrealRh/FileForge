@@ -39,6 +39,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.fileforge.core.audio.AudioTarget
@@ -48,6 +49,8 @@ import com.fileforge.core.ops.Operation
 import com.fileforge.core.ops.OperationKind
 import com.fileforge.core.ops.PdfPaper
 import com.fileforge.core.ops.VideoFormat
+import com.fileforge.core.pdf.PdfPermission
+import com.fileforge.core.pdf.PdfSecurity
 import com.fileforge.core.pdf.StampSpot
 import com.fileforge.core.util.SizeInput
 import com.fileforge.converter.data.WorkItem
@@ -157,6 +160,12 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
     var videoByTarget by mutableStateOf(false)
     var audioTarget by mutableStateOf(AudioTarget.M4a)
     var audioByTarget by mutableStateOf(false)
+    var pdfUserPw by mutableStateOf("")
+    var pdfOwnerPw by mutableStateOf("")
+    var pdfOpenPw by mutableStateOf("")
+
+    /** 勾选项 = 还允许的权限。默认只留"允许打印"，其余三项关着。 */
+    var pdfAllowed by mutableStateOf(setOf(PdfPermission.Print))
     var bitrate by mutableStateOf(2500f)
     var startSecondText by mutableStateOf("")
     var durationSecondText by mutableStateOf("")
@@ -345,6 +354,45 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
                 }
                 Summary("系统没有 MP3 编码器，所以转不成 mp3 —— 只给 M4A 和 WAV 两个目标。")
             }
+            OperationKind.EncryptPdf -> {
+                OutlinedTextField(
+                    value = pdfUserPw,
+                    onValueChange = { pdfUserPw = it },
+                    label = { Text("打开密码（留空＝不设打开密码）") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    supportingText = { Text("别人打开这份文件时要输它。少于 ${PdfSecurity.MIN_PASSWORD} 位会被拦，那等于没设。") },
+                    isError = pdfUserPw.isNotEmpty() && pdfUserPw.length < PdfSecurity.MIN_PASSWORD,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = pdfOwnerPw,
+                    onValueChange = { pdfOwnerPw = it },
+                    label = { Text("所有者密码（可留空）") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    supportingText = { Text("留空就按打开密码填同一个。库在所有者密码留空时会自己造一个随机值，那样以后连自己都解不开。") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                PdfPermission.entries.forEach { permission ->
+                    Segmented(permission.blockedName, listOf("不允许", "允许"), if (permission in pdfAllowed) 1 else 0) { on ->
+                        pdfAllowed = if (on == 1) pdfAllowed + permission else pdfAllowed - permission
+                    }
+                }
+                Summary(PdfSecurity.ADVISORY_NOTE)
+                Summary("密码强度固定用 128 位 AES。四项全允许＝什么都没限制，那样会被拦下来。")
+            }
+            OperationKind.DecryptPdf -> {
+                OutlinedTextField(
+                    value = pdfOpenPw,
+                    onValueChange = { pdfOpenPw = it },
+                    label = { Text("打开密码") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    supportingText = { Text("产出不带保护的副本，原文件不动。要填的是打开密码，所有者密码不能用来打开。") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         }
     }
 
@@ -373,6 +421,7 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
         if (kind == OperationKind.RemovePdfPages && pageSpec.isBlank()) return "先写要删哪些页"
         if (kind == OperationKind.MergePdfs && items.size < 2) return "合并 PDF 至少选两个文件"
         if (kind == OperationKind.PdfWatermark && watermarkText.isBlank()) return "先写要盖的水印文字"
+        if (kind == OperationKind.EncryptPdf) PdfSecurity.validate(pdfUserPw, pdfOwnerPw, pdfAllowed)?.let { return it }
         if (startSecondText.isNotBlank() && startSecondText.toFloatOrNull() == null) return "开始秒数不是数字"
         if (durationSecondText.isNotBlank() && durationSecondText.toFloatOrNull() == null) return "取多少秒不是数字"
         return null
@@ -429,6 +478,9 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
             OperationKind.ConvertAudio, OperationKind.ExtractAudio -> Operation.AudioConvert(
                 audioTarget, if (audioByTarget) targetBytes else null,
             )
+            // 密码原样传，不做 trim：首尾空格可能就是用户密码的一部分
+            OperationKind.EncryptPdf -> Operation.EncryptPdf(pdfUserPw, pdfOwnerPw, pdfAllowed)
+            OperationKind.DecryptPdf -> Operation.DecryptPdf(pdfOpenPw)
         }
     }
 }

@@ -18,6 +18,8 @@ enum class OperationKind(val label: String, val hint: String) {
     AddPageNumbers("PDF 加页码", "底部或角落，可跳过前几页"),
     PdfWatermark("PDF 加水印", "文字水印，可平铺和调深浅"),
     PdfToImages("PDF 每页导出图片", "页转 JPG / PNG / WebP"),
+    EncryptPdf("PDF 加密码", "设打开密码，可再限制打印/复制/修改"),
+    DecryptPdf("PDF 去密码", "填对打开密码，产出不带保护的副本"),
     CompressGif("压缩 GIF", "降尺寸、降帧、减色"),
     GifToImages("GIF 转图片", "逐帧导出，或只要首帧"),
     ImagesToGif("图片合成 GIF", "一张一帧，可设每帧停留"),
@@ -41,6 +43,7 @@ enum class OperationKind(val label: String, val hint: String) {
             ImagesToPdf -> fileKind.isImage
             CompressPdf, SplitPdfBySize, SplitPdfIntoParts, ExtractPdfPages, RemovePdfPages,
             RotatePdfPages, MergePdfs, PdfToText, PdfToImages, AddPageNumbers, PdfWatermark,
+            EncryptPdf, DecryptPdf,
             -> fileKind == FileKind.Pdf
             CompressGif, GifToImages -> fileKind == FileKind.Gif
             ImagesToGif -> fileKind.isImage
