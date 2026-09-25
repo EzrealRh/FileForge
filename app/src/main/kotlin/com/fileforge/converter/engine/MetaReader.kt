@@ -5,6 +5,7 @@ import android.media.MediaExtractor
 import android.media.MediaFormat
 import com.fileforge.core.audio.AudioPlan
 import com.fileforge.core.gif.GifDecoder
+import com.fileforge.core.meta.ImageMeta
 import com.fileforge.core.model.FileKind
 import com.fileforge.core.util.SizeInput
 import com.fileforge.converter.data.WorkItem
@@ -101,11 +102,26 @@ class MetaReader {
             add("画面" to "${bounds.outWidth} × ${bounds.outHeight}")
             add("像素" to "%.1f 百万".format(megapixels))
             bounds.outMimeType?.let { add("解码格式" to it.removePrefix("image/").uppercase()) }
-            val degrees = runCatching {
-                android.media.ExifInterface(file.absolutePath)
-                    .getAttributeInt(android.media.ExifInterface.TAG_ORIENTATION, android.media.ExifInterface.ORIENTATION_NORMAL)
-            }.getOrDefault(0)
-            if (degrees != android.media.ExifInterface.ORIENTATION_NORMAL && degrees != 0) add("EXIF 旋转" to "第 $degrees 档")
+            addAll(metaFacts(file))
+        }
+    }
+
+    /**
+     * 图片里带的身份信息。详情面板列出来，用户才知道"清除元数据"会扔掉什么。
+     *
+     * 只读文件开头一小段：EXIF 和文本块都在像素之前，为一屏文字把整张图搬进堆没必要。
+     */
+    private fun metaFacts(file: File): List<Pair<String, String>> {
+        val report = ImageMeta.report(ImageMeta.head(file))
+        if (report.container == null) return emptyList()
+        return buildList {
+            if (report.fields.isEmpty()) add("元数据" to "只有段落结构，没读到字段")
+            report.fields.take(META_LINES).forEach { (key, value) -> add(key.removePrefix("拍摄参数 ") to value) }
+            if (report.fields.size > META_LINES) add("其余字段" to "${report.fields.size - META_LINES} 项未列出")
+            add(
+                "可清理" to if (report.identifying.isEmpty()) "没有身份信息可清"
+                else "${report.identifying.size} 段 · ${SizeInput.format(report.saving.toLong())}",
+            )
         }
     }
 
@@ -224,5 +240,8 @@ class MetaReader {
     private companion object {
         /** 详情页只是读信息，解这么多像素足够算出颜色数，不必把整个动图搬进堆。 */
         const val FACT_PIXEL_BUDGET = 4_000_000
+
+        /** 元数据字段最多列这么多行，剩下的报个数 —— 详情面板不是十六进制编辑器。 */
+        const val META_LINES = 12
     }
 }

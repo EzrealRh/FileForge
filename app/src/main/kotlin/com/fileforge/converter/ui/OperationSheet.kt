@@ -47,6 +47,8 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.fileforge.core.audio.AudioTarget
+import com.fileforge.core.meta.ImageMeta
+import com.fileforge.core.meta.MetaReport
 import com.fileforge.core.model.FileKind
 import com.fileforge.core.ops.ImageFormat
 import com.fileforge.core.ops.Operation
@@ -436,6 +438,25 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
+            OperationKind.CleanMetadata -> {
+                val reports = remember(items) { items.map { it.name to metaReportOf(it) } }
+                reports.forEach { (name, report) ->
+                    Text(
+                        name,
+                        style = MaterialTheme.typography.labelMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    )
+                    Summary(report?.removalNote ?: "打不开这个文件，读不到元数据")
+                }
+                val saving = reports.mapNotNull { it.second }.sumOf { it.saving }
+                Summary("合计约省 ${SizeInput.format(saving.toLong())}。像素数据整段照抄，不重新编码，画质一点不动。")
+                if (reports.any { it.second?.willLoseRotation == true }) {
+                    Summary("其中有靠 EXIF 记着角度的照片：清掉之后部分查看器会把它横过来。要保住方向，就先做一次格式转换（会按方向把像素重画正），再清这份新的。")
+                }
+                Summary("影响显示的部分会留着：ICC 色彩配置、JFIF 密度、Adobe 通道序。删掉它们照片会变色，那就不是清理而是损坏。")
+            }
         }
     }
 
@@ -528,6 +549,7 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
             )
             OperationKind.ConvertSubtitle -> Operation.ConvertSubtitle(subtitleTarget, encodingAt(subtitleSource))
             OperationKind.DecryptPdf -> Operation.DecryptPdf(pdfOpenPw)
+            OperationKind.CleanMetadata -> Operation.CleanMetadata
         }
     }
 }
@@ -539,6 +561,13 @@ private val SPOTS = listOf(StampSpot.BottomCenter, StampSpot.BottomRight, StampS
 private fun edgeLabel(edge: Float): String = if (edge == 0f) "不改" else "%.0f px".format(edge)
 
 private fun sizeOf(items: List<WorkItem>): String = SizeInput.format(items.sumOf { it.size })
+
+/**
+ * 参数面板报"要扔哪些段"用的这份读**只读文件开头**：预览不该为一屏字把 20 MB 的原图搬进堆。
+ * 像素之后的文本块可能漏计，所以界面写的是"约省"；真正清理时引擎读整份文件，报的是准数。
+ */
+private fun metaReportOf(item: WorkItem): MetaReport? =
+    runCatching { ImageMeta.report(ImageMeta.head(item.file)) }.getOrNull()
 
 private fun FileKind.label(): String = badge
 

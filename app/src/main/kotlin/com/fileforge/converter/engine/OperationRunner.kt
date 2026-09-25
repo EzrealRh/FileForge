@@ -134,6 +134,9 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
                     listOf(audio.convert(item, operation) { percent -> onProgress(percent, item.name) })
                 }
             }
+            is Operation.CleanMetadata -> items.forEach { item ->
+                collect(item.name) { listOf(images.cleanMetadata(item, ::staging)) }
+            }
         }
 
         coroutineContext.ensureActive()

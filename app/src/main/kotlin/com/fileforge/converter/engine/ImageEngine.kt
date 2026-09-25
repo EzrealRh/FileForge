@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.os.Build
+import com.fileforge.core.meta.ImageMeta
 import com.fileforge.core.naming.OutputNaming
 import com.fileforge.core.ops.ImageFormat
 import com.fileforge.core.ops.Operation
@@ -99,6 +100,32 @@ class ImageEngine {
             OutputNaming.tagged(item.name, "压缩", operation.format.extension),
             staging(operation.format.extension).apply { writeBytes(best) },
             "${SizeInput.format(best.size.toLong())} ≤ 目标 ${SizeInput.format(target)}",
+        )
+    }
+
+    /**
+     * 清元数据：段级照抄，像素一个字节都不重新编码。
+     *
+     * 能不能清、清不了是为什么，全由 [com.fileforge.core.meta.MetaReport.cleanBlocker] 说；
+     * 引擎只在它说「可以」的时候搬字节。没有可清的东西时不产出成品 —— 一批里混一张
+     * 干净的图，用户看到的应该是"这张没得清"，而不是一份和源文件一模一样的假结果。
+     */
+    fun cleanMetadata(item: WorkItem, staging: (String) -> File): EngineOutput {
+        val bytes = item.file.readBytes()
+        val report = ImageMeta.report(bytes)
+        report.cleanBlocker?.let { throw IllegalArgumentException(it) }
+        val cleaned = ImageMeta.clean(bytes)
+            ?: throw IllegalStateException("这份文件清不出结果，已按原样保留，没动原图")
+        val extension = if (report.container == ImageMeta.Container.Png) "png" else "jpg"
+        val note = buildString {
+            append(SizeInput.format(bytes.size.toLong())).append(" → ").append(SizeInput.format(cleaned.size.toLong()))
+            append("，删了 ").append(report.identifying.size).append(" 段")
+            if (report.willLoseRotation) append("；原图靠 EXIF 站着，清完可能横过来")
+        }
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "无元数据", extension),
+            staging(extension).apply { writeBytes(cleaned) },
+            note,
         )
     }
 
