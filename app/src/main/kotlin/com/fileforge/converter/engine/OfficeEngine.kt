@@ -5,9 +5,11 @@ import com.fileforge.converter.data.Workspace
 import com.fileforge.core.data.Csv
 import com.fileforge.core.data.Delimiter
 import com.fileforge.core.data.TableBridge
+import com.fileforge.core.doc.TextDoc
 import com.fileforge.core.text.LineEnding
 import com.fileforge.core.model.FileKind
 import com.fileforge.core.naming.OutputNaming
+import com.fileforge.core.office.DocxWrite
 import com.fileforge.core.office.OoxmlStructure
 import com.fileforge.core.office.Sheet
 import com.fileforge.core.office.SheetToWrite
@@ -117,6 +119,41 @@ class OfficeEngine(private val workspace: Workspace) {
         val notes = ArrayList(TableBridge.flatteningNotes(json))
         notes += "第一行是列名"
         return workbook(item, listOf(SheetToWrite(OutputNaming.stem(item.name), table.records)), notes)
+    }
+
+    /**
+     * 文本 / Markdown / 网页 / Word 演示正文写成一份 docx。
+     *
+     * 认哪条路、怎么排版全在 `:core`（那边能脱机单测，也拿 pandoc 逐块对过）；
+     * 这里只管读进来、落盘、把"按什么排的"拼进说明。
+     */
+    fun toDocx(item: WorkItem): EngineOutput {
+        val notes = ArrayList<String>()
+        val source = when (item.kind) {
+            FileKind.Docx, FileKind.Pptx -> {
+                val extracted = OfficeSource.text(item.file, item.kind)
+                notes += extracted.losses
+                extracted.text
+            }
+            else -> {
+                val decoded = com.fileforge.core.text.TextCodecs.decodeForConversion(read(item), null)
+                notes += "按 ${decoded.encoding.label} 读" + if (decoded.hadBom) "（源带 BOM）" else ""
+                decoded.text
+            }
+        }
+        val reading = TextDoc.read(source)
+        notes.add(0, when (reading.route) {
+            TextDoc.Route.Web -> "按网页结构排"
+            TextDoc.Route.Markdown -> "按 Markdown 记号排"
+            TextDoc.Route.Plain -> "按空行分段排（文本里没有网页标签或 Markdown 记号）"
+        })
+        val out = DocxWrite.document(reading.doc, modifiedAt = item.file.lastModified())
+        val file = workspace.newStagingFile("docx").apply { writeBytes(out.bytes) }
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "", "docx"),
+            file,
+            (listOf("${reading.doc.parts.size} 块内容") + notes + reading.doc.notes + out.notes).joinToString(" · "),
+        )
     }
 
     private fun workbook(

@@ -46,6 +46,7 @@ enum class OperationKind(val label: String, val hint: String) {
     CsvToXlsx("CSV 转 Excel", "写一份真 .xlsx；007 与 1.50 这类写法不会被猜成数字"),
     JsonToXlsx("JSON 转 Excel", "对象数组摊成表，列名取第一份对象的键"),
     HtmlToCsv("网页表格转 CSV", "一张表一份 CSV；跨格按跨度占位，不把整行挤歪"),
+    TextToDocx("文本转 Word", "带记号的按 Markdown / 网页排，列表是 Word 自己的编号"),
     ImageToIco("做成图标 ICO", "一次出 16/32/48/256 多个尺寸"),
     IcoToImages("图标拆成图片", "把 .ico 里的每个画面导成 PNG"),
     XmlToJson("XML 转 JSON", "属性加 @、子元素成数组；带 DTD 的不解析"),
@@ -77,8 +78,10 @@ enum class OperationKind(val label: String, val hint: String) {
             ConvertAudio -> fileKind.isAudio
             // 两种都只认"这是个文本文件"，具体是哪种字幕交给解析器判
             ConvertTextEncoding, ConvertSubtitle -> fileKind.isTextual
-            // 印成 PDF 走同一套排版：docx / pptx 先把正文抽出来，网页先把标记剔掉，抽出来的是什么就是什么
-            TextToPdf -> fileKind.isTextual || fileKind == FileKind.Docx || fileKind == FileKind.Pptx
+            // 印成 PDF 与写成 Word 走同一条来源判定：docx / pptx 先把正文抽出来，
+            // 网页与 Markdown 按内容认，抽出来 / 认出来的是什么就是什么
+            TextToPdf, TextToDocx ->
+                fileKind.isTextual || fileKind == FileKind.Docx || fileKind == FileKind.Pptx
             OfficeToText -> fileKind == FileKind.Docx || fileKind == FileKind.Pptx
             XlsxToCsv -> fileKind == FileKind.Xlsx
             // 只有真带画面的类型才给"提取音频"，否则用户会对一个纯音频文件点它

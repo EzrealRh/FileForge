@@ -416,6 +416,16 @@ sealed interface Operation {
         override val label get() = "网页表格转 CSV"
     }
 
+    /**
+     * 文本 / Markdown / 网页写成 .docx，进 Word / WPS 打得开、能继续编辑。
+     *
+     * 按内容挑路（见 [com.fileforge.core.doc.TextDoc]）：带标签的按网页排，带记号的按 Markdown 排，
+     * 其余按空行分段。列表的圆点与序号是 Word 自己画的（不是写在文字里），删一行也不会错位。
+     */
+    data object TextToDocx : Operation {
+        override val label get() = "写成 Word 文档"
+    }
+
     /** 把 .ico 里的每一帧画面导成 PNG。 */
     data object IcoToImages : Operation {
         override val label get() = "导出图标里的画面"

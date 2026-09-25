@@ -185,7 +185,7 @@ class FileKindSniffTest {
         assertTrue(OperationKind.OfficeToText !in OperationKind.applicable(setOf(FileKind.Text)))
         // docx 和 txt 混着选：只剩两条路都走得通的操作
         assertEquals(
-            setOf(OperationKind.TextToPdf, OperationKind.PackZip),
+            setOf(OperationKind.TextToPdf, OperationKind.TextToDocx, OperationKind.PackZip),
             OperationKind.applicable(setOf(FileKind.Docx, FileKind.Text)).toSet(),
         )
     }
@@ -211,6 +211,12 @@ class FileKindSniffTest {
         assertTrue(OperationKind.HtmlToText in html && OperationKind.HtmlToMarkdown in html, "网页该有这两条：$html")
         assertTrue(OperationKind.ConvertTextEncoding in html, "网页也要能换编码：$html")
         assertTrue(OperationKind.TextToPdf in html, "网页能印成 PDF：$html")
+        assertTrue(OperationKind.TextToDocx in html, "网页能写成 Word：$html")
+        // 表格没有"连着读的正文"，摆一条"写成 Word"只会产出一份把格子摊平的文档
+        assertTrue(
+            OperationKind.TextToDocx !in OperationKind.applicable(setOf(FileKind.Xlsx)),
+            "xlsx 不该拿到「写成 Word」",
+        )
         // 网页与纯文本混着选：这两条对两边都成立（引擎自己判有没有标签）
         assertTrue(
             setOf(OperationKind.HtmlToText, OperationKind.HtmlToMarkdown)

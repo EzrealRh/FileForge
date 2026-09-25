@@ -221,6 +221,191 @@ object Html {
 
     private const val MAX_SPAN = 1000
 
+    /**
+     * HTML → 文档树（段落 + 带记号的文字 + 表格），Word 那条路用。
+     *
+     * 与纯文本那条的差别只有**记号留不留**：这里把 `strong` `em` `del` `code` 与链接翻成开关
+     * 和能点开的真链接，建树与表格对位仍旧共用一套 —— 三份输出在"哪段是列表、哪格在第几列"上
+     * 必须一致，各摆一套迟早会出现纯文本里是列表、Word 里成普通段落那种岔。
+     */
+    fun toDoc(source: String): Doc {
+        val tally = EntityTally()
+        val built = HtmlTree.build(HtmlTokens.tokenize(source, tally))
+        val counted = Counted()
+        val parts = ArrayList<DocPart>()
+        docChildren(built.root, Ctx(markdown = false, counted), parts, 0, 0)
+        val notes = ArrayList<String>()
+        if (built.repaired > 0) notes += "源文件有 ${built.repaired} 处标签没按规矩闭合，按浏览器那套补的"
+        if (tally.unknown > 0) notes += "${tally.unknown} 处实体没认出来，照字面留下了"
+        if (counted.dropped > 0) notes += "${counted.dropped} 段脚本/样式/页眉内容丢掉（那不是给人读的文字）"
+        if (counted.links > 0) notes += "${counted.links} 处链接写成 Word 里能点开的真链接"
+        if (counted.tables > 0) notes += "${counted.tables} 张表按跨度摆成表格（跨过的格子留空）"
+        if (counted.images > 0) notes += "${counted.images} 处图片只剩替代文字（图片本体不在文字里）"
+        if (counted.nestedQuotes > 0) notes += "${counted.nestedQuotes} 处嵌套引用压成多缩一层的引用段（Word 里没有第二层引用样式）"
+        if (counted.rules > 0) notes += "${counted.rules} 处分隔线画成带下边线的空段（Word 里没有横线这个块）"
+        if (counted.forms > 0) notes += "${counted.forms} 处表单控件只留下标签文字"
+        return Doc(parts, notes)
+    }
+
+    /** 一个容器里的孩子：块级各自成块，剩下的行内内容攒成一个段落。 */
+    private fun docChildren(node: HtmlNode, ctx: Ctx, parts: ArrayList<DocPart>, indent: Int, quote: Int) {
+        val run = ArrayList<DocRun>()
+        fun flush() {
+            val kept = trimBlanks(run)
+            if (kept.isNotEmpty()) parts += DocParagraph(DocPara(kept, if (quote > 0) "Quote" else "Body", indent + quote))
+            run.clear()
+        }
+        node.children.forEach { child ->
+            when {
+                child.name.isEmpty() -> Unit
+                child.name in DROP -> ctx.counted.dropped++
+                child.name in BLOCKS || holdsBlock(child) -> {
+                    flush()
+                    docBlock(child, ctx, parts, indent, quote)
+                }
+                else -> docDocRun(child, ctx, run)
+            }
+        }
+        flush()
+    }
+
+    private fun docBlock(node: HtmlNode, ctx: Ctx, parts: ArrayList<DocPart>, indent: Int, quote: Int) {
+        val level = headingLevel(node.name)
+        when {
+            node.name == "hr" -> {
+                ctx.counted.rules++
+                parts += DocRule()
+            }
+            level > 0 -> {
+                val run = ArrayList<DocRun>()
+                node.children.forEach { child -> docDocRun(child, ctx, run) }
+                val kept = trimBlanks(run)
+                if (kept.isNotEmpty()) parts += DocParagraph(DocPara(kept, "Heading$level", indent))
+            }
+            node.name == "pre" -> {
+                val source = StringBuilder()
+                children(node, source, ctx, raw = true)
+                val text = source.toString().trim('\n')
+                if (text.isNotEmpty()) {
+                    // 一整段一份代码块（行内用软回车）：拆成 N 段的话，Word 里粘回去就多了 N-1 个空行
+                    parts += DocParagraph(DocPara(listOf(DocRun(text, mono = true)), "SourceCode", indent))
+                }
+            }
+            node.name == "blockquote" -> {
+                if (quote > 0) ctx.counted.nestedQuotes++
+                docChildren(node, ctx, parts, indent, quote + 1)
+            }
+            node.name == "ul" || node.name == "ol" -> docList(node, ctx, parts, indent, quote)
+            node.name == "table" -> docTable(node, ctx, parts)
+            else -> docChildren(node, ctx, parts, indent, quote)
+        }
+    }
+
+    private fun headingLevel(name: String): Int =
+        if (name.length == 2 && name[0] == 'h' && name[1] in '1'..'6') name[1] - '0' else 0
+
+    private fun docList(node: HtmlNode, ctx: Ctx, parts: ArrayList<DocPart>, indent: Int, quote: Int) {
+        val ordered = node.name == "ol"
+        var number = node.attrs["start"]?.trim()?.toIntOrNull() ?: 1
+        node.children.filter { it.name == "li" }.forEach { item ->
+            val checkbox = item.children.firstOrNull { it.name == "input" && it.attrs["type"] == "checkbox" }
+            val marker = when {
+                checkbox == null -> ""
+                checkbox.attrs.containsKey("checked") -> "☑ "
+                else -> "☐ "
+            }
+            val run = ArrayList<DocRun>()
+            item.children.forEach { child ->
+                when {
+                    child.name == "ul" || child.name == "ol" || child === checkbox -> Unit
+                    child.name in BLOCKS && child.name != "br" -> child.children.forEach { inner -> docDocRun(inner, ctx, run) }
+                    else -> docDocRun(child, ctx, run)
+                }
+            }
+            val kept = trimBlanks(run)
+            val box = checkbox
+            if (box != null) ctx.counted.forms++
+            val body = if (box != null && marker.isNotEmpty()) listOf(DocRun(marker)) + kept else kept
+            if (body.isNotEmpty()) {
+                parts += DocParagraph(DocPara(body, if (quote > 0) "Quote" else "ListParagraph", indent + quote, !ordered))
+            }
+            item.children.filter { it.name == "ul" || it.name == "ol" }
+                .forEach { child -> docList(child, ctx, parts, indent + 1, quote) }
+        }
+    }
+
+    private fun docTable(node: HtmlNode, ctx: Ctx, parts: ArrayList<DocPart>) {
+        ctx.counted.tables++
+        val placed = placeTable(node, ctx)
+        if (placed.rows.isEmpty()) return
+        val header = tableRows(node).firstOrNull()?.children?.any { it.name == "th" } == true
+        parts += DocTable(header, placed.rows.map { row -> row.map { it.replace("\n", " ").trim() } })
+    }
+
+    private fun docDocRun(node: HtmlNode, ctx: Ctx, into: ArrayList<DocRun>) {
+        if (node.name in DROP) {
+            ctx.counted.dropped++
+            return
+        }
+        if (node.raw()) {
+            if (node.name == "#raw:textarea") into += DocRun(node.text) else ctx.counted.dropped++
+            return
+        }
+        when {
+            node.isText() -> into += DocRun(collapse(node.text))
+            node.name == "br" -> into += DocRun("\n")
+            node.name == "img" -> {
+                ctx.counted.images++
+                into += DocRun(node.attrs["alt"].orEmpty())
+            }
+            node.name == "a" -> {
+                val href = linkTarget(node.attrs["href"].orEmpty())
+                if (href != null) ctx.counted.links++
+                val inner = ArrayList<DocRun>()
+                node.children.forEach { child -> docDocRun(child, ctx, inner) }
+                inner.forEach { into += it.copy(link = href, underline = href != null) }
+            }
+            node.name in FORMS -> {
+                ctx.counted.forms++
+                node.children.forEach { child -> docDocRun(child, ctx, into) }
+            }
+            node.name in setOf("strong", "b") -> into += marked(node, ctx) { it.copy(bold = true) }
+            node.name in setOf("em", "i", "cite") -> into += marked(node, ctx) { it.copy(italic = true) }
+            node.name in setOf("del", "s", "strike") -> into += marked(node, ctx) { it.copy(strike = true) }
+            node.name in setOf("code", "kbd", "samp", "tt") -> into += marked(node, ctx) { it.copy(mono = true) }
+            else -> node.children.forEach { child -> docDocRun(child, ctx, into) }
+        }
+    }
+
+    private fun marked(node: HtmlNode, ctx: Ctx, wrap: (DocRun) -> DocRun): List<DocRun> {
+        val inner = ArrayList<DocRun>()
+        node.children.forEach { child -> docDocRun(child, ctx, inner) }
+        return inner.map(wrap)
+    }
+
+    /** 只有这些地址值得留成能点开的链接；`javascript:` 那种、页内锚点与空地址都只当文字。 */
+    private fun linkTarget(href: String): String? {
+        val value = href.trim()
+        if (value.isEmpty() || value.startsWith("#")) return null
+        return value.takeIf {
+            it.startsWith("http://", true) || it.startsWith("https://", true) ||
+                it.startsWith("mailto:", true) || it.startsWith("www.", true) || EMAIL.matches(it)
+        }
+    }
+
+    private val EMAIL = Regex("^[\\w.+-]+@[\\w.-]+\\.[A-Za-z]{2,}$")
+
+    /** 首尾的纯空白段不要：段首缩进与段间空行由 Word 的样式管，搬一堆空格进去只会歪。 */
+    private fun trimBlanks(runs: List<DocRun>): List<DocRun> {
+        var from = 0
+        var to = runs.size
+        while (from < to && runs[from].text.isBlank()) from++
+        while (to > from && runs[to - 1].text.isBlank()) to--
+        return runs.subList(from, to).toList()
+    }
+
+    private fun collapse(value: String) = value.replace(WHITESPACE_RUN, " ")
+
     private class Ctx(val markdown: Boolean, val counted: Counted)
 
     private class Counted {
@@ -230,6 +415,8 @@ object Html {
         var tables = 0
         var forms = 0
         var clamped = 0
+        var rules = 0
+        var nestedQuotes = 0
     }
 
     private fun render(source: String, markdown: Boolean): Rendered {

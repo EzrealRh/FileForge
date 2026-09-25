@@ -566,7 +566,8 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
                 Summary("格子里的 `<br>` 与多个段落变成格内换行（CSV 里带引号），列表照记号写。")
                 Summary("表里嵌着表时，外面那张的格子里只剩文字，嵌着的另出一份文件。")
             }
-            OperationKind.CsvToXlsx -> {                Summary("写一份真 .xlsx（一张表，表名用文件名），Excel / WPS / Numbers 直接打得开。")
+            OperationKind.CsvToXlsx -> {
+                Summary("写一份真 .xlsx（一张表，表名用文件名），Excel / WPS / Numbers 直接打得开。")
                 Summary("格子类型只按字面判：能一字不差读回来的写法才写成数字，`007`、`1.50`、15 位以上的编号一律保持文字。")
                 Summary("以 `=` `+` `@` 开头的格子按文字存，不会被当成公式执行。")
             }
@@ -574,6 +575,12 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
                 Summary("要的是对象数组：第一行是列名（取各条目键的并集，按首次出现的顺序），每条一行。")
                 Summary("嵌套的对象与数组会压成一格文字，字段数不齐时缺的地方留空 —— 都会逐条写明。")
                 Summary("与「JSON 转 CSV」用的是同一套摊平判据，两条路出来的表内容一致。")
+            }
+            OperationKind.TextToDocx -> {
+                Summary("标题、列表、表格、引用、代码块、加粗斜体删除线写成 Word 的样式；链接是真链接，点开能跳。")
+                Summary("列表的圆点与序号由 Word 自己画（不是写在文字里），删一行、加一行都不会错位。")
+                Summary("源文件里有 HTML 标签就按网页排，有 Markdown 记号就按 Markdown 排，普通文字按空行分段 —— 按哪条路排的会写在结果里。")
+                Summary("docx / pptx 进来是先抽正文再重排：原来的样式、图片与脚注搬不过来，丢了什么逐条写明。")
             }
             OperationKind.IcoToImages -> {
                 Summary("PNG 内嵌的那种直接把内嵌字节原样取出，不重新编码；老式位图（DIB）的要重建像素再编 PNG。")
@@ -755,6 +762,7 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
             OperationKind.CsvToXlsx -> Operation.CsvToXlsx
             OperationKind.HtmlToCsv -> Operation.HtmlToCsv(csvDelimiter, csvEnding)
             OperationKind.JsonToXlsx -> Operation.JsonToXlsx
+            OperationKind.TextToDocx -> Operation.TextToDocx
             OperationKind.IcoToImages -> Operation.IcoToImages
         }
     }

@@ -196,6 +196,9 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
             is Operation.HtmlToCsv -> items.forEach { item ->
                 collect(item.name) { text.htmlToCsv(item, operation.delimiter, operation.ending) }
             }
+            is Operation.TextToDocx -> items.forEach { item ->
+                collect(item.name) { listOf(office.toDocx(item)) }
+            }
         }
 
         coroutineContext.ensureActive()
