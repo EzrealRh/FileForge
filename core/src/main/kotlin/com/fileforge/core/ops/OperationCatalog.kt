@@ -36,6 +36,8 @@ enum class OperationKind(val label: String, val hint: String) {
     FormatJson("JSON 格式化", "缩进或压平、键排序；数字原文不被改写"),
     JsonToCsv("JSON 转 CSV", "对象数组拆成表，会丢什么都先说明"),
     CsvToJson("CSV 转 JSON", "首行当列名；默认不猜类型，007 不会变成 7"),
+    ImageToIco("做成图标 ICO", "一次出 16/32/48/256 多个尺寸"),
+    IcoToImages("图标拆成图片", "把 .ico 里的每个画面导成 PNG"),
     XmlToJson("XML 转 JSON", "属性加 @、子元素成数组；带 DTD 的不解析"),
     JsonToXml("JSON 转 XML", "键当标签名，数组写成重复元素"),
     ;
@@ -49,7 +51,10 @@ enum class OperationKind(val label: String, val hint: String) {
         }
 
         private fun compatible(kind: OperationKind, fileKind: FileKind): Boolean = when (kind) {
-            ConvertImage, CompressImage -> fileKind.isImage && fileKind != FileKind.Gif
+            ConvertImage, CompressImage -> fileKind.isImage && fileKind != FileKind.Gif && fileKind != FileKind.Ico
+            // 图标要走专门通路：解码成位图后一次出多个尺寸；普通格式转换只会给一张
+            ImageToIco -> fileKind.isImage && fileKind != FileKind.Gif && fileKind != FileKind.Ico
+            IcoToImages -> fileKind == FileKind.Ico
             ImagesToPdf -> fileKind.isImage
             CompressPdf, SplitPdfBySize, SplitPdfIntoParts, ExtractPdfPages, RemovePdfPages,
             RotatePdfPages, MergePdfs, PdfToText, PdfToImages, AddPageNumbers, PdfWatermark,

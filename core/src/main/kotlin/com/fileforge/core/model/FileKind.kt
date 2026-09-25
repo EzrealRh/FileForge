@@ -4,7 +4,7 @@ package com.fileforge.core.model
 enum class FileKind {
     Pdf, Png, Jpeg, Gif, WebP, Bmp, Heic, Avif, Mp4, WebM, Mkv, QuickTime,
     Mp3, Aac, M4a, Flac, Ogg, Wav,
-    Zip, Text, Unknown;
+    Zip, Ico, Text, Unknown;
 
     val isImage: Boolean get() = this in IMAGE_KINDS
     val isVideo: Boolean get() = this in VIDEO_KINDS
@@ -16,6 +16,7 @@ enum class FileKind {
         Png -> "image/png"
         Jpeg -> "image/jpeg"
         Gif -> "image/gif"
+        Ico -> "image/x-icon"
         WebP -> "image/webp"
         Bmp -> "image/bmp"
         Heic -> "image/heic"
@@ -44,6 +45,7 @@ enum class FileKind {
         Png -> "PNG"
         Jpeg -> "JPEG"
         Gif -> "GIF"
+        Ico -> "ICO"
         WebP -> "WebP"
         Bmp -> "BMP"
         Heic -> "HEIC"
@@ -64,7 +66,7 @@ enum class FileKind {
     }
 
     companion object {
-        val IMAGE_KINDS = setOf(Png, Jpeg, Gif, WebP, Bmp, Heic, Avif)
+        val IMAGE_KINDS = setOf(Png, Jpeg, Gif, WebP, Bmp, Heic, Avif, Ico)
         val VIDEO_KINDS = setOf(Mp4, WebM, Mkv, QuickTime)
 
         /**
@@ -94,6 +96,10 @@ object FileTypeSniffer {
             u(0) == 0x89 && isAscii(1, "PNG") -> FileKind.Png
             u(0) == 0xFF && u(1) == 0xD8 && u(2) == 0xFF -> FileKind.Jpeg
             isAscii(0, "GIF8") -> FileKind.Gif
+            // ICO：保留字 0、类型 1(图标)/2(光标)，条目数不为 0。只认前四条约束——
+            // 光看 00 00 01 00 会撞上别的二进制头，所以再加一条"数据都落在文件内"
+            u(0) == 0 && u(1) == 0 && u(2) == 1 && u(3) == 0 &&
+                u(4) in 1..255 && u(5) == 0 && looksLikeIcoDirectory(header) -> FileKind.Ico
             u(0) == 0x42 && u(1) == 0x4D -> FileKind.Bmp
             isAscii(0, "RIFF") && isAscii(8, "WEBP") -> FileKind.WebP
             // EBML：DocType 里写 webm 才是 WebM，否则是 Matroska
@@ -133,6 +139,27 @@ object FileTypeSniffer {
             if (v < 0x20 && v != 0x09 && v != 0x0A && v != 0x0B && v != 0x0C && v != 0x0D) controls++
         }
         return controls * 20 <= header.size
+    }
+
+    /**
+     * 目录里每一项都得说得通才算图标。
+     *
+     * 只判"偏移在目录之后、长度是正数"这一条：嗅探用的头只有几十到几百字节，
+     * 拿它去比图片数据的偏移会不会越界是没有意义的（真图标必然超出），所以越界检查
+     * 留给真正读文件时的 Ico.directory 去做。这里要挡的是"开头碰巧是 00 00 01 00"的别的文件。
+     */
+    private fun looksLikeIcoDirectory(header: ByteArray): Boolean {
+        val count = (header[4].toInt() and 0xFF) or ((header[5].toInt() and 0xFF) shl 8)
+        if (count == 0 || count > 64) return false
+        return (0 until count).all { index ->
+            val at = 6 + index * 16
+            if (at + 16 > header.size) return false
+            val size = (header[at + 8].toInt() and 0xFF) or ((header[at + 9].toInt() and 0xFF) shl 8) or
+                ((header[at + 10].toInt() and 0xFF) shl 16) or ((header[at + 11].toInt() and 0xFF) shl 24)
+            val offset = (header[at + 12].toInt() and 0xFF) or ((header[at + 13].toInt() and 0xFF) shl 8) or
+                ((header[at + 14].toInt() and 0xFF) shl 16) or ((header[at + 15].toInt() and 0xFF) shl 24)
+            size in 1..(1 shl 26) && offset >= 6 + count * 16
+        }
     }
 
     private fun isoBrandToKind(brand: String) = when {

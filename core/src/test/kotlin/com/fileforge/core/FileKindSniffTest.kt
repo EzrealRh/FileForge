@@ -128,6 +128,29 @@ class FileKindSniffTest {
     }
 
     @Test
+    fun `真实的 ico 夹具要认成图标`() {
+        // 用真夹具而不是手编前缀：嗅探规则最容易在"开头碰巧对"的别的文件上误判
+        listOf("ico/dib32.ico", "ico/pngico.ico").forEach { name ->
+            val bytes = javaClass.classLoader.getResourceAsStream(name).use { requireNotNull(it).readBytes() }
+            assertEquals(FileKind.Ico, FileTypeSniffer.sniff(bytes.take(256).toByteArray()), "$name 该认成图标")
+        }
+        // 开头是 00 00 01 00 但目录说不通的，不该被硬认成图标
+        val fake = ByteArray(64).also { it[2] = 1; it[4] = 9 }
+        assertTrue(FileTypeSniffer.sniff(fake) != FileKind.Ico, "条目数 9 但后面全是 0，目录说不通")
+    }
+
+    @Test
+    fun `图标只给图标那两个操作`() {
+        val ops = OperationKind.applicable(setOf(FileKind.Ico))
+        assertTrue(OperationKind.IcoToImages in ops, "ico 该能拆图：$ops")
+        assertFalse(OperationKind.ConvertImage in ops, "普通格式转换只会出一张，不该摆在图标上：$ops")
+        assertFalse(OperationKind.ImageToIco in ops, "已经是图标了不必再做成图标")
+        val png = OperationKind.applicable(setOf(FileKind.Png))
+        assertTrue(OperationKind.ImageToIco in png, "PNG 该能做成图标")
+        assertFalse(OperationKind.IcoToImages in png, "PNG 不是图标")
+    }
+
+    @Test
     fun `音频加图片的混选只剩打包`() {
         // 选了一个 mp3 一个 jpg：没有任何共同的转换操作，界面不该摆一个只对一半文件有效、
         // 跑完静默跳过另一半的按钮。唯一例外是打包 —— 把不相干的两类装进一个包正是它的用途。

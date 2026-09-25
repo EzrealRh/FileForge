@@ -314,6 +314,23 @@ sealed interface Operation {
     data class JsonToXml(val root: String = "", val indent: Int = 2) : Operation {
         override val label get() = "转为 XML"
     }
+
+    /**
+     * 图片做成 .ico。一张源图会被缩到 [sizes] 里的每个尺寸，一并写进同一份图标 ——
+     * 系统按用途挑合适的那张，所以一次出多尺寸才有意义。
+     */
+    data class ImageToIco(val sizes: List<Int> = DEFAULT_ICO_SIZES) : Operation {
+        override val label get() = "做成图标 ICO"
+
+        companion object {
+            val DEFAULT_ICO_SIZES = listOf(16, 32, 48, 256)
+        }
+    }
+
+    /** 把 .ico 里的每一帧画面导成 PNG。 */
+    data object IcoToImages : Operation {
+        override val label get() = "导出图标里的画面"
+    }
 }
 
 enum class PdfPaper(val label: String) { A4("A4"), A5("A5"), Letter("Letter"), FitImage("按图片尺寸") }
