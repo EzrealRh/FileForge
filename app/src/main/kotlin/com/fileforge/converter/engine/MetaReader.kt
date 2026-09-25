@@ -3,6 +3,7 @@ package com.fileforge.converter.engine
 import android.graphics.BitmapFactory
 import android.media.MediaExtractor
 import android.media.MediaFormat
+import com.fileforge.core.archive.ZipReader
 import com.fileforge.core.audio.AudioPlan
 import com.fileforge.core.gif.GifDecoder
 import com.fileforge.core.meta.ImageMeta
@@ -38,6 +39,7 @@ class MetaReader {
         runCatching {
             when {
                 item.kind == FileKind.Gif -> facts += gifFacts(item.file)
+                item.kind == FileKind.Zip -> facts += zipFacts(item.file)
                 item.kind == FileKind.Pdf -> facts += pdfFacts(item.file)
                 item.kind.isVideo -> facts += videoFacts(item.file)
                 item.kind.isAudio -> facts += audioFacts(item.file)
@@ -139,6 +141,26 @@ class MetaReader {
             add("平均帧率" to "%.1f fps".format(image.averageFps))
             add("循环" to if (image.loopCount == 0) "无限" else "${image.loopCount} 次")
             add("实际颜色" to "${seen.size} 种")
+        }
+    }
+
+    /** 压缩包里有什么：不解压也能先看清有多少条、解开多大、带不带口令。 */
+    private fun zipFacts(file: File): List<Pair<String, String>> {
+        val slices = FileSlices(file)
+        return try {
+            val archive = ZipReader.read(slices, file.length())
+            val files = archive.entries.filterNot { it.isDirectory }
+            buildList {
+                add("条目" to "${archive.entries.size} 条（文件 ${files.size}）")
+                add("解开后" to SizeInput.format(files.sumOf { it.size }))
+                val locked = files.count { it.isEncrypted }
+                if (locked > 0) add("带口令" to "$locked 条，这几条解不出来")
+                files.take(META_LINES).forEach { add(it.name.substringAfterLast('/') to SizeInput.format(it.size)) }
+                if (files.size > META_LINES) add("其余条目" to "${files.size - META_LINES} 条未列出")
+                if (archive.comment.isNotBlank()) add("包注释" to archive.comment)
+            }
+        } finally {
+            runCatching { slices.close() }
         }
     }
 

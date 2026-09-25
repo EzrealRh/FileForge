@@ -26,6 +26,7 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
     private val video = VideoEngine(workspace, images)
     private val audio = AudioEngine(workspace)
     private val text = TextEngine(workspace)
+    private val archives = ArchiveEngine()
 
     suspend fun run(
         items: List<WorkItem>,
@@ -136,6 +137,12 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
             }
             is Operation.CleanMetadata -> items.forEach { item ->
                 collect(item.name) { listOf(images.cleanMetadata(item, ::staging)) }
+            }
+            is Operation.PackArchive -> collect("${items.size} 份文件") {
+                listOf(archives.pack(items, operation, ::staging))
+            }
+            is Operation.UnpackArchive -> items.forEach { item ->
+                collect(item.name) { archives.unpack(item, operation, ::staging) }
             }
         }
 

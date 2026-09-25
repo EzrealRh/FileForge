@@ -50,6 +50,7 @@ import com.fileforge.core.audio.AudioTarget
 import com.fileforge.core.meta.ImageMeta
 import com.fileforge.core.meta.MetaReport
 import com.fileforge.core.model.FileKind
+import com.fileforge.core.naming.OutputNaming
 import com.fileforge.core.ops.ImageFormat
 import com.fileforge.core.ops.Operation
 import com.fileforge.core.ops.OperationKind
@@ -457,6 +458,16 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
                 }
                 Summary("影响显示的部分会留着：ICC 色彩配置、JFIF 密度、Adobe 通道序。删掉它们照片会变色，那就不是清理而是损坏。")
             }
+            OperationKind.PackZip -> {
+                Summary("${items.size} 份文件、合计 ${sizeOf(items)}，压成一个 zip。")
+                Summary("进包用原文件名，重名会自动补编号；jpg / mp4 / zip 这类已经压过的直接存原文，不再压第二遍。")
+                Summary("包名跟着第一份文件走：${OutputNaming.stem(items.first().name)}_打包.zip")
+            }
+            OperationKind.UnpackZip -> {
+                Summary("解出来的文件平铺在工作台里，路径压进名字（包名_目录_文件.扩展名），不保留目录层级。")
+                Summary("带口令的条目、符号链接和解不了的压缩方式会跳过并在结果里说明；整包都是口令包就直接不做。")
+                Summary("只解 zip。rar / 7z 用的是另一套算法，这里不支持，会直接告诉你不是 zip。")
+            }
         }
     }
 
@@ -550,6 +561,8 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
             OperationKind.ConvertSubtitle -> Operation.ConvertSubtitle(subtitleTarget, encodingAt(subtitleSource))
             OperationKind.DecryptPdf -> Operation.DecryptPdf(pdfOpenPw)
             OperationKind.CleanMetadata -> Operation.CleanMetadata
+            OperationKind.PackZip -> Operation.PackArchive
+            OperationKind.UnpackZip -> Operation.UnpackArchive
         }
     }
 }
