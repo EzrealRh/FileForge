@@ -236,6 +236,9 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
             is Operation.TextToDocx -> items.forEach { item ->
                 collect(item.name) { listOf(office.toDocx(item)) }
             }
+            is Operation.TextToEpub -> items.forEach { item ->
+                collect(item.name) { listOf(book.fromText(item, operation)) }
+            }
         }
 
         coroutineContext.ensureActive()

@@ -50,6 +50,7 @@ enum class OperationKind(val label: String, val hint: String) {
     JsonToXlsx("JSON 转 Excel", "对象数组摊成表，列名取第一份对象的键"),
     HtmlToCsv("网页表格转 CSV", "一张表一份 CSV；跨格按跨度占位，不把整行挤歪"),
     TextToDocx("文本转 Word", "带记号的按 Markdown / 网页排，列表是 Word 自己的编号"),
+    TextToEpub("文本转 EPUB", "按一级标题切章，出一份阅读器能打开的电子书"),
     YamlToJson("YAML 转 JSON", "yes 与 1:30 这类值保持文字，不被当成真假与秒数"),
     JsonToYaml("JSON 转 YAML", "块式输出；该加引号的加引号，别人读回去是同一个值"),
     YamlToCsv("YAML 转 CSV", "对象数组摊成表，会丢什么都先说明"),
@@ -90,9 +91,9 @@ enum class OperationKind(val label: String, val hint: String) {
             ConvertAudio -> fileKind.isAudio
             // 两种都只认"这是个文本文件"，具体是哪种字幕交给解析器判
             ConvertTextEncoding, ConvertSubtitle -> fileKind.isTextual
-            // 印成 PDF 与写成 Word 走同一条来源判定：docx / pptx 先把正文抽出来，
+            // 印成 PDF、写成 Word 与写成电子书走同一条来源判定：docx / pptx 先把正文抽出来，
             // 网页与 Markdown 按内容认，抽出来 / 认出来的是什么就是什么
-            TextToPdf, TextToDocx ->
+            TextToPdf, TextToDocx, TextToEpub ->
                 fileKind.isTextual || fileKind == FileKind.Docx || fileKind == FileKind.Pptx
             OfficeToText -> fileKind == FileKind.Docx || fileKind == FileKind.Pptx
             XlsxToCsv -> fileKind == FileKind.Xlsx

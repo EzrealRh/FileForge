@@ -200,6 +200,8 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
     var csvHeader by mutableStateOf(true)
     var csvInfer by mutableStateOf(false)
     var xmlRoot by mutableStateOf("")
+    var epubTitle by mutableStateOf("")
+    var epubAuthor by mutableStateOf("")
     var icoSizesText by mutableStateOf("16,32,48,256")
     var textSize by mutableStateOf(11f)
     var textLeading by mutableStateOf(1.4f)
@@ -618,6 +620,30 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
                 Summary("源文件里有 HTML 标签就按网页排，有 Markdown 记号就按 Markdown 排，普通文字按空行分段 —— 按哪条路排的会写在结果里。")
                 Summary("docx / pptx 进来是先抽正文再重排：原来的样式、图片与脚注搬不过来，丢了什么逐条写明。")
             }
+            OperationKind.TextToEpub -> {
+                OutlinedTextField(
+                    value = epubTitle,
+                    onValueChange = { epubTitle = it },
+                    label = { Text("书名（留空用文件名）") },
+                    singleLine = true,
+                    supportingText = { Text("留空就是《${OutputNaming.stem(items.first().name)}》。写进书的元数据里，阅读器书架上显示的是它。") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = epubAuthor,
+                    onValueChange = { epubAuthor = it },
+                    label = { Text("作者（留空就不写）") },
+                    singleLine = true,
+                    supportingText = { Text("留空时元数据里没有作者这一项，不会编一个名字进去。") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Summary("章节按「一级标题」切（Markdown 的一个 # 号、网页的 h1）；一个都没有就整本算一章。")
+                Summary("章名之前还有内容的话，那部分单独算「开篇」，不会丢。")
+                Summary("标题、列表、表格、引用、代码块与加粗斜体照排进章节文件；链接是真链接。")
+                Summary("语言按正文数出来（中文标 zh、英文标 en），阅读器据此挑字体与断词。")
+                Summary("源文件里的图片不搬（文本与网页里没有可搬的图），产出一份纯文字的电子书。")
+                Summary("同一份内容每次导出的书号是同一个：改完再导一遍，阅读器认得出还是同一本书。")
+            }
             OperationKind.EpubToText, OperationKind.EpubToMarkdown, OperationKind.EpubToDocx -> {
                 Summary("章节顺序按包里的 spine 走（`.epub` 里的文件名顺序常常不是阅读顺序）。")
                 Summary("章名优先取目录（NCX）里的名字，其次文档自己的 title，再不行用文件名。")
@@ -842,6 +868,7 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
             OperationKind.HtmlToCsv -> Operation.HtmlToCsv(csvDelimiter, csvEnding)
             OperationKind.JsonToXlsx -> Operation.JsonToXlsx
             OperationKind.TextToDocx -> Operation.TextToDocx
+            OperationKind.TextToEpub -> Operation.TextToEpub(epubTitle.trim(), epubAuthor.trim())
             OperationKind.IcoToImages -> Operation.IcoToImages
             OperationKind.EpubToText -> Operation.EpubToText
             OperationKind.EpubToMarkdown -> Operation.EpubToMarkdown

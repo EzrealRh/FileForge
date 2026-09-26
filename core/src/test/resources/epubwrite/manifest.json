@@ -1,0 +1,61 @@
+{
+  "namespace": "0e7a2b1c-3f4d-5a6b-7c8d-9e0f1a2b3c4d",
+  "modified": "2023-11-14T22:13:20Z",
+  "modified_at": 1700000000000,
+  "cases": [
+    {
+      "source": "note.md",
+      "title": "读书笔记甲乙",
+      "author": "写书的人",
+      "chapters": [
+        "开篇",
+        "第一章 甲 & 乙",
+        "第二章 收尾"
+      ],
+      "language": "zh",
+      "identifier": "urn:uuid:dcdddff2-1be0-516a-b561-5e97adf114a8"
+    },
+    {
+      "source": "head.md",
+      "title": "head",
+      "author": "",
+      "chapters": [
+        "只有标题开头"
+      ],
+      "language": "zh",
+      "identifier": "urn:uuid:9dcc9346-32a8-5e44-9231-36c6f4a2f102"
+    },
+    {
+      "source": "page.html",
+      "title": "网页的一本书",
+      "author": "",
+      "chapters": [
+        "开篇",
+        "第一章 & 甲",
+        "第二章 收尾"
+      ],
+      "language": "zh",
+      "identifier": "urn:uuid:ba070840-094e-5c8d-bb09-47daaac67f8d"
+    },
+    {
+      "source": "plain.txt",
+      "title": "随手记",
+      "author": "某人",
+      "chapters": [
+        "plain"
+      ],
+      "language": "zh",
+      "identifier": "urn:uuid:a89f76a0-9e64-5a43-ac6a-2db8bb14c1f0"
+    },
+    {
+      "source": "english.md",
+      "title": "An English note",
+      "author": "",
+      "chapters": [
+        "First chapter"
+      ],
+      "language": "en",
+      "identifier": "urn:uuid:f6c437fc-8b36-5670-9d8e-80cf8339fde6"
+    }
+  ]
+}

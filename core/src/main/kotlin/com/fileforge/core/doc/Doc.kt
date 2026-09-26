@@ -96,7 +96,15 @@ object PlainDoc {
  */
 object TextDoc {
 
-    enum class Route { Web, Markdown, Plain }
+    /**
+     * 按哪条路排的。话放在这里而不是各条产物路里写一遍：
+     * 写成 Word、印成 PDF、写成电子书要的是同一句交代，分开写早晚长成三个说法。
+     */
+    enum class Route(val note: String) {
+        Web("按网页结构排"),
+        Markdown("按 Markdown 记号排"),
+        Plain("按空行分段排（文本里没有网页标签或 Markdown 记号）"),
+    }
 
     /** 走成的文档，以及"按哪条路排的"（结果说明里要写，用户才知道为什么列表变成了点号）。 */
     class Reading(val doc: Doc, val route: Route)

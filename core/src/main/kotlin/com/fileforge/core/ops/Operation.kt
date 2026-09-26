@@ -506,6 +506,17 @@ sealed interface Operation {
         override val label get() = "写成 Word 文档"
     }
 
+    /**
+     * 文本 / Markdown / 网页 / Word 演示正文写成一份 `.epub` —— 文字出路的第四条，
+     * 手机上拿阅读器读的就是它。
+     *
+     * 章节按**一级标题**切，与读 EPUB 那一侧同一套规矩；[title] 空着用文件名，
+     * [author] 空着就不写作者（不编一个名字进去）。
+     */
+    data class TextToEpub(val title: String = "", val author: String = "") : Operation {
+        override val label get() = if (title.isBlank()) "写成电子书" else "写成电子书（《$title》）"
+    }
+
     /** 把 .ico 里的每一帧画面导成 PNG。 */
     data object IcoToImages : Operation {
         override val label get() = "导出图标里的画面"

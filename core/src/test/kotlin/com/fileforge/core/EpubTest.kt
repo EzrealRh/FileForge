@@ -157,4 +157,55 @@ class EpubTest {
         assertNull(read.author)
         assertEquals("只有书名", read.title)
     }
+
+    @Test
+    fun `EPUB3 只有 nav 目录时也拿它当章名，且不把目录读成一章`() {
+        val opf = opf(
+            """<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>""" +
+                """<item id="a" href="text/ch1.xhtml" media-type="application/xhtml+xml"/>""" +
+                """<item id="b" href="text/ch2.xhtml" media-type="application/xhtml+xml"/>""",
+            """<itemref idref="a"/><itemref idref="b"/>""",
+        )
+        val nav = """<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html>""" +
+            """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">""" +
+            """<body><nav epub:type="toc" id="toc"><ol>""" +
+            """<li><a href="text/ch1.xhtml#甲">目录里的第一章</a></li>""" +
+            """<li><a href="text/ch2.xhtml">目录里的第二章</a></li></ol></nav>""" +
+            """<nav epub:type="landmarks" id="landmarks"><ol>""" +
+            """<li><a href="text/ch2.xhtml" epub:type="start">正文起始</a></li></ol></nav></body></html>"""
+        val read = Epub.read(
+            book(
+                opf,
+                "OEBPS/nav.xhtml" to utf8(nav),
+                // 章节文件自己的 title 故意和目录不一样：目录给的应当赢
+                "OEBPS/text/ch1.xhtml" to utf8(page("文件里的标题甲")),
+                "OEBPS/text/ch2.xhtml" to utf8(page("文件里的标题乙")),
+            ),
+        )
+        assertEquals(listOf("目录里的第一章", "目录里的第二章"), read.chapters.map { it.title })
+        assertEquals(listOf("OEBPS/text/ch1.xhtml", "OEBPS/text/ch2.xhtml"), read.chapters.map { it.part })
+        assertTrue(read.notes.none { it.contains("没被 spine 用到") }, read.notes.toString())
+    }
+
+    @Test
+    fun `NCX 与 nav 都在时名字听 NCX 的`() {
+        val opf = opf(
+            """<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>""" +
+                """<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>""" +
+                """<item id="a" href="text/ch1.xhtml" media-type="application/xhtml+xml"/>""",
+            """<itemref idref="a"/>""",
+        )
+        val ncx = """<?xml version="1.0" encoding="UTF-8"?><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">""" +
+            """<docTitle><text>这本书</text></docTitle><navMap>""" +
+            """<navPoint id="n1" playOrder="1"><navLabel><text>NCX 给的名字</text></navLabel>""" +
+            """<content src="text/ch1.xhtml"/></navPoint></navMap></ncx>"""
+        val nav = """<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html>""" +
+            """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">""" +
+            """<body><nav epub:type="toc" id="toc"><ol><li><a href="text/ch1.xhtml">nav 给的名字</a></li></ol></nav></body></html>"""
+        val read = Epub.read(
+            book(opf, "OEBPS/toc.ncx" to utf8(ncx), "OEBPS/nav.xhtml" to utf8(nav),
+                "OEBPS/text/ch1.xhtml" to utf8(page("文件里的标题"))),
+        )
+        assertEquals(listOf("NCX 给的名字"), read.chapters.map { it.title })
+    }
 }

@@ -344,15 +344,26 @@ object ZipLabel {
     }
 }
 
-/** 要打进包里的一份内容。字节可以来自内存，也可以来自一个只许打开一次的文件流。 */
-class ZipItem(val name: String, val size: Long, val modifiedAt: Long, val open: () -> java.io.InputStream) {
+/**
+ * 要打进包里的一份内容。字节可以来自内存，也可以来自一个只许打开一次的文件流。
+ *
+ * [stored] 是给 EPUB 那种"某一条必须不压缩"的格式用的（规范写死 `mimetype` 那条要直存且排第一），
+ * 别的情形都按扩展名判（见 [NO_DEFLATE]）。
+ */
+class ZipItem(
+    val name: String,
+    val size: Long,
+    val modifiedAt: Long,
+    val stored: Boolean = false,
+    val open: () -> java.io.InputStream,
+) {
 
     constructor(name: String, bytes: ByteArray, modifiedAt: Long = System.currentTimeMillis()) :
-        this(name, bytes.size.toLong(), modifiedAt, { java.io.ByteArrayInputStream(bytes) })
+        this(name, bytes.size.toLong(), modifiedAt, false, { java.io.ByteArrayInputStream(bytes) })
 
     /** 已经压过的这些扩展名再 Deflate 一遍只会变大，所以直接存原文（流式打包时的判据）。 */
     val skipDeflate: Boolean
-        get() = name.substringAfterLast('.', "").lowercase() in NO_DEFLATE
+        get() = stored || name.substringAfterLast('.', "").lowercase() in NO_DEFLATE
 
     companion object {
         val NO_DEFLATE = setOf(

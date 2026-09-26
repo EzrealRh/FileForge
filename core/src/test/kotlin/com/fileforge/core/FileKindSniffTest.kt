@@ -193,9 +193,12 @@ class FileKindSniffTest {
 
         // 纯文本没有"丢图"这一说，抽取操作不给它
         assertTrue(OperationKind.OfficeToText !in OperationKind.applicable(setOf(FileKind.Text)))
-        // docx 和 txt 混着选：只剩两条路都走得通的操作
+        // docx 和 txt 混着选：只剩几条路都走得通的操作
         assertEquals(
-            setOf(OperationKind.TextToPdf, OperationKind.TextToDocx, OperationKind.PackZip, OperationKind.PackTar),
+            setOf(
+                OperationKind.TextToPdf, OperationKind.TextToDocx, OperationKind.TextToEpub,
+                OperationKind.PackZip, OperationKind.PackTar,
+            ),
             OperationKind.applicable(setOf(FileKind.Docx, FileKind.Text)).toSet(),
         )
     }

@@ -64,6 +64,7 @@ object Epub {
 
         val parts = LinkedHashMap<String, String>()
         val titles = HashMap<String, String>()
+        val navDocs = ArrayList<String>()
         var bookTitle: String? = null
         var author: String? = null
         var images = 0
@@ -79,6 +80,10 @@ object Epub {
                     val path = normalize(opfPath, urlDecode(href))
                     if (type == "application/x-dtbncx+xml") {
                         titles.putAll(navLabels(entry(path), opfPath))
+                    } else if (attrs["properties"].orEmpty().split(' ').contains("nav")) {
+                        // EPUB3 的目录是一个 XHTML（清单上标 properties="nav"），不在 spine 里：
+                        // 它不是正文，把它当正文读会多出一章"目录"来
+                        navDocs += path
                     } else if (type.startsWith("image/")) {
                         images++
                     } else if (type in DOCUMENT_TYPES) {
@@ -91,6 +96,11 @@ object Epub {
                     order += id
                 }
             }
+        }
+        // 只认 EPUB3 目录的书（没有 NCX）以前只能拿到文件名当章名，现在补上目录给的名字。
+        // NCX 已经在 titles 里了，所以这里只填空位 —— spine 上 toc="ncx" 指的那份优先。
+        navDocs.forEach { path ->
+            htmlNavLabels(entry(path), path).forEach { (key, value) -> titles.putIfAbsent(key, value) }
         }
 
         val chapters = ArrayList<EpubChapter>()
@@ -152,6 +162,32 @@ object Epub {
     }
 
     private fun String.ifNotEmptyOrNull(): String? = if (isEmpty()) null else this
+
+    /**
+     * EPUB3 的目录文档（`nav.xhtml`）：`<nav epub:type="toc">` 里一个 `<ol>`，每项 `<a href="章文件#片段">名</a>`。
+     *
+     * 只取第一个带 `epub:type="toc"`（或 `id="toc"`）的 `nav` 里的链接 —— 同一份文件常还挂着
+     * landmarks 那份（`Title Page`、`Beginning` 之类），把它们混进章名里就把正文标错了。
+     * href 上的 `#片段` 丢掉：我们要的是"这个文件是哪一章"。
+     */
+    private fun htmlNavLabels(bytes: ByteArray?, base: String): Map<String, String> {
+        if (bytes == null) return emptyMap()
+        val nodes = attributes(String(decode(bytes), Charsets.UTF_8))
+        val tocIndex = nodes.indexOfFirst {
+            it["tag"] == "nav" && (it["epub:type"] == "toc" || it["type"] == "toc" || it["id"] == "toc")
+        }
+        if (tocIndex < 0) return emptyMap()
+        // 扁表按文档顺序：这个 nav 的孩子紧跟它，下一个 nav 就是 landmarks 那一份
+        val end = nodes.indices.firstOrNull { it > tocIndex && nodes[it]["tag"] == "nav" } ?: nodes.size
+        val out = HashMap<String, String>()
+        nodes.subList(tocIndex + 1, end).forEach { attrs ->
+            if (attrs["tag"] != "a") return@forEach
+            val href = attrs["href"] ?: return@forEach
+            val label = attrs["__text"]?.trim()?.ifNotEmptyOrNull() ?: return@forEach
+            out.putIfAbsent(normalize(base, urlDecode(href)).removePrefix("/"), label)
+        }
+        return out
+    }
 
     /** 名字的来源按优先级：目录(NCX)给的 > 文档自己的 title > 第一个标题 > 文件名。 */
     private fun titleOf(source: String, given: String?, fallback: String): String {

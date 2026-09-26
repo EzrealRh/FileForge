@@ -3,20 +3,22 @@ package com.fileforge.converter.engine
 import com.fileforge.core.archive.ZipReader
 import com.fileforge.core.book.Epub
 import com.fileforge.core.book.EpubBook
+import com.fileforge.core.book.EpubWrite
 import com.fileforge.core.doc.Doc
 import com.fileforge.core.doc.DocPart
 import com.fileforge.core.doc.Html
 import com.fileforge.core.naming.OutputNaming
 import com.fileforge.core.office.DocxWrite
+import com.fileforge.core.ops.Operation
 import com.fileforge.converter.data.FileSlices
 import com.fileforge.converter.data.WorkItem
 import com.fileforge.converter.data.Workspace
 
 /**
- * EPUB 的三条出路：抽文字、转 Markdown、写成 Word。
+ * EPUB 这一头一尾：读进来有三条出路（抽文字、转 Markdown、写成 Word），写出去是一条（任何文本来料 → 电子书）。
  *
- * 怎么拆包、章节怎么排序、名字从哪儿来，全在 `:core/book`（那边能脱机单测，
- * 也有 pandoc 与 ElementTree 各独立读同一份文件当裁判）；这里只管按需读文本、拼起来、落盘。
+ * 怎么拆包、章节怎么排序、名字从哪儿来、包怎么拼，全在 `:core/book`（那边能脱机单测，
+ * 也有 pandoc 与 ElementTree 各独立读同一份文件当裁判）；这里只管按需读文本、落盘、拼说明。
  * 读是**按需**的：一本书的图片能有几百 MB，只取那几份 XHTML。
  */
 class BookEngine(private val workspace: Workspace) {
@@ -77,6 +79,38 @@ class BookEngine(private val workspace: Workspace) {
             file,
             "${book.chapters.size} 章 · ${parts.size} 块内容 · " +
                 (book.notes + out.notes + merge(notes)).joinToString(" · "),
+        )
+    }
+
+    /**
+     * 文本 / Markdown / 网页 / Word 演示正文写成一份 `.epub`。
+     *
+     * 来源判定走 [SourceText]（与写成 Word 同一条，两个产物不会一个按记号排一个按空行排），
+     * 切章与打包全在 `:core/book`（那边能脱机单测，产物另有 pandoc 与 ElementTree 当裁判）。
+     * 书名空着用文件名、作者空着就不写 —— 编一个作者名进元数据，读者会当真去找这个人。
+     */
+    fun fromText(item: WorkItem, operation: Operation.TextToEpub): EngineOutput {
+        val reading = SourceText.of(item)
+        require(reading.doc.parts.isNotEmpty()) { "这里面没有可排的正文（空文件，或全是空白）" }
+        val title = operation.title.ifBlank { OutputNaming.stem(item.name) }
+        val author = operation.author.ifBlank { null }
+        val pages = EpubWrite.chaptersOf(reading.doc, OutputNaming.stem(item.name))
+        val language = EpubWrite.languageOf(reading.doc)
+        val out = EpubWrite.book(
+            title = title,
+            author = author,
+            pages = pages,
+            language = language,
+            identifier = EpubWrite.identifierFor(title + reading.source),
+            modifiedAt = item.file.lastModified(),
+        )
+        val file = workspace.newStagingFile("epub").apply { writeBytes(out.bytes) }
+        val chars = reading.source.count { !it.isWhitespace() }
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "", "epub"),
+            file,
+            "《$title》 · ${pages.size} 章 · $chars 字 · 语言标 $language · " +
+                (reading.notes + reading.doc.notes + out.notes).joinToString(" · "),
         )
     }
 
