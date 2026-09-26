@@ -100,6 +100,9 @@ object Xml {
         for (i in 0 until named.length) {
             attributes += named.item(i).nodeName to named.item(i).nodeValue
         }
+        // DOM 不保证属性的返回顺序（安卓那套与桌面那套就给得不一样），排一下才让
+        // 同一份 XML 在任何平台上转出同一列顺序 —— 子元素不排，那是文档顺序，排了就改数据
+        attributes.sortBy { it.first }
         val body = text.toString().trim()
         if (attributes.isEmpty() && !sawElement) {
             // 纯文字或空元素。注释按约定一律丢掉，界面上会提前说明

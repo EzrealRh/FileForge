@@ -170,6 +170,12 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
             is Operation.JsonToXml -> items.forEach { item ->
                 collect(item.name) { listOf(text.jsonToXml(item, operation)) }
             }
+            is Operation.XmlToCsv -> items.forEach { item ->
+                collect(item.name) { listOf(text.xmlToCsv(item, operation)) }
+            }
+            is Operation.XmlToXlsx -> items.forEach { item ->
+                collect(item.name) { listOf(office.xmlToXlsx(item)) }
+            }
             is Operation.ImageToIco -> items.forEach { item ->
                 collect(item.name) { listOf(images.toIco(listOf(item), operation, ::staging)) }
             }

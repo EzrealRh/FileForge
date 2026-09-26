@@ -346,6 +346,24 @@ sealed interface Operation {
     }
 
     /**
+     * XML → CSV：挑出重复出现的那个元素当行，属性与子元素各成一列。
+     *
+     * 挑了哪一处、还有几处也像表、哪些列是真嵌套被压平的，全在结果说明里（判断在 [com.fileforge.core.data.XmlTable]）。
+     */
+    data class XmlToCsv(
+        val delimiter: Delimiter = Delimiter.Comma,
+        val ending: LineEnding = LineEnding.Lf,
+        val quoteAll: Boolean = false,
+    ) : Operation {
+        override val label get() = "转为 CSV 表格"
+    }
+
+    /** XML → xlsx。与「XML 转 CSV」挑同一张表，只是落成一份真工作簿。 */
+    data object XmlToXlsx : Operation {
+        override val label get() = "转为 Excel（.xlsx）"
+    }
+
+    /**
      * 图片做成 .ico。一张源图会被缩到 [sizes] 里的每个尺寸，一并写进同一份图标 ——
      * 系统按用途挑合适的那张，所以一次出多尺寸才有意义。
      */

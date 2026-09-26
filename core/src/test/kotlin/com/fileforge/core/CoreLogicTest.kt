@@ -410,7 +410,7 @@ class OperationLabelTest {
         val text = OperationKind.applicable(setOf(FileKind.Text))
         listOf(
             OperationKind.FormatJson, OperationKind.JsonToCsv, OperationKind.CsvToJson,
-            OperationKind.XmlToJson, OperationKind.JsonToXml,
+            OperationKind.XmlToJson, OperationKind.JsonToXml, OperationKind.XmlToCsv, OperationKind.XmlToXlsx,
         ).forEach {
             assertTrue(it in text, "${'$'}{it.label} 该摆在文本上")
         }
@@ -419,6 +419,8 @@ class OperationLabelTest {
             val ops = OperationKind.applicable(setOf(kind))
             assertFalse(OperationKind.FormatJson in ops, "$kind 上不该有 JSON 格式化")
             assertFalse(OperationKind.CsvToJson in ops, "$kind 上不该有 CSV 转 JSON")
+            assertFalse(OperationKind.XmlToCsv in ops, "$kind 上不该有 XML 转 CSV")
+            assertFalse(OperationKind.XmlToXlsx in ops, "$kind 上不该有 XML 转 Excel")
         }
     }
 

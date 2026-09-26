@@ -5,6 +5,8 @@ import com.fileforge.converter.data.Workspace
 import com.fileforge.core.data.Csv
 import com.fileforge.core.data.Delimiter
 import com.fileforge.core.data.TableBridge
+import com.fileforge.core.data.Xml
+import com.fileforge.core.data.XmlTable
 import com.fileforge.core.doc.TextDoc
 import com.fileforge.core.text.LineEnding
 import com.fileforge.core.model.FileKind
@@ -118,6 +120,21 @@ class OfficeEngine(private val workspace: Workspace) {
         )
         val notes = ArrayList(TableBridge.flatteningNotes(json))
         notes += "第一行是列名"
+        return workbook(item, listOf(SheetToWrite(OutputNaming.stem(item.name), table.records)), notes)
+    }
+
+    /**
+     * XML 写成一份 xlsx：与「XML 转 CSV」挑同一张表（同一套判断在 `:core` 的 XmlTable 里），
+     * 只是落成工作簿。列名、行序、哪处没进表，两条路说的一样。
+     */
+    fun xmlToXlsx(item: WorkItem): EngineOutput {
+        val tree = Xml.parse(com.fileforge.core.text.TextCodecs.decodeForConversion(read(item), null).text)
+        val picked = XmlTable.pick(tree) ?: throw IllegalArgumentException(
+            XmlTable.reasonWhyNot(tree) ?: "这份 XML 里没有可当行的重复元素",
+        )
+        val table = TableBridge.toTable(picked.rows) ?: throw IllegalArgumentException("挑出来的那处重复元素摊不成表")
+        val notes = ArrayList(picked.notes)
+        notes += "第一行是列名（属性列前面带 @）"
         return workbook(item, listOf(SheetToWrite(OutputNaming.stem(item.name), table.records)), notes)
     }
 

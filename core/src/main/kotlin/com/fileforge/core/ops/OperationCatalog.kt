@@ -61,6 +61,8 @@ enum class OperationKind(val label: String, val hint: String) {
     IcoToImages("图标拆成图片", "把 .ico 里的每个画面导成 PNG"),
     XmlToJson("XML 转 JSON", "属性加 @、子元素成数组；带 DTD 的不解析"),
     JsonToXml("JSON 转 XML", "键当标签名，数组写成重复元素"),
+    XmlToCsv("XML 转 CSV", "取重复出现的那个元素当行，属性与子元素各成一列"),
+    XmlToXlsx("XML 转 Excel", "同一张表，落成能直接打开的 .xlsx"),
     ;
 
     companion object {
@@ -108,7 +110,7 @@ enum class OperationKind(val label: String, val hint: String) {
             // 判不动会直说 —— 与字幕那族同一个路子，不在类型层猜。Markdown 同理：
             // 纯文本里没有任何记号时"转 HTML"没意义，引擎会拒而不是硬出一页。
             // .html 也算这一族：很多人把网页存成 .txt，反向那两条（抽文字 / 转 MD）本来就要给它
-            FormatJson, JsonToCsv, CsvToJson, XmlToJson, JsonToXml, MdToHtml, MdToText,
+            FormatJson, JsonToCsv, CsvToJson, XmlToJson, JsonToXml, XmlToCsv, XmlToXlsx, MdToHtml, MdToText,
             YamlToJson, JsonToYaml, YamlToCsv, CsvToYaml -> fileKind.isTextual
             // 网页那两条反过来也宽松：类型说 Text 但内容满是标签的文件照样能抽，
             // 真没有 HTML 标记时引擎会直说"这不是网页"，不硬出一份少了尖括号的文件

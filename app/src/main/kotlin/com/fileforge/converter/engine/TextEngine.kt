@@ -3,6 +3,7 @@ package com.fileforge.converter.engine
 import com.fileforge.core.data.Csv
 import com.fileforge.core.data.TableBridge
 import com.fileforge.core.data.Xml
+import com.fileforge.core.data.XmlTable
 import com.fileforge.core.data.Yaml
 import com.fileforge.core.data.YamlException
 import com.fileforge.core.json.Json
@@ -254,6 +255,26 @@ class TextEngine(private val workspace: Workspace) {
             OutputNaming.tagged(item.name, "", "xml"),
             writeText(item, xml, "xml"),
             "根元素 $name · ${countElements(json)} 个节点",
+        )
+    }
+
+    /**
+     * XML → CSV。挑哪一处重复元素当行、每行怎么摊平全在 `:core`（那边能脱机单测），
+     * 这里只管读文本、落盘、把"用了哪处、还有什么没进来"拼进说明。
+     */
+    fun xmlToCsv(item: WorkItem, operation: Operation.XmlToCsv): EngineOutput {
+        val tree = Xml.parse(readText(item))
+        val picked = XmlTable.pick(tree) ?: throw IllegalArgumentException(XmlTable.reasonWhyNot(tree) ?: "这份 XML 里没有可当行的重复元素")
+        val table = TableBridge.toTable(picked.rows)
+            ?: throw IllegalArgumentException("挑出来的那处重复元素摊不成表")
+        val text = Csv.render(table.records, operation.delimiter, operation.ending, operation.quoteAll)
+        val notes = ArrayList(picked.notes)
+        notes += "第一行是列名（属性列前面带 @）"
+        notes += TableBridge.losses(picked.rows)
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "", "csv"),
+            writeText(item, text, "csv"),
+            "${table.rows.size} 行 × ${table.columns.size} 列 · " + notes.joinToString(" · "),
         )
     }
 

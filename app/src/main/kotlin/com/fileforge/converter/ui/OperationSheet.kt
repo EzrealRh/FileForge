@@ -637,6 +637,23 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
                 Summary("注释、处理指令会丢掉；带 DTD 或实体定义的一律不解析 —— 实体能让转换工具去访问别人写的地址。")
                 Summary("命名空间前缀原样留在名字里，不展开成 URI。")
             }
+            OperationKind.XmlToCsv -> {
+                PickerRow("分隔符", Delimiter.entries.map { it.label }, Delimiter.entries.indexOf(csvDelimiter)) {
+                    csvDelimiter = Delimiter.entries[it]
+                }
+                Segmented("换行", LineEnding.entries.map { it.label }, LineEnding.entries.indexOf(csvEnding)) {
+                    csvEnding = LineEnding.entries[it]
+                }
+                Segmented("引号", listOf("必要处才加", "每格都加"), if (csvQuoteAll) 1 else 0) { csvQuoteAll = it == 1 }
+                Summary("行取自**重复出现的那个元素**：条数最多的优先。用了哪处、还有几处也像表，结果说明里会写。")
+                Summary("列名 = 元素路径（`作者.姓名` 这样），属性前面带 @，元素自己的文字进「文本」列。")
+                Summary("一个条目里有多条的真嵌套压成一格文本并点名是哪一列 —— 一行摆不下两样东西。")
+            }
+            OperationKind.XmlToXlsx -> {
+                Summary("挑表与摊平用的是「XML 转 CSV」同一套判断，只是落成一份能直接打开的 .xlsx。")
+                Summary("第一行是列名；格子类型只按字面判，能一字不差读回来的写法才算数字。")
+                Summary("带 DTD 或实体定义的 XML 一律不解析。")
+            }
             OperationKind.JsonToXml -> {
                 OutlinedTextField(
                     value = xmlRoot,
@@ -804,6 +821,8 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
             OperationKind.JsonToCsv -> Operation.JsonToCsv(csvDelimiter, csvEnding, csvQuoteAll)
             OperationKind.CsvToJson -> Operation.CsvToJson(csvHeader, csvInfer, jsonIndent.roundToInt())
             OperationKind.XmlToJson -> Operation.XmlToJson(jsonIndent.roundToInt())
+            OperationKind.XmlToCsv -> Operation.XmlToCsv(csvDelimiter, csvEnding, csvQuoteAll)
+            OperationKind.XmlToXlsx -> Operation.XmlToXlsx
             OperationKind.YamlToJson -> Operation.YamlToJson(jsonIndent.roundToInt())
             OperationKind.JsonToYaml -> Operation.JsonToYaml(jsonIndent.roundToInt())
             OperationKind.YamlToCsv -> Operation.YamlToCsv(csvDelimiter, csvEnding, csvQuoteAll)

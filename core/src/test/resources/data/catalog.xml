@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 这份夹具是给「XML 转表」用的：有好几处都像表，胜负要靠"条数最多优先、字段数次之、
+     浅的优先"这条打分才能分开。属性、元素自己的文字、单值嵌套与真嵌套各来一点，行与行还故意不齐。 -->
+<catalog xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <meta>
+    <owner>老王的店</owner>
+    <updated>2026-01-02</updated>
+  </meta>
+  <book no="1" lang="zh">
+    <title>可借的</title>
+    <author><name>甲</name></author>
+    <tags><tag>散文</tag><tag>随笔</tag></tags>
+    <price>12.50</price>
+  </book>
+  <book no="2" lang="en">
+    <title>On &amp; About</title>
+    <author><name>乙</name><born>1900</born></author>
+    <price>7</price>
+  </book>
+  <book no="3">
+    <title>缺货的那本</title>
+    <author><name>丙</name></author>
+  </book>
+  <book no="4" lang="ja">
+    <title>带备注的</title>这本书只多一句正文
+  </book>
+  <!-- 与 book 条数、字段数都一样，只是更深：靠"浅的优先"才分得开 -->
+  <media>
+    <disc no="1" lang="zh"><title>片子甲</title><author><name>丁</name></author><tags><tag>纪录片</tag><tag>黑白</tag></tags><price>15</price></disc>
+    <disc no="2" lang="en"><title>片子乙</title><author><name>戊</name></author><tags><tag>故事</tag><tag>彩色</tag></tags><price>20</price></disc>
+    <disc no="3" lang="de"><title>片子丙</title><author><name>己</name></author><tags><tag>短片</tag><tag>无声</tag></tags><price>9</price></disc>
+    <disc no="4" lang="fr"><title>片子丁</title><author><name>庚</name></author><tags><tag>试片</tag><tag>彩色</tag></tags><price>11</price></disc>
+  </media>
+  <!-- 字段比 book 多、条数比 book 少：靠"条数最多优先"才不会被它抢走 -->
+  <supply>
+    <item sku="a-1" qty="3" place="甲地" unit="盒" note="易碎" price="3.5" code="s1" vendor="某厂"><tag>t</tag></item>
+    <item sku="a-2" qty="7" place="乙地" unit="箱" note="重物" price="8" code="s2" vendor="某厂"><tag>u</tag></item>
+  </supply>
+  <dvd no="9">
+    <title>不该被选中的那组</title>
+    <mins>96</mins>
+  </dvd>
+  <dvd no="10">
+    <title>同上</title>
+    <mins>104</mins>
+  </dvd>
+  <tags><tag>清仓</tag><tag>新品</tag></tags>
+</catalog>
