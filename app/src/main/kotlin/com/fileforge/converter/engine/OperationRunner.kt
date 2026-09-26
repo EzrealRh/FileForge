@@ -196,6 +196,18 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
             is Operation.JsonToXlsx -> items.forEach { item ->
                 collect(item.name) { listOf(office.jsonToXlsx(item)) }
             }
+            is Operation.YamlToJson -> items.forEach { item ->
+                collect(item.name) { listOf(text.yamlToJson(item, operation)) }
+            }
+            is Operation.JsonToYaml -> items.forEach { item ->
+                collect(item.name) { listOf(text.jsonToYaml(item, operation)) }
+            }
+            is Operation.YamlToCsv -> items.forEach { item ->
+                collect(item.name) { listOf(text.yamlToCsv(item, operation)) }
+            }
+            is Operation.CsvToYaml -> items.forEach { item ->
+                collect(item.name) { listOf(text.csvToYaml(item, operation)) }
+            }
             is Operation.HtmlToCsv -> items.forEach { item ->
                 collect(item.name) { text.htmlToCsv(item, operation.delimiter, operation.ending) }
             }

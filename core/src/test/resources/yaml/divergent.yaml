@@ -1,0 +1,15 @@
+# 声明过的差异：PyYAML 走 YAML 1.1，这一版按 1.2 的核心模式判
+# 这些值在两边**本来就该不一样**，判据脚本逐条钉住（哪边漂了都会红）
+flag: yes
+disabled: no
+state: on
+leap: off
+clock: 1:30
+long_clock: 1:2:3
+octet: 012
+stamp: 2023-05-01
+moment: 2023-05-01 12:00:00
+sci: 1.5e3
+under: .inf
+over: -.inf
+not_a_number: .nan

@@ -499,6 +499,35 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
                 Summary("分隔符按引号以外的票数自动认（逗号 / 分号 / 制表符 / 竖线），引号里的逗号不会骗到它。")
                 Summary("列数不齐照样转，缺的格子留空，并在结果里报是第几行 —— 那通常是数据错了而不是格式错了。")
             }
+            OperationKind.YamlToJson -> {
+                IntSlider("缩进宽度", jsonIndent, 1f..8f, { "$it 空格" }) { jsonIndent = it }
+                Summary("认块式与行内写法、块标量（`|` 与 `>`）、锚点与 `<<` 合并、两种引号与注释。")
+                Summary("`yes` / `no` / `1:30` 这类值**保持文字**：有的库会把它们变成 true 和 90，那是把数据改了。")
+                Summary("认不出的写法（!! 标签、? 显式键、tab 缩进）直接说明并拒绝，不硬读一份看着对的东西出来。")
+            }
+            OperationKind.JsonToYaml -> {
+                IntSlider("缩进宽度", jsonIndent, 1f..8f, { "$it 空格" }) { jsonIndent = it }
+                Summary("块式输出：列表用 `- `，嵌套按缩进走。")
+                Summary("该加引号的一定加：`yes`、`1`、`0755`、`2023-05-01` 这些不加引号，别人读回去就不是那个值了。")
+                Summary("`1.5e3` 这种两家读法不同的数写成等价的十进制 —— 值不变，谁读都是同一个数。")
+            }
+            OperationKind.YamlToCsv -> {
+                PickerRow("分隔符", Delimiter.entries.map { it.label }, Delimiter.entries.indexOf(csvDelimiter)) {
+                    csvDelimiter = Delimiter.entries[it]
+                }
+                Segmented("换行", LineEnding.entries.map { it.label }, LineEnding.entries.indexOf(csvEnding)) {
+                    csvEnding = LineEnding.entries[it]
+                }
+                Segmented("引号", listOf("必要处才加", "每格都加"), if (csvQuoteAll) 1 else 0) { csvQuoteAll = it == 1 }
+                Summary("要的是对象数组（或「键映射到对象」的形状）：第一行是列名，一条一项一行。")
+                Summary("嵌套的对象与数组会压成一格文字，字段数不齐时缺的地方留空 —— 与「JSON 转 CSV」同一本账。")
+            }
+            OperationKind.CsvToYaml -> {
+                Segmented("首行", listOf("当普通数据行", "当列名"), if (csvHeader) 1 else 0) { csvHeader = it == 1 }
+                IntSlider("缩进宽度", jsonIndent, 1f..8f, { "$it 空格" }) { jsonIndent = it }
+                Summary("一行一个对象；与「CSV 转 JSON」共用同一套摊平判据，两条路出来的内容一致。")
+                Summary("不猜类型：`007`、`1.50` 到了 YAML 里还是带引号的文字，读回去写法不变。")
+            }
             OperationKind.TextToPdf -> {
                 Segmented("纸张", listOf("A4", "A5", "Letter"), listOf(PdfPaper.A4, PdfPaper.A5, PdfPaper.Letter).indexOf(paper)) {
                     paper = listOf(PdfPaper.A4, PdfPaper.A5, PdfPaper.Letter)[it]
@@ -756,6 +785,10 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
             OperationKind.JsonToCsv -> Operation.JsonToCsv(csvDelimiter, csvEnding, csvQuoteAll)
             OperationKind.CsvToJson -> Operation.CsvToJson(csvHeader, csvInfer, jsonIndent.roundToInt())
             OperationKind.XmlToJson -> Operation.XmlToJson(jsonIndent.roundToInt())
+            OperationKind.YamlToJson -> Operation.YamlToJson(jsonIndent.roundToInt())
+            OperationKind.JsonToYaml -> Operation.JsonToYaml(jsonIndent.roundToInt())
+            OperationKind.YamlToCsv -> Operation.YamlToCsv(csvDelimiter, csvEnding, csvQuoteAll)
+            OperationKind.CsvToYaml -> Operation.CsvToYaml(csvHeader, jsonIndent.roundToInt())
             OperationKind.JsonToXml -> Operation.JsonToXml(xmlRoot.trim(), jsonIndent.roundToInt())
             OperationKind.TextToPdf -> Operation.TextToPdf(
                 textSize.roundToInt(), paper, textMargin.roundToInt(), textLeading, textIndent, textNumber,

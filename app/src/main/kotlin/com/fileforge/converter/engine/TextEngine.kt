@@ -3,6 +3,8 @@ package com.fileforge.converter.engine
 import com.fileforge.core.data.Csv
 import com.fileforge.core.data.TableBridge
 import com.fileforge.core.data.Xml
+import com.fileforge.core.data.Yaml
+import com.fileforge.core.data.YamlException
 import com.fileforge.core.json.Json
 import com.fileforge.core.json.JsonException
 import com.fileforge.core.json.JsonRender
@@ -144,6 +146,86 @@ class TextEngine(private val workspace: Workspace) {
             writeText(item, text, "json"),
             notes.joinToString(" · "),
         )
+    }
+
+    /**
+     * YAML → JSON。
+     *
+     * 类型按 YAML 1.2 的核心模式判：`yes` / `no` / `1:30` 这些在部分库里会变成 `true` 与 `90`，
+     * 那是把数据改了 —— 这里保持文字。认不出的写法（标签、显式键、tab 缩进）直接说，不硬读。
+     */
+    fun yamlToJson(item: WorkItem, operation: Operation.YamlToJson): EngineOutput {
+        val (tree, notes) = parseYaml(item)
+        val text = JsonRender.render(tree, indent = operation.indent)
+        val entries = tree.arrayValue.size.takeIf { it > 0 } ?: tree.members.size
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "", "json"),
+            writeText(item, text, "json"),
+            (listOf("顶层 $entries 项") + notes).joinToString(" · "),
+        )
+    }
+
+    /** JSON → YAML（块式）。写出侧的规矩见 [com.fileforge.core.data.Yaml]。 */
+    fun jsonToYaml(item: WorkItem, operation: Operation.JsonToYaml): EngineOutput {
+        val json = parseJson(item)
+        val text = Yaml.write(json, operation.indent)
+        val entries = json.arrayValue.size.takeIf { it > 0 } ?: json.members.size
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "", "yaml"),
+            writeText(item, text, "yaml"),
+            "顶层 $entries 项 · 块式缩进 ${operation.indent} 空格 · 看着像别的类型的值都加了引号",
+        )
+    }
+
+    /** YAML → CSV：先落成那棵共用的树，再走「JSON 转 CSV」同一套摊平判据。 */
+    fun yamlToCsv(item: WorkItem, operation: Operation.YamlToCsv): EngineOutput {
+        val (tree, notes) = parseYaml(item)
+        TableBridge.reasonWhyNotTable(tree)?.let { throw IllegalArgumentException("转不成表：$it") }
+        val table = TableBridge.toTable(tree) ?: throw IllegalArgumentException("转不成表：这份 YAML 的形状没认出来")
+        val text = Csv.render(table.records, operation.delimiter, operation.ending, operation.quoteAll)
+        val lines = ArrayList(notes)
+        lines += "${table.rows.size} 行 × ${table.columns.size} 列"
+        TableBridge.losses(tree).forEach { lines += "转过去会丢$it" }
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "", "csv"),
+            writeText(item, text, "csv"),
+            lines.joinToString(" · "),
+        )
+    }
+
+    /** CSV → YAML。与「CSV 转 JSON」同一套摊平判据，默认不猜类型。 */
+    fun csvToYaml(item: WorkItem, operation: Operation.CsvToYaml): EngineOutput {
+        val decoded = TextCodecs.decodeForConversion(read(item), null)
+        val doc = Csv.parse(decoded.text, Csv.detect(decoded.text))
+        require(!doc.isEmpty) { "这份 CSV 里一行内容都没有" }
+        val text = Yaml.write(TableBridge.toRowsJson(doc, operation.header, false), operation.indent)
+        val shape = if (operation.header) "${doc.records.first().size} 列 · ${doc.records.size - 1} 行数据"
+        else "${doc.records.size} 行 × ${doc.widest} 列"
+        val notes = ArrayList(listOf(shape, "格子一律当字符串（007 与 1.50 的写法不会被动）"))
+        if (doc.ragged.isNotEmpty()) notes += "第 ${doc.ragged.joinToString("、")} 行的列数跟别处不一样"
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "", "yaml"),
+            writeText(item, text, "yaml"),
+            notes.joinToString(" · "),
+        )
+    }
+
+    /** 读 + 判"像不像 YAML" + 解析；顺手把"读了几份文档""按什么编码读的"记下来。 */
+    private fun parseYaml(item: WorkItem): Pair<Json, List<String>> {
+        val decoded = TextCodecs.decodeForConversion(read(item), null)
+        require(Yaml.looksLikeYaml(decoded.text)) {
+            "这份文件里没找到 YAML 的样子（既没有「键: 值」也没有「- 项」）。它本来就是普通文本。"
+        }
+        val tree = try {
+            Yaml.parse(decoded.text)
+        } catch (bad: YamlException) {
+            throw IllegalArgumentException(bad.message)
+        }
+        val notes = ArrayList<String>()
+        val docs = Yaml.documentCount(decoded.text)
+        if (docs > 1) notes += "文件里有 $docs 份文档（用 --- 分隔），只转了第一份"
+        notes += "按 ${decoded.encoding.label} 读" + if (decoded.hadBom) "（源带 BOM）" else ""
+        return tree to notes
     }
 
     /** XML → JSON。约定（子元素成数组、`@` 属性、`#text`）在 `:core` 的 Xml 头部写着。 */

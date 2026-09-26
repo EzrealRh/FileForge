@@ -180,6 +180,16 @@ class FileKindSniffTest {
 
         val text = OperationKind.applicable(setOf(FileKind.Text))
         assertTrue(OperationKind.CsvToXlsx in text && OperationKind.JsonToXlsx in text, "文本该能写成 xlsx：$text")
+        // YAML 那一族只看"是不是文本"，是不是合法 YAML 交给引擎判（判不动会直说）
+        assertTrue(
+            setOf(OperationKind.YamlToJson, OperationKind.JsonToYaml, OperationKind.YamlToCsv,
+                OperationKind.CsvToYaml).all { it in text },
+            "文本该能跟 YAML 互转：$text",
+        )
+        assertTrue(
+            OperationKind.YamlToJson !in OperationKind.applicable(setOf(FileKind.Docx)),
+            "docx 没有 YAML 可解析",
+        )
 
         // 纯文本没有"丢图"这一说，抽取操作不给它
         assertTrue(OperationKind.OfficeToText !in OperationKind.applicable(setOf(FileKind.Text)))

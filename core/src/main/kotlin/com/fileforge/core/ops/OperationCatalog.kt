@@ -48,6 +48,10 @@ enum class OperationKind(val label: String, val hint: String) {
     JsonToXlsx("JSON 转 Excel", "对象数组摊成表，列名取第一份对象的键"),
     HtmlToCsv("网页表格转 CSV", "一张表一份 CSV；跨格按跨度占位，不把整行挤歪"),
     TextToDocx("文本转 Word", "带记号的按 Markdown / 网页排，列表是 Word 自己的编号"),
+    YamlToJson("YAML 转 JSON", "yes 与 1:30 这类值保持文字，不被当成真假与秒数"),
+    JsonToYaml("JSON 转 YAML", "块式输出；该加引号的加引号，别人读回去是同一个值"),
+    YamlToCsv("YAML 转 CSV", "对象数组摊成表，会丢什么都先说明"),
+    CsvToYaml("CSV 转 YAML", "一行一个对象；默认不猜类型，007 不会变成 7"),
     ImageToIco("做成图标 ICO", "一次出 16/32/48/256 多个尺寸"),
     IcoToImages("图标拆成图片", "把 .ico 里的每个画面导成 PNG"),
     XmlToJson("XML 转 JSON", "属性加 @、子元素成数组；带 DTD 的不解析"),
@@ -97,7 +101,8 @@ enum class OperationKind(val label: String, val hint: String) {
             // 判不动会直说 —— 与字幕那族同一个路子，不在类型层猜。Markdown 同理：
             // 纯文本里没有任何记号时"转 HTML"没意义，引擎会拒而不是硬出一页。
             // .html 也算这一族：很多人把网页存成 .txt，反向那两条（抽文字 / 转 MD）本来就要给它
-            FormatJson, JsonToCsv, CsvToJson, XmlToJson, JsonToXml, MdToHtml, MdToText -> fileKind.isTextual
+            FormatJson, JsonToCsv, CsvToJson, XmlToJson, JsonToXml, MdToHtml, MdToText,
+            YamlToJson, JsonToYaml, YamlToCsv, CsvToYaml -> fileKind.isTextual
             // 网页那两条反过来也宽松：类型说 Text 但内容满是标签的文件照样能抽，
             // 真没有 HTML 标记时引擎会直说"这不是网页"，不硬出一份少了尖括号的文件
             HtmlToText, HtmlToMarkdown -> fileKind.isTextual

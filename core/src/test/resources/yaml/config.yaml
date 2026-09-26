@@ -1,0 +1,53 @@
+# 一份常见配置：嵌套、列表、列表里带映射、行内写法、注释与锚点
+server:
+  host: localhost        # 行尾注释
+  port: 8080
+  tags:
+    - web
+    - "带空格的标签"
+  timeouts: {connect: 5, read: 30}
+
+hosts:
+  - name: alpha
+    roles: [web, api]
+    weight: 0.75
+  - name: beta
+    roles: []
+    weight: 1
+
+defaults: &defaults
+  adapter: postgres
+  pool: 5
+development:
+  <<: *defaults
+  database: app_dev
+production:
+  <<: *defaults
+  pool: 25
+
+log: |
+  第一行日志
+  - 看着像列表的一行
+  # 看着像注释的一行
+
+  块里面还空了一行
+
+folded: >-
+  这两行会被折成一行，
+  中间没有换行。
+
+  空了一行之后就换行。
+kept: |+
+  这块末尾的空行是内容
+
+
+tailClip: |
+  普通块留一个换行
+
+tailStrip: |-
+  这个连一个都不留
+
+quote: '单引号里的''号与 : 冒号 # 井号'
+escaped: "tab:\there 换行\n结尾"
+empty:
+nothing: ~

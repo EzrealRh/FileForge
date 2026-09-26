@@ -427,6 +427,38 @@ sealed interface Operation {
     }
 
     /**
+     * YAML → JSON。类型按 **YAML 1.2 的核心模式**判：`yes` / `no` / `1:30` 保持文字，
+     * 不会像某些库那样变成 `true` 与 `90`（那是静悄悄改数据）。
+     */
+    data class YamlToJson(val indent: Int = 2) : Operation {
+        override val label get() = "转为 JSON"
+    }
+
+    /**
+     * JSON → YAML（块式）。
+     *
+     * 看着像别的类型的字符串一律加引号，`1.5e3` 这类"两家读法不同"的数写成等价的十进制 ——
+     * 目标是别人用任何一个 YAML 库读回去都是同一个值。
+     */
+    data class JsonToYaml(val indent: Int = 2) : Operation {
+        override val label get() = "转为 YAML"
+    }
+
+    /** YAML（对象数组或映射的映射）→ CSV。会丢什么沿用「JSON 转 CSV」那本账。 */
+    data class YamlToCsv(
+        val delimiter: Delimiter = Delimiter.Comma,
+        val ending: LineEnding = LineEnding.Lf,
+        val quoteAll: Boolean = false,
+    ) : Operation {
+        override val label get() = "转为 CSV 表格"
+    }
+
+    /** CSV → YAML（一个对象一行的列表）。默认不猜类型，`007` 还是 `007`。 */
+    data class CsvToYaml(val header: Boolean = true, val indent: Int = 2) : Operation {
+        override val label get() = if (header) "转为 YAML（首行当列名）" else "转为 YAML（按数组摆）"
+    }
+
+    /**
      * 文本 / Markdown / 网页写成 .docx，进 Word / WPS 打得开、能继续编辑。
      *
      * 按内容挑路（见 [com.fileforge.core.doc.TextDoc]）：带标签的按网页排，带记号的按 Markdown 排，

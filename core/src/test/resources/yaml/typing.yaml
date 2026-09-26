@@ -1,0 +1,27 @@
+# 两家判据一致的标量类型：数字、布尔、空值与字符串的写法
+ints: [0, -1, 42, 1_000]
+neg: -7
+zero: 0
+floats: [3.14, -0.5, .25]
+exact: 1.50
+weird: 1e3
+bools: [true, False, TRUE]
+nils: [~, null, Null]
+text: 普通中文一句话
+key with space: 值
+"quoted key": 值
+"single key": 值
+empty_str: ""
+padded: " 前后有空格 "
+colon_text: "a: b"
+hash_text: "#1"
+url: http://example.com/a#b
+path: C:\Users\me
+list_of_lists:
+  - [1, 2]
+  - []
+nested:
+  deep:
+    deeper:
+      - one: 1
+        two: two
