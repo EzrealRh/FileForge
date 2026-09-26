@@ -280,6 +280,26 @@ sealed interface Operation {
     }
 
     /**
+     * 打成 tar.gz：tar 排目录，gzip 压整体。
+     *
+     * 与 zip 的分别不在"能不能压"，而在 tar **保留条目路径与时间**且 Unix 侧的工具链都认它 ——
+     * 文本类文件合成一份再压，通常也比一份条各压一份的 zip 小。
+     */
+    data object PackTarGz : Operation {
+        override val label get() = "打包成 tar.gz"
+    }
+
+    /**
+     * 解开 tar / tar.gz / 单个 .gz。
+     *
+     * `.gz` 里是不是装着一份 tar 由内容判（第一块头校验和对得上才算），不靠扩展名猜：
+     * 是 tar 就照 zip 那套规矩平铺出多份产物，不是就交回那一个文件（名字优先用 gzip 头里的原名）。
+     */
+    data object UntarArchive : Operation {
+        override val label get() = "解开这个包"
+    }
+
+    /**
      * JSON 格式化：缩进或压平，可选键排序与非 ASCII 转码。
      *
      * 数字**一律照抄原文**（`1.50` 不会变成 `1.5`）：格式化不该改写值的样子，

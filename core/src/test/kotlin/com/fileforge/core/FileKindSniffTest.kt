@@ -107,10 +107,10 @@ class FileKindSniffTest {
     @Test
     fun `音频只拿到音频操作`() {
         // 这一条钉的是"别把不相干的操作摆在音频上"：图片转换、PDF、GIF 那些
-        // 混进来就是点了必崩的按钮。PackZip 是唯一的例外 —— 打包对任何类型都成立。
+        // 混进来就是点了必崩的按钮。两条打包（zip 与 tar.gz）是例外 —— 打包对任何类型都成立。
         listOf(FileKind.Mp3, FileKind.Aac, FileKind.M4a, FileKind.Flac, FileKind.Ogg, FileKind.Wav).forEach {
             assertEquals(
-                listOf(OperationKind.ConvertAudio, OperationKind.PackZip),
+                listOf(OperationKind.ConvertAudio, OperationKind.PackZip, OperationKind.PackTar),
                 OperationKind.applicable(setOf(it)),
                 "$it 只该给音频转换和打包",
             )
@@ -154,7 +154,7 @@ class FileKindSniffTest {
     fun `音频加图片的混选只剩打包`() {
         // 选了一个 mp3 一个 jpg：没有任何共同的转换操作，界面不该摆一个只对一半文件有效、
         // 跑完静默跳过另一半的按钮。唯一例外是打包 —— 把不相干的两类装进一个包正是它的用途。
-        assertEquals(listOf(OperationKind.PackZip), OperationKind.applicable(setOf(FileKind.Mp3, FileKind.Jpeg)))
+        assertEquals(listOf(OperationKind.PackZip, OperationKind.PackTar), OperationKind.applicable(setOf(FileKind.Mp3, FileKind.Jpeg)))
         assertTrue(OperationKind.applicable(setOf(FileKind.Pdf)).isNotEmpty())
     }
 
@@ -195,7 +195,7 @@ class FileKindSniffTest {
         assertTrue(OperationKind.OfficeToText !in OperationKind.applicable(setOf(FileKind.Text)))
         // docx 和 txt 混着选：只剩两条路都走得通的操作
         assertEquals(
-            setOf(OperationKind.TextToPdf, OperationKind.TextToDocx, OperationKind.PackZip),
+            setOf(OperationKind.TextToPdf, OperationKind.TextToDocx, OperationKind.PackZip, OperationKind.PackTar),
             OperationKind.applicable(setOf(FileKind.Docx, FileKind.Text)).toSet(),
         )
     }
@@ -247,6 +247,49 @@ class FileKindSniffTest {
         assertFalse(OperationKind.UnpackZip in epub, "电子书不该拿到解压按钮：$epub")
         assertTrue(OperationKind.PackZip in epub, "打包对类型不设限")
         // 与纯文本混选：没有对两边都成立的出路，只留打包
-        assertEquals(listOf(OperationKind.PackZip), OperationKind.applicable(setOf(FileKind.Epub, FileKind.Text)))
+        assertEquals(listOf(OperationKind.PackZip, OperationKind.PackTar), OperationKind.applicable(setOf(FileKind.Epub, FileKind.Text)))
+    }
+
+    @Test
+    fun `tar 认头部那五个字节加校验和，gz 认魔数`() {
+        val block = ByteArray(512)
+        "甲.txt".toByteArray(Charsets.UTF_8).copyInto(block, 0)
+        "0000644".toByteArray().copyInto(block, 100)
+        "00000000005".toByteArray().copyInto(block, 124)
+        "00000000000".toByteArray().copyInto(block, 136)
+        block[156] = '0'.code.toByte()
+        "ustar".toByteArray().copyInto(block, 257)
+        "00".toByteArray().copyInto(block, 263)
+        val sum = (0 until 512).sumOf { index -> if (index in 148 until 156) ' '.code else block[index].toInt() and 0xFF }
+        "%06o".format(sum).toByteArray().copyInto(block, 148)
+        block[154] = 0
+        block[155] = ' '.code.toByte()
+        assertEquals(FileKind.Tar, FileTypeSniffer.sniff(block))
+        assertEquals(FileKind.Gzip, FileTypeSniffer.sniff(byteArrayOf(0x1F, 0x8B.toByte(), 8, 0, 0, 0, 0, 0, 0, 3, 0, 0)))
+        // 只有 ustar 那五个字、校验和不对：不算 tar（随便一份文件里都可能出现这五个字节）
+        block[148] = '9'.code.toByte()
+        assertTrue(FileTypeSniffer.sniff(block) != FileKind.Tar, "校验和不对还认成 tar")
+        // 只看 64 字节永远到不了第 257 位 —— 头部要读够 512 才行
+        assertTrue(FileTypeSniffer.sniff(block.copyOf(64)) != FileKind.Tar)
+    }
+
+    @Test
+    fun `归档族的操作各归各的容器`() {
+        val tar = OperationKind.applicable(setOf(FileKind.Tar))
+        val gz = OperationKind.applicable(setOf(FileKind.Gzip))
+        assertTrue(OperationKind.Untar in tar && OperationKind.Untar in gz, "$tar / $gz")
+        // zip 的按钮不给 tar：那边解不了 tar 的条目布局
+        assertFalse(OperationKind.UnpackZip in tar, "tar 上不该有解压 ZIP")
+        assertFalse(OperationKind.Untar in OperationKind.applicable(setOf(FileKind.Zip)), "zip 上不该有解开 tar")
+        // 打包不设限：两种打包对任何类型都成立
+        assertTrue(OperationKind.PackTar in OperationKind.applicable(setOf(FileKind.Pdf, FileKind.Jpeg)))
+        // 文本与 tar 混选：只剩两条打包
+        assertEquals(
+            setOf(OperationKind.PackZip, OperationKind.PackTar),
+            OperationKind.applicable(setOf(FileKind.Text, FileKind.Tar)).toSet(),
+        )
+        assertEquals("application/x-tar", FileKind.Tar.mimeType)
+        assertEquals("TAR", FileKind.Tar.badge)
+        assertEquals("GZ", FileKind.Gzip.badge)
     }
 }

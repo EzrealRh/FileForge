@@ -679,7 +679,17 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
             OperationKind.UnpackZip -> {
                 Summary("解出来的文件平铺在工作台里，路径压进名字（包名_目录_文件.扩展名），不保留目录层级。")
                 Summary("带口令的条目、符号链接和解不了的压缩方式会跳过并在结果里说明；整包都是口令包就直接不做。")
-                Summary("只解 zip。rar / 7z 用的是另一套算法，这里不支持，会直接告诉你不是 zip。")
+                Summary("这一条只解 zip：tar / tar.gz 与单个 .gz 走「解开 tar / gz」。rar / 7z 用的是另一套算法，这里不支持，会直接告诉你不是 zip。")
+            }
+            OperationKind.PackTar -> {
+                Summary("${items.size} 份文件、合计 ${sizeOf(items)}，先归档成 tar 再整份压成 gzip。")
+                Summary("与 zip 的分别：tar 不逐条压，整份一起压；条目路径与时间是写在头里的，Unix 侧工具链认这个。")
+                Summary("包名跟着第一份文件走：${OutputNaming.stem(items.first().name)}_打包.tar.gz")
+            }
+            OperationKind.Untar -> {
+                Summary("tar、tar.gz 与单个 .gz 都走这一条：是不是 tar 看内容，不按扩展名猜。")
+                Summary("解出来平铺在工作台里，路径压进名字；符号链接、设备节点与超大条目会跳过并说明。")
+                Summary("单个 .gz 交回那一份文件，名字优先用 gzip 头里记的原名。解压体积在搬运途中就卡上限。")
             }
         }
     }
@@ -786,6 +796,8 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
             OperationKind.CleanMetadata -> Operation.CleanMetadata
             OperationKind.PackZip -> Operation.PackArchive
             OperationKind.UnpackZip -> Operation.UnpackArchive
+            OperationKind.PackTar -> Operation.PackTarGz
+            OperationKind.Untar -> Operation.UntarArchive
             OperationKind.FormatJson -> Operation.FormatJson(
                 jsonPretty, jsonIndent.roundToInt(), jsonSort, jsonAscii,
             )

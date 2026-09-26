@@ -2,10 +2,23 @@ package com.fileforge.core.archive
 
 import com.fileforge.core.util.SizeInput
 
+/**
+ * 一条"包里的东西"。zip 与 tar 的条目都长成这样，解压那套规矩（上限、链接、口令）只写一遍 ——
+ * 两个容器各判一遍迟早会出现"zip 里跳符号链接，tar 里不跳"那种岔。
+ */
+interface PackagedEntry {
+    val name: String
+    val size: Long
+    val isDirectory: Boolean
+
+    /** 解不出来的原因；null 表示可以解。原因要能直接念给用户听。 */
+    val skipReason: String?
+}
+
 /** 解压前的一次性判断：哪些条目能落盘、哪些要跳过、整包该不该直接拒。 */
 sealed interface UnpackPlan {
     /** 可以解。[keep] 是真正要落盘的条目，[skipped] 带着跳过原因。 */
-    class Go(val keep: List<ZipEntry>, val skipped: List<Pair<ZipEntry, String>>) : UnpackPlan
+    class Go(val keep: List<PackagedEntry>, val skipped: List<Pair<PackagedEntry, String>>) : UnpackPlan
     /** 整包不做，理由要能直接念给用户听。 */
     class Refused(val reason: String) : UnpackPlan
 }
@@ -58,38 +71,43 @@ object ArchivePlan {
         return cleaned.trimStart('.')
     }
 
-    /** 一条包里的目录项（名字以 `/` 结尾）没有内容，不该被当成文件解出来。 */
-    fun plan(archive: ZipArchive): UnpackPlan {
-        if (archive.entries.isEmpty()) return UnpackPlan.Refused("这个包里一条文件都没有")
-        val files = archive.entries.filterNot { it.isDirectory }
+    /** zip 与 tar 共用这一套判断；目录项不当文件解（它没有内容）。 */
+    fun plan(archive: ZipArchive): UnpackPlan = plan(archive.entries)
+
+    /** tar 走同一套判断：区别只在"解不了的原因"写在条目自己身上。 */
+    fun plan(archive: TarArchive): UnpackPlan = plan(archive.entries)
+
+    fun plan(entries: List<PackagedEntry>): UnpackPlan {
+        if (entries.isEmpty()) return UnpackPlan.Refused("这个包里一条文件都没有")
+        val files = entries.filterNot { it.isDirectory }
         if (files.isEmpty()) return UnpackPlan.Refused("这个包里只有目录，没有可解出的文件")
-        if (files.all { it.isEncrypted }) {
-            return UnpackPlan.Refused("整个包都带口令，本应用不做口令解压")
-        }
         val total = files.sumOf { it.size }
         if (total > MAX_TOTAL_BYTES) {
             return UnpackPlan.Refused(
                 "这个包声明解开后有 ${SizeInput.format(total)}，超过 ${SizeInput.format(MAX_TOTAL_BYTES)} 的上限，不硬解",
             )
         }
-        val keep = ArrayList<ZipEntry>(files.size)
-        val skipped = ArrayList<Pair<ZipEntry, String>>()
+        val keep = ArrayList<PackagedEntry>(files.size)
+        val skipped = ArrayList<Pair<PackagedEntry, String>>()
         files.forEach { entry ->
-            when {
-                entry.isEncrypted -> skipped += entry to "带口令"
-                ZipMethod.of(entry.method) == null ->
-                    skipped += entry to "用了解不了的压缩方式（${ZipLabel.of(entry.method)}）"
-                entry.isSymlink -> skipped += entry to "是个符号链接，解出来等于在别人目录里放文件"
-                entry.size > MAX_ENTRY_BYTES -> skipped += entry to "单条 ${SizeInput.format(entry.size)} 超过上限"
-                else -> keep += entry
-            }
+            val reason = entry.skipReason
+            if (reason == null) keep += entry else skipped += entry to reason
         }
-        if (keep.isEmpty()) return UnpackPlan.Refused("这个包里的文件全都解不了：${skipped.first().second}")
+        if (keep.isEmpty()) {
+            val only = skipped.map { it.second }.distinct()
+            return UnpackPlan.Refused(
+                if (only == listOf(PASSWORD)) "整个包都带口令，本应用不做口令解压"
+                else "这个包里的文件全都解不了：${skipped.first().second}",
+            )
+        }
         return UnpackPlan.Go(keep, skipped)
     }
 
+    /** 口令包的说法：整包都是这一条时要单独成句，用户要的是"去哪儿输口令"而不是逐条列表。 */
+    internal const val PASSWORD = "带口令"
+
     /** 跳过项的说明文字，进结果详情。 */
-    fun skippedNote(skipped: List<Pair<ZipEntry, String>>): String = when {
+    fun skippedNote(skipped: List<Pair<PackagedEntry, String>>): String = when {
         skipped.isEmpty() -> ""
         skipped.size == 1 -> "跳过 1 条：${skipped.first().first.name}（${skipped.first().second}）"
         else -> "跳过 ${skipped.size} 条（${skipped.map { it.second }.distinct().joinToString("、")}）"

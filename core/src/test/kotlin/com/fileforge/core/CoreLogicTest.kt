@@ -372,10 +372,10 @@ class CrossConversionCatalogTest {
     }
 
     @Test
-    fun `GIF 与 PDF 混选时只剩打包`() {
-        // GIF 和 PDF 没有共同的转换操作；唯一活下来的是打包 —— 把不相干的两类一起装进一个包
+    fun `GIF 与 PDF 混选时只剩两条打包`() {
+        // GIF 和 PDF 没有共同的转换操作；活下来的只有两条打包 —— 把不相干的两类一起装进一个包本来就是压缩包的用途
         // 本来就是压缩包的用途，所以它不属于"半可用按钮"
-        assertEquals(listOf(OperationKind.PackZip), OperationKind.applicable(setOf(FileKind.Gif, FileKind.Pdf)))
+        assertEquals(listOf(OperationKind.PackZip, OperationKind.PackTar), OperationKind.applicable(setOf(FileKind.Gif, FileKind.Pdf)))
     }
 
     @Test

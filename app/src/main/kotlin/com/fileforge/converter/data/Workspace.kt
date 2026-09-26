@@ -189,7 +189,8 @@ class Workspace(context: Context) {
     fun usedSpace(): Long = list().sumOf { it.size }
 
     private fun sniff(file: File): FileKind = runCatching {
-        val header = ByteArray(64)
+        // 512 不是随手取的：tar 的 ustar 那几个字节落在第 257 位上，只看 64 字节永远认不出
+        val header = ByteArray(512)
         file.inputStream().use { stream ->
             val read = stream.read(header)
             if (read in 0 until header.size) header.copyOf(read) else header

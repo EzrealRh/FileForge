@@ -296,6 +296,8 @@ class MetaReader {
         FileKind.Jpeg -> "JPEG 图片"
         FileKind.Bmp -> "BMP 图片"
         FileKind.Zip -> "ZIP 压缩包"
+        FileKind.Tar -> "TAR 归档"
+        FileKind.Gzip -> "GZ 压缩"
         FileKind.Docx -> "DOCX 文档"
         FileKind.Xlsx -> "XLSX 表格"
         FileKind.Epub -> "EPUB 电子书"

@@ -34,6 +34,8 @@ enum class OperationKind(val label: String, val hint: String) {
     CleanMetadata("清除图片元数据", "删掉 EXIF / GPS / 机型 / 注释，像素不重新编码"),
     PackZip("打包成 ZIP", "把选中的几份压成一个包"),
     UnpackZip("解压 ZIP", "解出里面的文件，路径压进文件名"),
+    PackTar("打包成 tar.gz", "几份文件合成一份归档再压，保住条目路径"),
+    Untar("解开 tar / gz", "tar 与 tar.gz 与单个 .gz 都走这一条"),
     FormatJson("JSON 格式化", "缩进或压平、键排序；数字原文不被改写"),
     JsonToCsv("JSON 转 CSV", "对象数组拆成表，会丢什么都先说明"),
     CsvToJson("CSV 转 JSON", "首行当列名；默认不猜类型，007 不会变成 7"),
@@ -100,6 +102,8 @@ enum class OperationKind(val label: String, val hint: String) {
             // 打包对类型无要求：任何文件都能塞进 zip，混选更是常见诉求（把发票 pdf 和照片一起发人）
             PackZip -> true
             UnpackZip -> fileKind == FileKind.Zip
+            PackTar -> true
+            Untar -> fileKind == FileKind.Tar || fileKind == FileKind.Gzip
             // 数据格式这一族只看"是不是文本"，具体是不是合法 JSON / 长得对不对交给引擎判，
             // 判不动会直说 —— 与字幕那族同一个路子，不在类型层猜。Markdown 同理：
             // 纯文本里没有任何记号时"转 HTML"没意义，引擎会拒而不是硬出一页。

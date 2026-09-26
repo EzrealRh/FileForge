@@ -1,5 +1,6 @@
 package com.fileforge.core.archive
 
+import com.fileforge.core.util.SizeInput
 import java.io.ByteArrayOutputStream
 import java.util.zip.CRC32
 import java.util.zip.Deflater
@@ -32,23 +33,32 @@ enum class ZipMethod(val code: Int, val label: String) {
 
 /** 一条目录项。尺寸与校验一律取**中央目录**的值：本地头里的三项常被流式写入方填成 0。 */
 data class ZipEntry(
-    val name: String,
+    override val name: String,
     val method: Int,
     val flags: Int,
     val crc: Long,
     val compressedSize: Long,
-    val size: Long,
+    override val size: Long,
     val localHeaderAt: Long,
     val modifiedAt: Long,
     val externalAttributes: Int,
-) {
-    val isDirectory: Boolean get() = name.endsWith("/")
+) : PackagedEntry {
+    override val isDirectory: Boolean get() = name.endsWith("/")
 
     /** 加密条目：安卓这边没有口令输入通路，读到就明确拒。 */
     val isEncrypted: Boolean get() = flags and 0x1 != 0
 
     /** 符号链接（unix mode 存在外部属性的**高 16 位**）：解出来等于在别人目录里放文件。 */
     val isSymlink: Boolean get() = (externalAttributes ushr 16) and 0xF000 == 0xA000
+
+    override val skipReason: String?
+        get() = when {
+            isEncrypted -> ArchivePlan.PASSWORD
+            ZipMethod.of(method) == null -> "用了解不了的压缩方式（${ZipLabel.of(method)}）"
+            isSymlink -> "是个符号链接，解出来等于在别人目录里放文件"
+            size > ArchivePlan.MAX_ENTRY_BYTES -> "单条 ${SizeInput.format(size)} 超过上限"
+            else -> null
+        }
 }
 
 /** 一份压缩包的目录。 */

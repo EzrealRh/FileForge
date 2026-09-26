@@ -1,0 +1,316 @@
+{
+ "archives": [
+  {
+   "file": "plain.tar",
+   "members": [
+    {
+     "name": "短.txt",
+     "size": 28,
+     "mtime": 1700000000,
+     "kind": "file",
+     "sha": "37fc693c446d1d2f8f0bc3d8ed88d8ac751484b76925a336821062c84c52a2ce"
+    },
+    {
+     "name": "空.txt",
+     "size": 0,
+     "mtime": 1700000000,
+     "kind": "file",
+     "sha": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+     "name": "deep/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/report.txt",
+     "size": 16,
+     "mtime": 1699913600,
+     "kind": "file",
+     "sha": "85282f4f2b43584a129de2aabba362c8292cb83a374abe875942eebaf5d22f70"
+    },
+    {
+     "name": "一层/二层",
+     "size": 0,
+     "mtime": 1700000000,
+     "kind": "dir",
+     "sha": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+     "name": "指个链接",
+     "size": 0,
+     "mtime": 1700000000,
+     "kind": "symlink",
+     "sha": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+     "name": "设备节点",
+     "size": 0,
+     "mtime": 1700000000,
+     "kind": "char",
+     "sha": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+   ],
+   "real": 3,
+   "skipped": {
+    "link": 1,
+    "device": 1
+   },
+   "dirs": 1
+  },
+  {
+   "file": "big.tar",
+   "members": [
+    {
+     "name": "短.txt",
+     "size": 28,
+     "mtime": 1700000000,
+     "kind": "file",
+     "sha": "37fc693c446d1d2f8f0bc3d8ed88d8ac751484b76925a336821062c84c52a2ce"
+    },
+    {
+     "name": "空.txt",
+     "size": 0,
+     "mtime": 1700000000,
+     "kind": "file",
+     "sha": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+     "name": "两万五千.bin",
+     "size": 256000,
+     "mtime": 12345,
+     "kind": "file",
+     "sha": "0ba55c454831412c56af57447be665601cd3682317eccea6ddaa51c289632f6c"
+    },
+    {
+     "name": "deep/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/report.txt",
+     "size": 16,
+     "mtime": 1699913600,
+     "kind": "file",
+     "sha": "85282f4f2b43584a129de2aabba362c8292cb83a374abe875942eebaf5d22f70"
+    },
+    {
+     "name": "一层/二层",
+     "size": 0,
+     "mtime": 1700000000,
+     "kind": "dir",
+     "sha": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+     "name": "指个链接",
+     "size": 0,
+     "mtime": 1700000000,
+     "kind": "symlink",
+     "sha": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+     "name": "设备节点",
+     "size": 0,
+     "mtime": 1700000000,
+     "kind": "char",
+     "sha": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+   ],
+   "real": 4,
+   "skipped": {
+    "link": 1,
+    "device": 1
+   },
+   "dirs": 1
+  },
+  {
+   "file": "gnu.tar",
+   "members": [
+    {
+     "name": "短.txt",
+     "size": 28,
+     "mtime": 1700000000,
+     "kind": "file",
+     "sha": "37fc693c446d1d2f8f0bc3d8ed88d8ac751484b76925a336821062c84c52a2ce"
+    },
+    {
+     "name": "空.txt",
+     "size": 0,
+     "mtime": 1700000000,
+     "kind": "file",
+     "sha": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+     "name": "deep/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/report.txt",
+     "size": 16,
+     "mtime": 1699913600,
+     "kind": "file",
+     "sha": "85282f4f2b43584a129de2aabba362c8292cb83a374abe875942eebaf5d22f70"
+    },
+    {
+     "name": "目录/很长的中文名字很长的中文名字很长的中文名字很长的中文名字很长的中文名字很长的中文名字很长的中文名字很长的中文名字很长的中文名字很长的中文名字很长的中文名字很长的中文名字.txt",
+     "size": 25,
+     "mtime": 1700000000,
+     "kind": "file",
+     "sha": "9eeb649fe79c0b59fbd4abe4a71fb053c3e3c6f7483075f3882a1d5789a1803d"
+    },
+    {
+     "name": "一层/二层",
+     "size": 0,
+     "mtime": 1700000000,
+     "kind": "dir",
+     "sha": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+     "name": "指个链接",
+     "size": 0,
+     "mtime": 1700000000,
+     "kind": "symlink",
+     "sha": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+     "name": "设备节点",
+     "size": 0,
+     "mtime": 1700000000,
+     "kind": "char",
+     "sha": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+   ],
+   "real": 4,
+   "skipped": {
+    "link": 1,
+    "device": 1
+   },
+   "dirs": 1
+  },
+  {
+   "file": "pax.tar",
+   "members": [
+    {
+     "name": "短.txt",
+     "size": 28,
+     "mtime": 1700000000,
+     "kind": "file",
+     "sha": "37fc693c446d1d2f8f0bc3d8ed88d8ac751484b76925a336821062c84c52a2ce"
+    },
+    {
+     "name": "空.txt",
+     "size": 0,
+     "mtime": 1700000000,
+     "kind": "file",
+     "sha": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+     "name": "deep/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/report.txt",
+     "size": 16,
+     "mtime": 1699913600,
+     "kind": "file",
+     "sha": "85282f4f2b43584a129de2aabba362c8292cb83a374abe875942eebaf5d22f70"
+    },
+    {
+     "name": "目录/很长的中文名字很长的中文名字很长的中文名字很长的中文名字很长的中文名字很长的中文名字很长的中文名字很长的中文名字很长的中文名字很长的中文名字很长的中文名字很长的中文名字.txt",
+     "size": 25,
+     "mtime": 1700000000,
+     "kind": "file",
+     "sha": "9eeb649fe79c0b59fbd4abe4a71fb053c3e3c6f7483075f3882a1d5789a1803d"
+    },
+    {
+     "name": "一层/二层",
+     "size": 0,
+     "mtime": 1700000000,
+     "kind": "dir",
+     "sha": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+     "name": "指个链接",
+     "size": 0,
+     "mtime": 1700000000,
+     "kind": "symlink",
+     "sha": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+     "name": "设备节点",
+     "size": 0,
+     "mtime": 1700000000,
+     "kind": "char",
+     "sha": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+   ],
+   "real": 4,
+   "skipped": {
+    "link": 1,
+    "device": 1
+   },
+   "dirs": 1
+  },
+  {
+   "file": "book.tar.gz",
+   "members": [
+    {
+     "name": "短.txt",
+     "size": 28,
+     "mtime": 1700000000,
+     "kind": "file",
+     "sha": "37fc693c446d1d2f8f0bc3d8ed88d8ac751484b76925a336821062c84c52a2ce"
+    },
+    {
+     "name": "空.txt",
+     "size": 0,
+     "mtime": 1700000000,
+     "kind": "file",
+     "sha": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+     "name": "deep/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/dir/report.txt",
+     "size": 16,
+     "mtime": 1699913600,
+     "kind": "file",
+     "sha": "85282f4f2b43584a129de2aabba362c8292cb83a374abe875942eebaf5d22f70"
+    },
+    {
+     "name": "目录/很长的中文名字很长的中文名字很长的中文名字很长的中文名字很长的中文名字很长的中文名字很长的中文名字很长的中文名字很长的中文名字很长的中文名字很长的中文名字很长的中文名字.txt",
+     "size": 25,
+     "mtime": 1700000000,
+     "kind": "file",
+     "sha": "9eeb649fe79c0b59fbd4abe4a71fb053c3e3c6f7483075f3882a1d5789a1803d"
+    },
+    {
+     "name": "一层/二层",
+     "size": 0,
+     "mtime": 1700000000,
+     "kind": "dir",
+     "sha": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+     "name": "指个链接",
+     "size": 0,
+     "mtime": 1700000000,
+     "kind": "symlink",
+     "sha": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+     "name": "设备节点",
+     "size": 0,
+     "mtime": 1700000000,
+     "kind": "char",
+     "sha": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+   ],
+   "real": 4,
+   "skipped": {
+    "link": 1,
+    "device": 1
+   },
+   "dirs": 1
+  }
+ ],
+ "formats": {
+  "ustar": "plain.tar",
+  "gnu": "gnu.tar",
+  "pax": "pax.tar"
+ },
+ "broken": {
+  "file": "broken.tar",
+  "good_before": 2,
+  "names": [
+   "短.txt",
+   "空.txt"
+  ]
+ },
+ "gz": {
+  "file": "single.gz",
+  "name": "报告/正文.txt",
+  "sha": "5f1bdfa518368b5f7f052e49bf094516abba0ea788e396a2a50d270a4bfa9e15",
+  "size": 2120
+ }
+}

@@ -2,7 +2,13 @@ package com.fileforge.converter.engine
 
 import com.fileforge.core.archive.ArchivePlan
 import com.fileforge.core.archive.ByteSlice
+import com.fileforge.core.archive.Gzip
+import com.fileforge.core.archive.PackagedEntry
+import com.fileforge.core.archive.Tar
+import com.fileforge.core.archive.TarEntry
+import com.fileforge.core.archive.TarItem
 import com.fileforge.core.archive.UnpackPlan
+import com.fileforge.core.archive.ZipEntry
 import com.fileforge.core.archive.ZipItem
 import com.fileforge.core.archive.ZipSink
 import com.fileforge.core.archive.ZipReader
@@ -72,7 +78,7 @@ class ArchiveEngine {
                 val output = names[index]
                 val file = staging(OutputNaming.extension(output, "bin"))
                 try {
-                    java.io.FileOutputStream(file).use { target -> ZipReader.writeDataOf(entry, slices, target) }
+                    java.io.FileOutputStream(file).use { target -> writeEntry(entry, slices, target) }
                     EngineOutput(output, file, note)
                 } catch (error: Exception) {
                     file.delete()
@@ -83,9 +89,163 @@ class ArchiveEngine {
             runCatching { slices.close() }
         }
     }
-}
+    /**
+     * 打成 tar.gz。
+     *
+     * 先写一份 tar 再套 gzip：tar 是纯归档（不逐条压），把整份一次性压下去通常比
+     * zip 那种"每条各压一段"小一点，而且条目路径与时间是写在头里的 —— Unix 侧的工具链认这个。
+     */
+    fun packTar(items: List<WorkItem>, operation: Operation.PackTarGz, staging: (String) -> File): EngineOutput {
+        require(items.isNotEmpty()) { "没有可选中要打包的文件" }
+        val names = ArchivePlan.uniqueNames(items.map { OutputNaming.sanitize(it.name) })
+        val plain = items.sumOf { it.size }
+        val tar = staging("tar")
+        var target: File? = null
+        try {
+            java.io.FileOutputStream(tar).use { sink ->
+                Tar.writeTo(
+                    items.mapIndexed { index, item ->
+                        TarItem(names[index], item.size, item.file.lastModified()) { item.file.inputStream() }
+                    },
+                    sink,
+                )
+            }
+            target = staging("tar.gz")
+            java.io.FileOutputStream(target).use { sink ->
+                tar.inputStream().use { source -> Gzip.gzip(source, sink, name = "${OutputNaming.stem(items.first().name)}.tar") }
+            }
+            return EngineOutput(
+                OutputNaming.tagged(items.first().name, "打包", "tar.gz"),
+                target,
+                "${items.size} 份文件 · ${SizeInput.format(plain)} → ${SizeInput.format(target.length())}（整份一起压）",
+            )
+        } catch (error: Exception) {
+            target?.delete()
+            throw error
+        } finally {
+            tar.delete()
+        }
+    }
 
-/** 一个文件背后的"按区间取字节"：中央目录在末尾、条目数据散在各处，整份搬进堆没道理。 */
+    /**
+     * 解开 tar / tar.gz / 单个 .gz。
+     *
+     * `.gz` 里装的是不是一份 tar **看内容**：第一块头校验和对得上才算。是 tar 就照 zip 那套
+     * 规矩平铺出多份；不是就把那一个文件交回去（名字优先用 gzip 头里记的原名，那比 `x.gz` 去掉
+     * 一个后缀准得多）。解压上限在搬运途中就卡住，不留"解到一半 OOM"这种死法。
+     */
+    fun untar(item: WorkItem, operation: Operation.UntarArchive, staging: (String) -> File): List<EngineOutput> {
+        val notes = ArrayList<String>()
+        val gzipped = isGzip(item)
+        val source = if (gzipped) staging("tar") else item.file
+        if (gzipped) {
+            java.io.FileOutputStream(source).use { sink ->
+                val written = runCatching {
+                    Gzip.ungzip(java.io.BufferedInputStream(item.file.inputStream()), LimitedStream(sink))
+                }.getOrElse { error ->
+                    source.delete()
+                    throw IllegalStateException("这个 gz 解不开：${error.message ?: "内容坏了"}")
+                }
+                notes += "先解了 gzip（${SizeInput.format(item.size)} → ${SizeInput.format(written)}）"
+            }
+        }
+        val head = headOf(source)
+        if (!Tar.looksLikeTar(head)) {
+            if (!gzipped) error("这份文件的第一块头读不出 tar 条目（名字或校验和不对），它不是 tar 归档")
+            // 单个文件被 gzip 的情形：交回那一份，名字优先用 gzip 头里记的原名（比去掉 .gz 准）
+            val stored = Gzip.readHeader(headOf(item.file))?.name?.substringAfterLast('/')
+            val stem = item.name.removeSuffix(".gz").removeSuffix(".GZ").ifBlank { item.name }
+            val name = OutputNaming.sanitize(stored ?: stem)
+            val output = if (name.contains('.')) name else "$name.bin"
+            return listOf(
+                EngineOutput(
+                    output,
+                    source,
+                    (notes + "这是一份 gzip 单文件（不是 tar 归档）· 解压自 ${item.name}").joinToString(" · "),
+                ),
+            )
+        }
+        return try {
+            unpackTar(item, source, notes, staging)
+        } finally {
+            if (source !== item.file) source.delete()
+        }
+    }
+
+    private fun unpackTar(
+        item: WorkItem,
+        source: File,
+        notes: List<String>,
+        staging: (String) -> File,
+    ): List<EngineOutput> {
+        val slices = FileSlices(source)
+        return try {
+            val archive = Tar.read(slices, source.length())
+            val plan = ArchivePlan.plan(archive)
+            if (plan is UnpackPlan.Refused) {
+                if (archive.notes.isNotEmpty()) error((notes + archive.notes).joinToString(" · ") + " · " + plan.reason)
+                error(plan.reason)
+            }
+            plan as UnpackPlan.Go
+            val parts = ArrayList<String>()
+            parts += "解压自 ${item.name}"
+            parts += notes
+            parts += archive.notes
+            ArchivePlan.skippedNote(plan.skipped).takeIf { it.isNotBlank() }?.let { parts += it }
+            if (plan.keep.any { it.name.contains('/') }) parts += "目录结构压进文件名了（工作台是平的）"
+            val note = parts.joinToString(" · ")
+            val names = ArchivePlan.uniqueNames(plan.keep.map { ArchivePlan.outputName(item.name, it.name) })
+            plan.keep.mapIndexed { index, entry ->
+                val output = names[index]
+                val file = staging(OutputNaming.extension(output, "bin"))
+                try {
+                    java.io.FileOutputStream(file).use { target -> writeEntry(entry, slices, target) }
+                    EngineOutput(output, file, note)
+                } catch (error: Exception) {
+                    file.delete()
+                    throw error
+                }
+            }
+        } finally {
+            runCatching { slices.close() }
+        }
+    }
+
+    private fun isGzip(item: WorkItem): Boolean {
+        val head = ByteArray(2)
+        item.file.inputStream().use { input -> if (input.read(head) < 2) return false }
+        return Gzip.isGzip(head)
+    }
+
+    /** 两种容器的条目都从各自的读取器里按区间取字节：解压那套流程只有一份。 */
+    private fun writeEntry(entry: PackagedEntry, slices: ByteSlice, target: java.io.OutputStream) {
+        when (entry) {
+            is ZipEntry -> ZipReader.writeDataOf(entry, slices, target)
+            is TarEntry -> Tar.writeDataOf(entry, slices, target)
+            else -> error("认不出的条目类型：${entry.name}")
+        }
+    }
+
+    /** 头一块够判断了：tar 的名字与校验和都落在前 512 字节里。 */
+    private fun headOf(file: File): ByteArray {
+        val head = ByteArray(512)
+        file.inputStream().use { input -> input.read(head) }
+        return head
+    }
+
+    /** 解压途中的体积闸：写够了上限就报错，不给"解到一半把进程顶掉"的机会。 */
+    private class LimitedStream(sink: java.io.OutputStream) : java.io.FilterOutputStream(sink) {
+        private var written = 0L
+
+        override fun write(bytes: ByteArray, offset: Int, length: Int) {
+            written += length
+            if (written > ArchivePlan.MAX_TOTAL_BYTES) {
+                throw IllegalStateException("解压后有 ${SizeInput.format(written)}，超过 ${SizeInput.format(ArchivePlan.MAX_TOTAL_BYTES)} 的上限")
+            }
+            out.write(bytes, offset, length)
+        }
+    }
+}
 
 /** staging 文件上的回写落点：本地头的长度要压完才能回填，所以得能 seek。 */
 internal class FileZipSink(file: File) : ZipSink, AutoCloseable {

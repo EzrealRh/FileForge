@@ -6,7 +6,7 @@ import com.fileforge.core.doc.Html
 enum class FileKind {
     Pdf, Png, Jpeg, Gif, WebP, Bmp, Heic, Avif, Mp4, WebM, Mkv, QuickTime,
     Mp3, Aac, M4a, Flac, Ogg, Wav,
-    Zip, Ico, Docx, Xlsx, Pptx, Epub, Text, Html, Unknown;
+    Zip, Ico, Docx, Xlsx, Pptx, Epub, Tar, Gzip, Text, Html, Unknown;
 
     val isImage: Boolean get() = this in IMAGE_KINDS
     val isVideo: Boolean get() = this in VIDEO_KINDS
@@ -43,6 +43,8 @@ enum class FileKind {
         Docx -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         Xlsx -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         Epub -> "application/epub+zip"
+        Tar -> "application/x-tar"
+        Gzip -> "application/gzip"
         Pptx -> "application/vnd.openxmlformats-officedocument.presentationml.presentation"
         Text -> "text/plain"
         Html -> "text/html"
@@ -77,6 +79,8 @@ enum class FileKind {
         Docx -> "DOCX"
         Xlsx -> "XLSX"
         Epub -> "EPUB"
+        Tar -> "TAR"
+        Gzip -> "GZ"
         Pptx -> "PPTX"
         Text -> "文本"
         Html -> "HTML"
@@ -97,7 +101,7 @@ enum class FileKind {
 
 object FileTypeSniffer {
 
-    /** 读文件前 64 字节足够判定这里用到的所有类型。 */
+    /** 绝大多数类型看前几十字节就够；tar 的 `ustar` 在第 257 字节，所以要给到 512 字节。 */
     fun sniff(header: ByteArray): FileKind {
         if (header.size < 12) return FileKind.Unknown
 
@@ -106,8 +110,10 @@ object FileTypeSniffer {
             if (header.size < at + text.length) return false
             return text.indices.all { offset -> u(at + offset) == text[offset].code }
         }
+        /** 只在开头这么多字节里找子串：EBML 的 DocType 就在前面，扫太远会撞上正文里的同样字节。 */
+        val probe = minOf(header.size, PROBE)
         fun contains(text: String): Boolean =
-            (0..header.size - text.length).any { isAscii(it, text) }
+            (0..probe - text.length).any { isAscii(it, text) }
 
         return when {
             isAscii(0, "%PDF") -> FileKind.Pdf
@@ -134,6 +140,10 @@ object FileTypeSniffer {
             u(0) == 0xFF && (u(1) and 0xE0) == 0xE0 && (u(1) and 0xF6) == 0xF0 -> FileKind.Aac
             u(0) == 0xFF && (u(1) and 0xE0) == 0xE0 -> FileKind.Mp3
             u(0) == 0x50 && u(1) == 0x4B && u(2) == 0x03 && u(3) == 0x04 -> FileKind.Zip
+            // gzip 的两位魔数；里面装的是 tar 还是单个文件，由解包那边看过第一块再说
+            u(0) == 0x1F && u(1) == 0x8B -> FileKind.Gzip
+            // tar 没有开头的魔数：名字落在第 257 字节的 ustar 上，还要头块自己的校验和对得上
+            com.fileforge.core.archive.Tar.looksLikeTar(header) -> FileKind.Tar
             looksLikeHtml(header) -> FileKind.Html
             looksLikeText(header) -> FileKind.Text
             else -> FileKind.Unknown
@@ -197,6 +207,9 @@ object FileTypeSniffer {
             size in 1..(1 shl 26) && offset >= 6 + count * 16
         }
     }
+
+    /** [contains] 那条子串判据只在开头这么多字节里找。 */
+    private const val PROBE = 64
 
     private fun isoBrandToKind(brand: String) = when {
         brand.startsWith("heic") || brand.startsWith("heix") || brand.startsWith("heim") ||
