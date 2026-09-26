@@ -569,6 +569,20 @@ sealed interface Operation {
     data object YamlToXlsx : Operation {
         override val label get() = "转为 Excel"
     }
+
+    /**
+     * CSV → 网页表格：一份带 charset 的完整页面，浏览器双击就开。
+     *
+     * 与「CSV 转 Excel / XML / YAML」用的是同一套读法（分隔符自动识别、引号里的换行算一格）。
+     */
+    data class CsvToHtml(val title: String = "", val header: Boolean = true) : Operation {
+        override val label get() = if (header) "转为网页表格（首行当表头）" else "转为网页表格（首行当数据）"
+    }
+
+    /** PDF → 网页：结构与「PDF 转 Word」同源（同一批量行、同一个还原层），落成 HTML。 */
+    data class PdfToHtml(val spec: String = "", val title: String = "") : Operation {
+        override val label get() = "转为网页" + if (spec.isNotBlank()) "（$spec）" else ""
+    }
 }
 
 enum class PdfPaper(val label: String) { A4("A4"), A5("A5"), Letter("Letter"), FitImage("按图片尺寸") }

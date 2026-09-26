@@ -251,6 +251,12 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
             is Operation.YamlToXlsx -> items.forEach { item ->
                 collect(item.name) { listOf(office.yamlToXlsx(item)) }
             }
+            is Operation.CsvToHtml -> items.forEach { item ->
+                collect(item.name) { listOf(text.csvToHtml(item, operation)) }
+            }
+            is Operation.PdfToHtml -> items.forEach { item ->
+                collect(item.name) { listOf(pdf.toHtml(item, operation)) }
+            }
         }
 
         coroutineContext.ensureActive()

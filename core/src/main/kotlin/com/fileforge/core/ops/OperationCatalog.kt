@@ -68,6 +68,8 @@ enum class OperationKind(val label: String, val hint: String) {
     YamlToXml("YAML 转 XML", "键当标签名，序列写成重复元素；顶层是序列时包一层根元素"),
     CsvToXml("CSV 转 XML", "一行一个元素，列名当子元素名"),
     YamlToXlsx("YAML 转 Excel", "摊表用的是 YAML 转 CSV 同一套判据"),
+    CsvToHtml("CSV 转网页表格", "一份带 charset 的完整页面，浏览器直接打开"),
+    PdfToHtml("PDF 转网页", "结构与转 Word 同源，落成 HTML"),
     ;
 
     companion object {
@@ -86,7 +88,7 @@ enum class OperationKind(val label: String, val hint: String) {
             ImagesToPdf -> fileKind.isImage
             CompressPdf, SplitPdfBySize, SplitPdfIntoParts, ExtractPdfPages, RemovePdfPages,
             RotatePdfPages, MergePdfs, PdfToText, PdfToImages, AddPageNumbers, PdfWatermark,
-            EncryptPdf, DecryptPdf, PdfToDocx,
+            EncryptPdf, DecryptPdf, PdfToDocx, PdfToHtml,
             -> fileKind == FileKind.Pdf
             CompressGif, GifToImages -> fileKind == FileKind.Gif
             ImagesToGif -> fileKind.isImage
@@ -121,7 +123,7 @@ enum class OperationKind(val label: String, val hint: String) {
             // 真没有 HTML 标记时引擎会直说"这不是网页"，不硬出一份少了尖括号的文件
             HtmlToText, HtmlToMarkdown -> fileKind.isTextual
             // 反向那两条同理：是不是真表格交给引擎判（空文件、列数不齐都会直说），不在类型层猜
-            CsvToXlsx, JsonToXlsx, HtmlToCsv, YamlToXlsx -> fileKind.isTextual
+            CsvToXlsx, JsonToXlsx, HtmlToCsv, YamlToXlsx, CsvToHtml -> fileKind.isTextual
             // EPUB 是容器：只看它自己，别在混选时给半可用按钮
             EpubToText, EpubToMarkdown, EpubToDocx -> fileKind == FileKind.Epub
         }

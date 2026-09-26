@@ -750,26 +750,16 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
     fun toDocx(item: WorkItem, operation: Operation.PdfToDocx): EngineOutput {
         val document = loadForReading(item.file)
         try {
-            val total = document.numberOfPages
-            val pages = if (operation.spec.isBlank()) (0 until total).toList()
-            else PageRangeParser.toPageIndices(PageRangeParser.parse(operation.spec), total)
-            val lines = ArrayList<PdfLine>()
-            pages.forEach { index ->
-                val scribe = PdfLineScribe(index)
-                scribe.setStartPage(index + 1)
-                scribe.setEndPage(index + 1)
-                scribe.getText(document)
-                lines += scribe.lines
-            }
-            val doc = PdfDoc.toDoc(lines)
+            val read = structureOf(document, operation.spec)
+            val doc = read.first
             require(doc.parts.isNotEmpty()) {
                 doc.notes.joinToString(" · ").ifBlank { "这份 PDF 没抽出可用的文字" } +
                     "；扫描件要留档就走「每页导出图片」"
             }
             val out = com.fileforge.core.office.DocxWrite.document(doc, modifiedAt = item.file.lastModified())
             val file = workspace.newStagingFile("docx").apply { writeBytes(out.bytes) }
-            val notes = ArrayList(listOf("${doc.parts.size} 段 · ${pages.size} 页") + doc.notes + out.notes)
-            if (lines.isEmpty()) notes += "没量到任何一行"
+            val notes = ArrayList(listOf("${doc.parts.size} 段 · ${read.second} 页") + doc.notes + out.notes)
+            if (read.third.isEmpty()) notes += "没量到任何一行"
             return EngineOutput(
                 OutputNaming.tagged(item.name, "Word", "docx"),
                 file,
@@ -778,6 +768,58 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
         } finally {
             runCatching { document.close() }
         }
+    }
+
+    /**
+     * PDF → 网页：与「PDF 转 Word」量同一批行、走同一个结构还原层，只是落成 HTML。
+     *
+     * 落成 HTML 而不是 XHTML：浏览器直接双击打开就行；标题、列表、表格、引用、代码块都在，
+     * 链接与图片不在 —— 那份 PDF 里的行只有字与位置，没有"这是个链接"这件事。
+     */
+    fun toHtml(item: WorkItem, operation: Operation.PdfToHtml): EngineOutput {
+        val document = loadForReading(item.file)
+        try {
+            val (doc, pages, lines) = structureOf(document, operation.spec)
+            require(doc.parts.isNotEmpty()) {
+                doc.notes.joinToString(" · ").ifBlank { "这份 PDF 没抽出可用的文字" } +
+                    "；扫描件要留档就走「每页导出图片」"
+            }
+            val page = com.fileforge.core.doc.HtmlWrite.page(
+                title = operation.title.ifBlank { OutputNaming.stem(item.name) },
+                parts = doc.parts,
+                language = com.fileforge.core.book.EpubWrite.languageOf(doc),
+            )
+            val file = workspace.newStagingFile("html").apply { writeText(page.html, Charsets.UTF_8) }
+            val notes = ArrayList(
+                listOf("${doc.parts.size} 段 · $pages 页", "带 charset 的完整页面，浏览器直接打开"),
+            )
+            notes += doc.notes
+            notes += page.notes
+            if (lines.isEmpty()) notes += "没量到任何一行"
+            return EngineOutput(
+                OutputNaming.tagged(item.name, "网页", "html"),
+                file,
+                notes.filter { it.isNotBlank() }.joinToString(" · "),
+            )
+        } finally {
+            runCatching { document.close() }
+        }
+    }
+
+    /** 按页码范围量行 → 还原结构。写成 Word 与写成网页共用，两个产物不会一个说 12 段一个说 14 段。 */
+    private fun structureOf(document: PDDocument, spec: String): Triple<com.fileforge.core.doc.Doc, Int, List<PdfLine>> {
+        val total = document.numberOfPages
+        val pages = if (spec.isBlank()) (0 until total).toList()
+        else PageRangeParser.toPageIndices(PageRangeParser.parse(spec), total)
+        val lines = ArrayList<PdfLine>()
+        pages.forEach { index ->
+            val scribe = PdfLineScribe(index)
+            scribe.setStartPage(index + 1)
+            scribe.setEndPage(index + 1)
+            scribe.getText(document)
+            lines += scribe.lines
+        }
+        return Triple(PdfDoc.toDoc(lines), pages.size, lines)
     }
 
     fun imagesToPdf(items: List<WorkItem>, paper: PdfPaper, marginDp: Int): EngineOutput {

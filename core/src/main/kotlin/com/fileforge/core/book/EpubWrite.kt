@@ -4,6 +4,7 @@ import com.fileforge.core.archive.ZipItem
 import com.fileforge.core.archive.ZipWriter
 import com.fileforge.core.doc.Doc
 import com.fileforge.core.doc.DocParagraph
+import com.fileforge.core.doc.HtmlWrite
 import com.fileforge.core.doc.DocPart
 import com.fileforge.core.doc.DocPara
 import com.fileforge.core.doc.DocRun
@@ -104,13 +105,9 @@ object EpubWrite {
         items += ZipItem("OEBPS/toc.ncx", ncx(title, pages, identifier, stamp).toByteArray(Charsets.UTF_8), modifiedAt)
         items += ZipItem("OEBPS/nav.xhtml", nav(title, pages, language).toByteArray(Charsets.UTF_8), modifiedAt)
         pages.forEachIndexed { index, page ->
-            val body = StringBuilder()
-            val lists = HtmlBody()
-            page.parts.forEach { part -> xhtmlPart(part, body, lists) }
-            lists.closeAll(body)
             items += ZipItem(
                 "OEBPS/text/ch${index + 1}.xhtml",
-                xhtml(page.title, language, body.toString()).toByteArray(Charsets.UTF_8),
+                xhtml(page.title, language, HtmlWrite.body(page.parts)).toByteArray(Charsets.UTF_8),
                 modifiedAt,
             )
         }
@@ -136,12 +133,12 @@ object EpubWrite {
     ): String {
         val out = StringBuilder()
         out.append(DECL).append("<package xmlns=\"http://www.idpf.org/2007/opf\" version=\"3.0\" ")
-            .append("xml:lang=\"").append(escape(language, true)).append("\" unique-identifier=\"id\">")
+            .append("xml:lang=\"").append(HtmlWrite.escape(language, true)).append("\" unique-identifier=\"id\">")
         out.append("<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\">")
-        out.append("<dc:identifier id=\"id\">").append(escape(identifier)).append("</dc:identifier>")
-        out.append("<dc:title>").append(escape(title)).append("</dc:title>")
-        out.append("<dc:language>").append(escape(language)).append("</dc:language>")
-        if (author != null) out.append("<dc:creator>").append(escape(author)).append("</dc:creator>")
+        out.append("<dc:identifier id=\"id\">").append(HtmlWrite.escape(identifier)).append("</dc:identifier>")
+        out.append("<dc:title>").append(HtmlWrite.escape(title)).append("</dc:title>")
+        out.append("<dc:language>").append(HtmlWrite.escape(language)).append("</dc:language>")
+        if (author != null) out.append("<dc:creator>").append(HtmlWrite.escape(author)).append("</dc:creator>")
         out.append("<dc:date>").append(stamp).append("</dc:date>")
         out.append("<meta property=\"dcterms:modified\">").append(stamp).append("</meta>")
         out.append("</metadata><manifest>")
@@ -167,12 +164,12 @@ object EpubWrite {
         val out = StringBuilder()
         out.append(DECL).append(DOCTYPE).append("\n")
             .append("<html xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:epub=\"http://www.idpf.org/2007/ops\" ")
-            .append("xml:lang=\"").append(escape(language, true)).append("\" lang=\"").append(escape(language, true)).append("\">")
-            .append("<head><meta charset=\"utf-8\"/><title>").append(escape(title)).append("</title></head>")
+            .append("xml:lang=\"").append(HtmlWrite.escape(language, true)).append("\" lang=\"").append(HtmlWrite.escape(language, true)).append("\">")
+            .append("<head><meta charset=\"utf-8\"/><title>").append(HtmlWrite.escape(title)).append("</title></head>")
             .append("<body><nav epub:type=\"toc\" id=\"toc\"><ol>")
         pages.forEachIndexed { index, page ->
             out.append("<li><a href=\"text/ch").append(index + 1).append(".xhtml\">")
-                .append(escape(page.title)).append("</a></li>")
+                .append(HtmlWrite.escape(page.title)).append("</a></li>")
         }
         out.append("</ol></nav></body></html>")
         return out.toString()
@@ -182,14 +179,14 @@ object EpubWrite {
     private fun ncx(title: String, pages: List<EpubPage>, identifier: String, stamp: String): String {
         val out = StringBuilder()
         out.append(DECL).append("<ncx xmlns=\"http://www.daisy.org/z3986/2005/ncx/\" version=\"2005-1\">")
-            .append("<head><meta name=\"dtb:uid\" content=\"").append(escape(identifier)).append("\"/>")
+            .append("<head><meta name=\"dtb:uid\" content=\"").append(HtmlWrite.escape(identifier)).append("\"/>")
             .append("<meta name=\"dtb:depth\" content=\"1\"/>")
             .append("<meta name=\"dtb:totalPageCount\" content=\"0\"/>")
             .append("<meta name=\"dtb:maxPageNumber\" content=\"0\"/></head>")
-            .append("<docTitle><text>").append(escape(title)).append("</text></docTitle><navMap>")
+            .append("<docTitle><text>").append(HtmlWrite.escape(title)).append("</text></docTitle><navMap>")
         pages.forEachIndexed { index, page ->
             out.append("<navPoint id=\"n").append(index + 1).append("\" playOrder=\"").append(index + 1).append("\">")
-                .append("<navLabel><text>").append(escape(page.title)).append("</text></navLabel>")
+                .append("<navLabel><text>").append(HtmlWrite.escape(page.title)).append("</text></navLabel>")
                 .append("<content src=\"text/ch").append(index + 1).append(".xhtml\"/></navPoint>")
         }
         out.append("</navMap></ncx>")
@@ -198,121 +195,8 @@ object EpubWrite {
 
     private fun xhtml(title: String, language: String, body: String): String =
         DECL + DOCTYPE + "\n<html xmlns=\"http://www.w3.org/1999/xhtml\" xml:lang=\"" +
-            escape(language, true) + "\" lang=\"" + escape(language, true) + "\">" +
-            "<head><meta charset=\"utf-8\"/><title>" + escape(title) + "</title></head><body>" + body + "</body></html>"
-
-    /** 整块文档 → XHTML。标签全靠结构拼，源文字里的 `<` 与 `&` 一律走 [escape]。 */
-    private fun xhtmlPart(part: DocPart, out: StringBuilder, lists: HtmlBody) {
-        when (part) {
-            is DocRule -> {
-                lists.closeAll(out)
-                out.append("<hr/>\n")
-            }
-            is DocTable -> {
-                lists.closeAll(out)
-                table(part, out)
-            }
-            is DocParagraph -> lists.paragraph(part.para, out)
-        }
-    }
-
-    private fun table(part: DocTable, out: StringBuilder) {
-        out.append("<table>")
-        part.rows.forEachIndexed { index, row ->
-            val tag = if (part.header && index == 0) "th" else "td"
-            out.append("<tr>").append(row.joinToString("") { cell -> "<$tag>${escape(cell)}</$tag>" }).append("</tr>")
-        }
-        out.append("</table>\n")
-    }
-
-    /**
-     * 一页的正文渲染器。列表的层级状态放在它自己身上，而不是对象级字段上：
-     * 同一时刻可能有两本书在导，共享状态会让后一本接着前一本的 `<li>` 写下去。
-     */
-    private class HtmlBody {
-        private class Frame(val mark: String) {
-            var liOpen = false
-        }
-
-        private val open = ArrayList<Frame>()
-
-        private fun closeTop(out: StringBuilder) {
-            val frame = open.removeAt(open.size - 1)
-            if (frame.liOpen) out.append("</li>")
-            out.append("</").append(frame.mark).append(">")
-        }
-
-        fun closeAll(out: StringBuilder) {
-            while (open.isNotEmpty()) closeTop(out)
-        }
-
-        fun paragraph(para: DocPara, out: StringBuilder) {
-            val plain = para.runs.joinToString("") { it.text }
-            when {
-                para.style == "ListParagraph" -> {
-                    val mark = if (para.bullet == false) "ol" else "ul"
-                    val depth = para.indent.coerceAtLeast(0)
-                    while (open.size > depth + 1) closeTop(out)
-                    if (open.size == depth + 1 && open.last().mark != mark) closeTop(out)
-                    while (open.size <= depth) {
-                        out.append("<").append(mark).append(">")
-                        open += Frame(mark)
-                    }
-                    val top = open.last()
-                    if (top.liOpen) out.append("</li>")
-                    out.append("<li>")
-                    top.liOpen = true
-                    runs(para, out, "", "")
-                    return
-                }
-                else -> closeAll(out)
-            }
-            when {
-                para.style.startsWith("Heading") -> {
-                    val level = para.style.removePrefix("Heading").toIntOrNull() ?: 1
-                    out.append("<h").append(level).append(">").append(escape(plain))
-                        .append("</h").append(level).append(">\n")
-                }
-                para.style == "SourceCode" -> out.append("<pre><code>")
-                    .append(escape(plain)).append("</code></pre>\n")
-                para.style == "Quote" -> runs(para, out, "<blockquote>", "</blockquote>\n")
-                plain.isNotBlank() -> runs(para, out, "<p>", "</p>\n")
-                else -> Unit                      // 全空的段落不写：段与段之间本来就有边界
-            }
-        }
-
-        private fun runs(para: DocPara, out: StringBuilder, opening: String, closing: String) {
-            out.append(opening)
-            para.runs.forEach { run ->
-                var piece = escape(run.text)
-                if (run.mono) piece = "<code>$piece</code>"
-                if (run.bold) piece = "<strong>$piece</strong>"
-                if (run.italic) piece = "<em>$piece</em>"
-                if (run.strike) piece = "<del>$piece</del>"
-                val target = run.link
-                if (!target.isNullOrBlank()) piece = "<a href=\"${escape(target, true)}\">$piece</a>"
-                out.append(piece.replace("\n", "<br/>\n"))
-            }
-            out.append(closing)
-        }
-    }
-
-    /** 文字进 XML：`&` `<` `>` 必须转义，控制字符丢掉（XML 里根本不允许出现那些字节）。 */
-    private fun escape(value: String, attribute: Boolean = false): String {
-        val out = StringBuilder(value.length)
-        value.forEach { ch ->
-            when {
-                ch == '&' -> out.append("&amp;")
-                ch == '<' -> out.append("&lt;")
-                ch == '>' -> out.append("&gt;")
-                ch == '"' && attribute -> out.append("&quot;")
-                ch == '\t' -> out.append(ch)
-                ch.code < 0x20 -> Unit
-                else -> out.append(ch)
-            }
-        }
-        return out.toString()
-    }
+            HtmlWrite.escape(language, true) + "\" lang=\"" + HtmlWrite.escape(language, true) + "\">" +
+            "<head><meta charset=\"utf-8\"/><title>" + HtmlWrite.escape(title) + "</title></head><body>" + body + "</body></html>"
 
     private fun isoOf(millis: Long): String {
         val format = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.ROOT)

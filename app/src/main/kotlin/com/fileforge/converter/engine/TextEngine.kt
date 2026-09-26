@@ -6,6 +6,9 @@ import com.fileforge.core.data.Xml
 import com.fileforge.core.data.XmlTable
 import com.fileforge.core.data.Yaml
 import com.fileforge.core.data.YamlException
+import com.fileforge.core.doc.Doc
+import com.fileforge.core.doc.DocTable
+import com.fileforge.core.doc.HtmlWrite
 import com.fileforge.core.json.Json
 import com.fileforge.core.json.JsonException
 import com.fileforge.core.json.JsonRender
@@ -289,6 +292,34 @@ class TextEngine(private val workspace: Workspace) {
             OutputNaming.tagged(item.name, "", "xml"),
             writeText(item, xml, "xml"),
             notes.joinToString(" · "),
+        )
+    }
+
+    /**
+     * CSV → 网页表格。读法与「CSV 转 Excel / XML / YAML」同一条（分隔符自动识别、引号里的换行算一格），
+     * 渲染走 `:core` 那套 Doc→HTML（与写成电子书同一套），所以两处出来的表是同一张。
+     */
+    fun csvToHtml(item: WorkItem, operation: Operation.CsvToHtml): EngineOutput {
+        val decoded = TextCodecs.decodeForConversion(read(item), null)
+        val doc = Csv.parse(decoded.text, Csv.detect(decoded.text))
+        require(!doc.isEmpty) { "这份 CSV 里一行内容都没有" }
+        val rows = doc.records.map { record -> record + List(doc.widest - record.size) { "" } }
+        val parts = listOf(DocTable(operation.header, rows))
+        val page = HtmlWrite.page(
+            title = operation.title.ifBlank { OutputNaming.stem(item.name) },
+            parts = parts,
+            language = com.fileforge.core.book.EpubWrite.languageOf(Doc(parts, emptyList())),
+        )
+        val notes = ArrayList<String>()
+        notes += if (operation.header) "第一行写成表头（<th>）" else "首行当数据行，没有表头"
+        notes += "${rows.size} 行 × ${doc.widest} 列"
+        if (doc.ragged.isNotEmpty()) notes += "第 ${doc.ragged.joinToString("、")} 行的列数跟别处不一样，右边补了空格子"
+        notes += "按 ${decoded.encoding.label} 读" + if (decoded.hadBom) "（源带 BOM）" else ""
+        val file = workspace.newStagingFile("html").apply { writeText(page.html, Charsets.UTF_8) }
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "网页", "html"),
+            file,
+            notes.filter { it.isNotBlank() }.joinToString(" · "),
         )
     }
 

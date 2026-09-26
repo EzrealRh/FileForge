@@ -201,6 +201,7 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
     var csvInfer by mutableStateOf(false)
     var xmlRoot by mutableStateOf("")
     var epubTitle by mutableStateOf("")
+    var htmlTitle by mutableStateOf("")
     var epubAuthor by mutableStateOf("")
     var icoSizesText by mutableStateOf("16,32,48,256")
     var textSize by mutableStateOf(11f)
@@ -644,6 +645,35 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
                 Summary("源文件里的图片不搬（文本与网页里没有可搬的图），产出一份纯文字的电子书。")
                 Summary("同一份内容每次导出的书号是同一个：改完再导一遍，阅读器认得出还是同一本书。")
             }
+            OperationKind.PdfToHtml -> {
+                PageSpecField("留空=整份；也可只要几页，例：1-3,7", "结构与「PDF 转 Word」量的是同一批行")
+                OutlinedTextField(
+                    value = htmlTitle,
+                    onValueChange = { htmlTitle = it },
+                    label = { Text("页面标题（留空用文件名）") },
+                    singleLine = true,
+                    supportingText = { Text("浏览器标签页上显示的那个标题。") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Summary("出一份带 charset 的完整网页，浏览器直接打开；标题、段落、列表、表格照结构排。")
+                Summary("跨页重复的页眉页脚不搬进行文；行尾的断词连字符拼回去时去掉。")
+                Summary("PDF 里的行只有字与位置，没有「这是个链接」这件事 —— 超链接与图片搬不过来。")
+                items.forEach { Summary("${it.name} · ${it.sizeLabel}") }
+            }
+            OperationKind.CsvToHtml -> {
+                Segmented("首行", listOf("当普通数据行", "当表头"), if (csvHeader) 1 else 0) { csvHeader = it == 1 }
+                OutlinedTextField(
+                    value = htmlTitle,
+                    onValueChange = { htmlTitle = it },
+                    label = { Text("页面标题（留空用文件名）") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Summary("一份带 charset 声明的完整页面：浏览器双击就开，中文不会猜错编码。")
+                Summary("分隔符自动识别；引号里的换行还是同一格里的换行（写成 <br>），不会被拆成两行。")
+                Summary("行与行列数不齐时按最宽的那行补齐，并在结果里说明是哪几行。")
+                Summary("表头那行写成 <th>，与「网页表格转 CSV」读的正是同一种表。")
+            }
             OperationKind.EpubToText, OperationKind.EpubToMarkdown, OperationKind.EpubToDocx -> {
                 Summary("章节顺序按包里的 spine 走（`.epub` 里的文件名顺序常常不是阅读顺序）。")
                 Summary("章名优先取目录（NCX）里的名字，其次文档自己的 title，再不行用文件名。")
@@ -901,6 +931,8 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
             OperationKind.YamlToXml -> Operation.YamlToXml(xmlRoot.trim(), jsonIndent.roundToInt())
             OperationKind.CsvToXml -> Operation.CsvToXml(xmlRoot.trim(), csvHeader)
             OperationKind.YamlToXlsx -> Operation.YamlToXlsx
+            OperationKind.CsvToHtml -> Operation.CsvToHtml(htmlTitle.trim(), csvHeader)
+            OperationKind.PdfToHtml -> Operation.PdfToHtml(pageSpec.trim(), htmlTitle.trim())
             OperationKind.TextToPdf -> Operation.TextToPdf(
                 textSize.roundToInt(), paper, textMargin.roundToInt(), textLeading, textIndent, textNumber,
             )
