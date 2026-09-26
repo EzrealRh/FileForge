@@ -239,6 +239,7 @@ object Html {
         if (tally.unknown > 0) notes += "${tally.unknown} 处实体没认出来，照字面留下了"
         if (counted.dropped > 0) notes += "${counted.dropped} 段脚本/样式/页眉内容丢掉（那不是给人读的文字）"
         if (counted.links > 0) notes += "${counted.links} 处链接写成 Word 里能点开的真链接"
+        if (counted.anchors > 0) notes += "${counted.anchors} 处页内锚点与不认的地址只留下文字（没有落点可跳）"
         if (counted.tables > 0) notes += "${counted.tables} 张表按跨度摆成表格（跨过的格子留空）"
         if (counted.images > 0) notes += "${counted.images} 处图片只剩替代文字（图片本体不在文字里）"
         if (counted.nestedQuotes > 0) notes += "${counted.nestedQuotes} 处嵌套引用压成多缩一层的引用段（Word 里没有第二层引用样式）"
@@ -360,7 +361,7 @@ object Html {
             }
             node.name == "a" -> {
                 val href = linkTarget(node.attrs["href"].orEmpty())
-                if (href != null) ctx.counted.links++
+                if (href != null) ctx.counted.links++ else ctx.counted.anchors++
                 val inner = ArrayList<DocRun>()
                 node.children.forEach { child -> docDocRun(child, ctx, inner) }
                 inner.forEach { into += it.copy(link = href, underline = href != null) }
@@ -410,6 +411,7 @@ object Html {
 
     private class Counted {
         var links = 0
+        var anchors = 0
         var images = 0
         var dropped = 0
         var tables = 0
@@ -436,6 +438,10 @@ object Html {
         if (!markdown) {
             if (counted.links > 0) notes += "${counted.links} 处链接只留下文字，地址在纯文本里没处放"
             if (counted.images > 0) notes += "${counted.images} 处图片只剩替代文字"
+        }
+        // 页内锚点在摊平成一篇之后没有落点：留个会跳空的链接不如留字，但少了东西得说
+        if (markdown && counted.anchors > 0) {
+            notes += "${counted.anchors} 处页内锚点没有落点（整篇摊平了），只留下文字"
         }
         val text = blocks.joinToString("\n\n")
         return Rendered(if (text.isEmpty()) "" else "$text\n", notes)
@@ -604,18 +610,15 @@ object Html {
                 into.append(if (ctx.markdown) "![${escape(alt)}](${node.attrs["src"].orEmpty()})" else alt)
             }
             node.name == "a" -> {
-                ctx.counted.links++
                 val body = StringBuilder()
                 children(node, body, ctx)
                 val href = node.attrs["href"].orEmpty()
                 val label = body.toString()
-                into.append(
-                    when {
-                        !ctx.markdown -> label
-                        href.isBlank() || href.startsWith("#") -> label
-                        else -> "[$label]($href)"
-                    },
-                )
+                when {
+                    !ctx.markdown -> { ctx.counted.links++; into.append(label) }
+                    href.isBlank() || href.startsWith("#") -> { ctx.counted.anchors++; into.append(label) }
+                    else -> { ctx.counted.links++; into.append("[$label]($href)") }
+                }
             }
             node.name in FORMS -> {
                 ctx.counted.forms++

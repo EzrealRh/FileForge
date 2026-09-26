@@ -22,6 +22,8 @@ object OoxmlParts {
      * 它就是工作簿本体。
      */
     fun kindOf(entries: Collection<String>): FileKind = when {
+        // EPUB 也是 zip，判据是 container.xml 这个只属于它的部件名
+        entries.any { it.equals("META-INF/container.xml", ignoreCase = true) } -> FileKind.Epub
         DOCX_BODY in entries -> FileKind.Docx
         XLSX_WORKBOOK in entries -> FileKind.Xlsx
         PPTX_PRESENTATION in entries -> FileKind.Pptx

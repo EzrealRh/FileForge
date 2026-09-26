@@ -52,6 +52,9 @@ enum class OperationKind(val label: String, val hint: String) {
     JsonToYaml("JSON 转 YAML", "块式输出；该加引号的加引号，别人读回去是同一个值"),
     YamlToCsv("YAML 转 CSV", "对象数组摊成表，会丢什么都先说明"),
     CsvToYaml("CSV 转 YAML", "一行一个对象；默认不猜类型，007 不会变成 7"),
+    EpubToText("EPUB 提取全书文字", "按 spine 的章节顺序接起来，输出 txt"),
+    EpubToMarkdown("EPUB 转 Markdown", "标题、列表、表格写成标记"),
+    EpubToDocx("EPUB 写成 Word", "结构与记号走 Word 的样式，可继续编辑"),
     ImageToIco("做成图标 ICO", "一次出 16/32/48/256 多个尺寸"),
     IcoToImages("图标拆成图片", "把 .ico 里的每个画面导成 PNG"),
     XmlToJson("XML 转 JSON", "属性加 @、子元素成数组；带 DTD 的不解析"),
@@ -108,6 +111,8 @@ enum class OperationKind(val label: String, val hint: String) {
             HtmlToText, HtmlToMarkdown -> fileKind.isTextual
             // 反向那两条同理：是不是真表格交给引擎判（空文件、列数不齐都会直说），不在类型层猜
             CsvToXlsx, JsonToXlsx, HtmlToCsv -> fileKind.isTextual
+            // EPUB 是容器：只看它自己，别在混选时给半可用按钮
+            EpubToText, EpubToMarkdown, EpubToDocx -> fileKind == FileKind.Epub
         }
     }
 }

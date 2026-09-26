@@ -618,6 +618,13 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
                 Summary("源文件里有 HTML 标签就按网页排，有 Markdown 记号就按 Markdown 排，普通文字按空行分段 —— 按哪条路排的会写在结果里。")
                 Summary("docx / pptx 进来是先抽正文再重排：原来的样式、图片与脚注搬不过来，丢了什么逐条写明。")
             }
+            OperationKind.EpubToText, OperationKind.EpubToMarkdown, OperationKind.EpubToDocx -> {
+                Summary("章节顺序按包里的 spine 走（`.epub` 里的文件名顺序常常不是阅读顺序）。")
+                Summary("章名优先取目录（NCX）里的名字，其次文档自己的 title，再不行用文件名。")
+                Summary("图片、CSS 与字体不是文字，不搬；缺件、清单对不上的条目、非线性的项都报数。")
+                Summary("加密的 EPUB（带 DRM）读不出正文，会直说，不会出一份空文件。")
+                items.forEach { Summary("${it.name} · ${it.sizeLabel}") }
+            }
             OperationKind.IcoToImages -> {
                 Summary("PNG 内嵌的那种直接把内嵌字节原样取出，不重新编码；老式位图（DIB）的要重建像素再编 PNG。")
                 Summary("一个图标里有几个尺寸就出几张图，名字带序号。")
@@ -805,6 +812,9 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
             OperationKind.JsonToXlsx -> Operation.JsonToXlsx
             OperationKind.TextToDocx -> Operation.TextToDocx
             OperationKind.IcoToImages -> Operation.IcoToImages
+            OperationKind.EpubToText -> Operation.EpubToText
+            OperationKind.EpubToMarkdown -> Operation.EpubToMarkdown
+            OperationKind.EpubToDocx -> Operation.EpubToDocx
         }
     }
 }

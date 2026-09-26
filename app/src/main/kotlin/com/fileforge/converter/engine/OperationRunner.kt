@@ -28,6 +28,7 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
     private val text = TextEngine(workspace)
     private val archives = ArchiveEngine()
     private val office = OfficeEngine(workspace)
+    private val book = BookEngine(workspace)
 
     suspend fun run(
         items: List<WorkItem>,
@@ -210,6 +211,15 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
             }
             is Operation.HtmlToCsv -> items.forEach { item ->
                 collect(item.name) { text.htmlToCsv(item, operation.delimiter, operation.ending) }
+            }
+            is Operation.EpubToText -> items.forEach { item ->
+                collect(item.name) { listOf(book.toText(item)) }
+            }
+            is Operation.EpubToMarkdown -> items.forEach { item ->
+                collect(item.name) { listOf(book.toMarkdown(item)) }
+            }
+            is Operation.EpubToDocx -> items.forEach { item ->
+                collect(item.name) { listOf(book.toDocx(item)) }
             }
             is Operation.TextToDocx -> items.forEach { item ->
                 collect(item.name) { listOf(office.toDocx(item)) }

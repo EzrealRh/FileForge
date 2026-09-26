@@ -194,12 +194,12 @@ class Workspace(context: Context) {
             val read = stream.read(header)
             if (read in 0 until header.size) header.copyOf(read) else header
         }.let { FileTypeSniffer.sniff(it) }
-            // OOXML 的身份证据是包里的部件名，头 64 字节看不出来：是 zip 就再开一次目录看一眼
-            .let { if (it == FileKind.Zip) ooxmlKind(file) else it }
+            // OOXML 与 EPUB 的身份证据都在包里的部件名上，头 64 字节看不出来：是 zip 就再开一次目录看一眼
+            .let { if (it == FileKind.Zip) containerKind(file) else it }
     }.getOrDefault(FileKind.Unknown)
 
     /** 开不了目录、目录读坏了的都算回普通 zip：具体哪里坏，引擎那边会照着文件说。 */
-    private fun ooxmlKind(file: File): FileKind {
+    private fun containerKind(file: File): FileKind {
         val slices = runCatching { FileSlices(file) }.getOrNull() ?: return FileKind.Zip
         return runCatching {
             OoxmlParts.kindOf(ZipReader.read(slices, file.length()).entries.map { entry -> entry.name })

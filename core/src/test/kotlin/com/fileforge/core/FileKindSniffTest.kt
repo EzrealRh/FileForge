@@ -233,4 +233,20 @@ class FileKindSniffTest {
                 .all { it in OperationKind.applicable(setOf(FileKind.Html, FileKind.Text)) },
         )
     }
+
+    @Test
+    fun `电子书给三条出路，不给普通 zip 的入口`() {
+        val epub = OperationKind.applicable(setOf(FileKind.Epub))
+        assertTrue(
+            setOf(OperationKind.EpubToText, OperationKind.EpubToMarkdown, OperationKind.EpubToDocx)
+                .all { it in epub }, "电子书该有这三条：$epub",
+        )
+        assertEquals("application/epub+zip", FileKind.Epub.mimeType)
+        assertEquals("EPUB", FileKind.Epub.badge)
+        // 技术上它是个 zip，但摆"解压"等于让用户去翻一堆 XHTML —— 三条出路里没有这一条
+        assertFalse(OperationKind.UnpackZip in epub, "电子书不该拿到解压按钮：$epub")
+        assertTrue(OperationKind.PackZip in epub, "打包对类型不设限")
+        // 与纯文本混选：没有对两边都成立的出路，只留打包
+        assertEquals(listOf(OperationKind.PackZip), OperationKind.applicable(setOf(FileKind.Epub, FileKind.Text)))
+    }
 }

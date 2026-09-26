@@ -472,6 +472,25 @@ sealed interface Operation {
     data object IcoToImages : Operation {
         override val label get() = "导出图标里的画面"
     }
+
+    /**
+     * EPUB 抽正文成 txt：按 OPF 的 **spine** 顺序把一章章接起来（文件名顺序不算顺序）。
+     *
+     * 图片、样式与字体不是文字，不搬；缺件、对不上的 id 与非线性的项都会报数，不静悄悄少一章。
+     */
+    data object EpubToText : Operation {
+        override val label get() = "提取全书文字"
+    }
+
+    /** EPUB → Markdown：每章的标题、列表、表格写成标记。 */
+    data object EpubToMarkdown : Operation {
+        override val label get() = "转为 Markdown"
+    }
+
+    /** EPUB → Word：结构与记号走 Word 的样式，可以拿去继续编辑。 */
+    data object EpubToDocx : Operation {
+        override val label get() = "写成 Word 文档"
+    }
 }
 
 enum class PdfPaper(val label: String) { A4("A4"), A5("A5"), Letter("Letter"), FitImage("按图片尺寸") }

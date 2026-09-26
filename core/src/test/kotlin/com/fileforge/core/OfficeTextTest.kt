@@ -34,6 +34,16 @@ class OfficeTextTest {
         assertEquals(FileKind.Xlsx, OoxmlParts.kindOf(listOf("[Content_Types].xml", "xl/workbook.xml")))
         assertEquals(FileKind.Pptx, OoxmlParts.kindOf(listOf("ppt/presentation.xml")))
         assertEquals(FileKind.Zip, OoxmlParts.kindOf(listOf("readme.txt", "data/photo.jpg")))
+        // 电子书技术上也是个 zip：认出它靠那个规定的目录文件，不靠扩展名
+        assertEquals(
+            FileKind.Epub,
+            OoxmlParts.kindOf(listOf("mimetype", "META-INF/container.xml", "OEBPS/content.opf")),
+        )
+        assertEquals(
+            FileKind.Zip,
+            OoxmlParts.kindOf(listOf("META-INF/container.xml.bak", "readme.txt")),
+            "差一个后缀不算电子书",
+        )
     }
 
     // ---- 正文顺序 ---------------------------------------------------------------

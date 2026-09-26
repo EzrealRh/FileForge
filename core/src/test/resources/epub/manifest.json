@@ -1,0 +1,53 @@
+{
+ "chapters": [
+  {
+   "id": "c2",
+   "href": "text/ch2.xhtml",
+   "path": "OEBPS/text/ch2.xhtml",
+   "title": "第二章",
+   "title_from": "文档的 title"
+  },
+  {
+   "id": "c3",
+   "href": "text/ch3.xhtml",
+   "path": "OEBPS/text/ch3.xhtml",
+   "title": "第三章 · 目录里叫这个",
+   "title_from": "NCX"
+  },
+  {
+   "id": "c1",
+   "href": "text/first%20part.xhtml",
+   "path": "OEBPS/text/first part.xhtml",
+   "title": "第一章 · 目录里叫这个 & 那样",
+   "title_from": "NCX"
+  },
+  {
+   "id": "c4",
+   "href": "text/ch4.xhtml",
+   "path": "OEBPS/text/ch4.xhtml",
+   "title": "第四章",
+   "title_from": "文档的 title"
+  }
+ ],
+ "linear_no": [
+  "c2"
+ ],
+ "not_in_spine": [
+  "OEBPS/text/appendix.xhtml"
+ ],
+ "not_text": {
+  "css": 1,
+  "image": 1
+ },
+ "title": "演示书",
+ "author": "编的作者",
+ "utf16": {
+  "file": "utf16.epub",
+  "path": "OEBPS/text/utf16.xhtml",
+  "title": "十六位的一章",
+  "texts": [
+   "按错的编码读会得到整章乱码",
+   "这一章是 UTF-16 编的，正文里也有汉字。"
+  ]
+ }
+}

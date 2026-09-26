@@ -98,7 +98,9 @@ internal object HtmlTokens {
         val closing = source.getOrNull(cursor) == '/'
         if (closing) cursor++
         val nameStart = cursor
-        while (cursor < source.length && (source[cursor].isLetterOrDigit() || source[cursor] == '-')) cursor++
+        // 标签名里带冒号是常态（XHTML 里见过、EPUB 的 OPF 里全是 dc:title），浏览器与
+        // Python 的 html.parser 都不把冒号当断点 —— 只认字母数字与连字符会把整段元数据读丢
+        while (cursor < source.length && (source[cursor].isLetterOrDigit() || source[cursor] in "-:_.")) cursor++
         if (cursor == nameStart) return null
         val name = source.substring(nameStart, cursor).lowercase()
         val attrs = LinkedHashMap<String, String>()
