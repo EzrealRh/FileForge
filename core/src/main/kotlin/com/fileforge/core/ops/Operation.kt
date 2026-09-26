@@ -248,6 +248,16 @@ sealed interface Operation {
     }
 
     /**
+     * PDF → Word：把"画在纸上的样子"还原成文档结构（标题层级、列表、段落），写进一份 .docx。
+     *
+     * spec 留空表示整份，多段用页码范围写。PDF 里没有"标题"这一层，所以层级是按字号与位置**推**的：
+     * 推不出来的（多栏的读序、表格线、图片）会照实说明，不会装作搬全了。
+     */
+    data class PdfToDocx(val spec: String = "") : Operation {
+        override val label get() = "转为 Word 文档"
+    }
+
+    /**
      * 清掉图片里的身份信息（EXIF / GPS / 机型 / 软件 / 注释），像素数据**一字节都不重编码**。
      *
      * 没有参数：要清什么由段的性质决定，见 [com.fileforge.core.meta.ImageMeta]。

@@ -293,6 +293,13 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
                 PageSpecField("留空=全文；也可只要几页，例：1-3,7", "只抽文字层；扫描件没有文字层，得走「每页导出图片」")
                 items.forEach { Summary("${it.name} · ${it.sizeLabel}") }
             }
+            OperationKind.PdfToDocx -> {
+                PageSpecField("留空=整份；也可只要几页，例：1-3,7", "结构是按字号与位置推的：推不出来的（多栏读序、表格线、图片）会照实说明")
+                Summary("标题按大小排层级，列表的圆点与编号交给 Word 画，被折开的行并回一段。")
+                Summary("跨页重复的页眉页脚不搬进行文；行尾的断词连字符拼回去时去掉。")
+                Summary("扫描件（字是图片）没有文字层可推，会直接说明，不出一份空文档。")
+                items.forEach { Summary("${it.name} · ${it.sizeLabel}") }
+            }
             OperationKind.PdfToImages -> {
                 Segmented("图片格式", ImageFormat.entries.map { it.label }, imageFormat.ordinal) {
                     imageFormat = ImageFormat.entries[it]
@@ -700,6 +707,7 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
             OperationKind.RemovePdfPages -> Operation.RemovePdfPages(pageSpec)
             OperationKind.RotatePdfPages -> Operation.RotatePdfPages(pageSpec.trim(), ROTATE_OPTIONS[rotateIndex].second)
             OperationKind.PdfToText -> Operation.PdfToText(pageSpec.trim())
+            OperationKind.PdfToDocx -> Operation.PdfToDocx(pageSpec.trim())
             OperationKind.AddPageNumbers -> Operation.PageNumbers(
                 pageSpec.trim(), numberStyle, SPOTS[numberSpot],
                 firstNumber.roundToInt(), numberSize.roundToInt(),

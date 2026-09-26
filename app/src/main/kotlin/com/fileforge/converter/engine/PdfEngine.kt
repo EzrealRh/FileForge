@@ -14,6 +14,8 @@ import com.fileforge.core.pdf.PageGroups
 import com.fileforge.core.pdf.PageNumberPlan
 import com.fileforge.core.pdf.PageRangeParser
 import com.fileforge.core.pdf.PdfCompressPlan
+import com.fileforge.core.pdf.PdfDoc
+import com.fileforge.core.pdf.PdfLine
 import com.fileforge.core.pdf.PdfPermission
 import com.fileforge.core.pdf.PdfSecurity
 import com.fileforge.core.pdf.PdfTier
@@ -734,6 +736,44 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
                 "${found} 页有文字" +
                     (if (silent > 0) "，$silent 页抽不出字（扫描页？）" else "") +
                     "，${SizeInput.format(output.length())}",
+            )
+        } finally {
+            runCatching { document.close() }
+        }
+    }
+
+    /**
+     * PDF → Word：逐页量出每行的字与样子，交给 `:core` 那份判断层还原结构，再写成 docx。
+     *
+     * 判断全在 `:core`（那边能脱机单测，也能拿 pdfminer 独立量的字号对答案）；这里只管量与落盘。
+     */
+    fun toDocx(item: WorkItem, operation: Operation.PdfToDocx): EngineOutput {
+        val document = loadForReading(item.file)
+        try {
+            val total = document.numberOfPages
+            val pages = if (operation.spec.isBlank()) (0 until total).toList()
+            else PageRangeParser.toPageIndices(PageRangeParser.parse(operation.spec), total)
+            val lines = ArrayList<PdfLine>()
+            pages.forEach { index ->
+                val scribe = PdfLineScribe(index)
+                scribe.setStartPage(index + 1)
+                scribe.setEndPage(index + 1)
+                scribe.getText(document)
+                lines += scribe.lines
+            }
+            val doc = PdfDoc.toDoc(lines)
+            require(doc.parts.isNotEmpty()) {
+                doc.notes.joinToString(" · ").ifBlank { "这份 PDF 没抽出可用的文字" } +
+                    "；扫描件要留档就走「每页导出图片」"
+            }
+            val out = com.fileforge.core.office.DocxWrite.document(doc, modifiedAt = item.file.lastModified())
+            val file = workspace.newStagingFile("docx").apply { writeBytes(out.bytes) }
+            val notes = ArrayList(listOf("${doc.parts.size} 段 · ${pages.size} 页") + doc.notes + out.notes)
+            if (lines.isEmpty()) notes += "没量到任何一行"
+            return EngineOutput(
+                OutputNaming.tagged(item.name, "Word", "docx"),
+                file,
+                notes.joinToString(" · "),
             )
         } finally {
             runCatching { document.close() }

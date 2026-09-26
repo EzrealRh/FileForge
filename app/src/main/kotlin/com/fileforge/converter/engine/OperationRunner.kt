@@ -84,6 +84,9 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
             is Operation.PdfToText -> items.forEach { item ->
                 collect(item.name) { listOf(pdf.toText(item, operation.spec)) }
             }
+            is Operation.PdfToDocx -> items.forEach { item ->
+                collect(item.name) { listOf(pdf.toDocx(item, operation)) }
+            }
             is Operation.PageNumbers -> items.forEach { item ->
                 collect(item.name) { listOf(pdf.addPageNumbers(item, operation)) }
             }

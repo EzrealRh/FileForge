@@ -7,6 +7,8 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.regex.Pattern;
+import org.apache.pdfbox.text.TextPosition;
 import org.apache.pdfbox.cos.COSBase;
 import org.apache.pdfbox.cos.COSDictionary;
 import org.apache.pdfbox.cos.COSName;
@@ -35,6 +37,13 @@ import org.apache.pdfbox.text.PDFTextStripper;
 import org.apache.pdfbox.pdmodel.encryption.AccessPermission;
 import org.apache.pdfbox.pdmodel.encryption.InvalidPasswordException;
 import org.apache.pdfbox.pdmodel.encryption.StandardProtectionPolicy;
+import com.fileforge.core.doc.Doc;
+import com.fileforge.core.doc.DocPart;
+import com.fileforge.core.doc.DocParagraph;
+import com.fileforge.core.doc.DocTable;
+import com.fileforge.core.office.DocxWrite;
+import com.fileforge.core.pdf.PdfDoc;
+import com.fileforge.core.pdf.PdfLine;
 import com.fileforge.core.pdf.TextLayout;
 import com.fileforge.core.pdf.TextLayoutPlanner;
 import com.fileforge.core.pdf.TextLine;
@@ -63,6 +72,7 @@ public final class PdfProbe {
             case "stamp" -> verifyStamping(new File(args[1]));
             case "security" -> verifySecurity(new File(args[1]));
             case "textlayout" -> verifyTextLayout(new File(args[1]), new File(args[2]));
+            case "pdfdoc" -> pdfStructure(new File(args[1]), new File(args[2]));
             default -> throw new IllegalArgumentException("unknown cmd " + args[0]);
         }
     }
@@ -969,5 +979,129 @@ public final class PdfProbe {
             expect(false, "找不到中文字体 " + font + "，水印那半没验");
         }
         System.out.println("stamp PASS");
+    }
+
+    /**
+     * PDF 的结构还原：用**桌面版 PDFBox** 把每行的字号与位置量出来，交给 :core 那份判断层，
+     * 落 lines.tsv 与 structure.docx 给 tools/verify_pdf_docx.py 判。
+     *
+     * 这里那份 LineMeter 与 app 侧 PdfLineScribe 是同一套规矩（安卓侧没设备跑不了，桌面版同内核跑得了）：
+     * 一行分几次回调、遇到行尾才结一次账、重面字按字体名认。判断本身一行都不在这个文件里。
+     */
+    private static void pdfStructure(File pdf, File outDir) throws Exception {
+        outDir.mkdirs();
+        List<PdfLine> lines = new ArrayList<>();
+        try (PDDocument document = PDDocument.load(pdf)) {
+            for (int index = 0; index < document.getNumberOfPages(); index++) {
+                LineMeter meter = new LineMeter(index);
+                meter.setStartPage(index + 1);
+                meter.setEndPage(index + 1);
+                meter.getText(document);
+                lines.addAll(meter.lines);
+            }
+        }
+        StringBuilder tsv = new StringBuilder();
+        for (PdfLine line : lines) {
+            tsv.append(line.getPage()).append('\t')
+                .append(String.format("%.1f", line.getTop())).append('\t')
+                .append(String.format("%.1f", line.getLeft())).append('\t')
+                .append(String.format("%.1f", line.getSize())).append('\t')
+                .append(line.getBold() ? "1" : "0").append('\t')
+                .append(line.getText().replace("\t", " ")).append('\n');
+        }
+        java.nio.file.Files.writeString(new File(outDir, "lines.tsv").toPath(), tsv.toString());
+
+        Doc doc = PdfDoc.INSTANCE.toDoc(lines);
+        StringBuilder shape = new StringBuilder();
+        for (DocPart part : doc.getParts()) {
+            if (part instanceof DocParagraph paragraph) {
+                shape.append(paragraph.getPara().getStyle()).append('\t')
+                    .append(paragraph.getPara().getIndent()).append('\t')
+                    .append(paragraph.getPara().getBullet()).append('\t')
+                    .append(paragraph.getPara().getText().replace("\n", " ")).append('\n');
+            } else if (part instanceof DocTable table) {
+                shape.append("Table\t").append(table.getRows().size()).append("行\n");
+            } else {
+                shape.append("Rule\n");
+            }
+        }
+        java.nio.file.Files.writeString(new File(outDir, "shape.tsv").toPath(), shape.toString());
+        java.nio.file.Files.write(new File(outDir, "structure.docx").toPath(),
+            DocxWrite.INSTANCE.document(doc, 0L).getBytes());
+        for (String note : doc.getNotes()) System.out.println("  note: " + note);
+        expect(!lines.isEmpty(), "桌面版 PDFBox 没量到任何一行，判据会被架空");
+        System.out.printf("pdfdoc：%d 行 → %d 块，产物在 %s%n", lines.size(), doc.getParts().size(), outDir);
+    }
+
+    /** 与 app 侧 PdfLineScribe 同一套规矩的桌面版量法。 */
+    static final class LineMeter extends PDFTextStripper {
+
+        private static final Pattern HEAVY = Pattern.compile(
+            "(?i)(bold|black|heavy|hei|黑|粗|\\.B$|-B($|[0-9.]))");
+
+        final List<PdfLine> lines = new ArrayList<>();
+        private final int page;
+        private final StringBuilder text = new StringBuilder();
+        private float size;
+        private float left = Float.MAX_VALUE;
+        private float top = Float.MAX_VALUE;
+        private float height;
+        private float right;
+        private boolean heavy;
+
+        LineMeter(int page) throws IOException {
+            this.page = page;
+            setSortByPosition(true);
+        }
+
+        @Override
+        protected void writeString(String chunk, List<TextPosition> positions) {
+            if (positions.isEmpty()) {
+                return;
+            }
+            text.append(chunk);
+            for (TextPosition position : positions) {
+                size = Math.max(size, position.getFontSizeInPt());
+                left = Math.min(left, position.getXDirAdj());
+                top = Math.min(top, position.getYDirAdj());
+                height = position.getPageHeight();
+                right = Math.max(right, position.getXDirAdj() + position.getWidthDirAdj());
+                PDFont font = position.getFont();
+                if (font != null && font.getFontDescriptor() != null
+                    && HEAVY.matcher(String.valueOf(font.getFontDescriptor().getFontName())).find()) {
+                    heavy = true;
+                }
+            }
+        }
+
+        @Override
+        protected void writeWordSeparator() {
+            text.append(' ');
+        }
+
+        @Override
+        protected void writeLineSeparator() {
+            settle();
+        }
+
+        @Override
+        protected void endPage(PDPage pdPage) throws IOException {
+            settle();
+            super.endPage(pdPage);
+        }
+
+        private void settle() {
+            String value = text.toString().trim();
+            if (!value.isEmpty() && size > 0f) {
+                lines.add(new PdfLine(value, size, heavy, left == Float.MAX_VALUE ? 0f : left, top, page, height, right));
+            }
+            text.setLength(0);
+            size = 0f;
+            left = Float.MAX_VALUE;
+            top = Float.MAX_VALUE;
+            height = 0f;
+            right = 0f;
+            heavy = false;
+        }
     }
 }
