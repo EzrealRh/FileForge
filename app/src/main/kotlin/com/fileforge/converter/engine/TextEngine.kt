@@ -211,23 +211,90 @@ class TextEngine(private val workspace: Workspace) {
         )
     }
 
-    /** 读 + 判"像不像 YAML" + 解析；顺手把"读了几份文档""按什么编码读的"记下来。 */
-    private fun parseYaml(item: WorkItem): Pair<Json, List<String>> {
-        val decoded = TextCodecs.decodeForConversion(read(item), null)
-        require(Yaml.looksLikeYaml(decoded.text)) {
-            "这份文件里没找到 YAML 的样子（既没有「键: 值」也没有「- 项」）。它本来就是普通文本。"
-        }
-        val tree = try {
-            Yaml.parse(decoded.text)
-        } catch (bad: YamlException) {
-            throw IllegalArgumentException(bad.message)
-        }
-        val notes = ArrayList<String>()
-        val docs = Yaml.documentCount(decoded.text)
-        if (docs > 1) notes += "文件里有 $docs 份文档（用 --- 分隔），只转了第一份"
-        notes += "按 ${decoded.encoding.label} 读" + if (decoded.hadBom) "（源带 BOM）" else ""
-        return tree to notes
+    /**
+     * XML → YAML：树与「XML 转 JSON」同一棵，写出规矩与「JSON 转 YAML」同一条。
+     *
+     * 值一律是文字：XML 里本来就没有类型，`1.50` 与 `007` 不会被读成 1.5 与 7。
+     */
+    fun xmlToYaml(item: WorkItem, operation: Operation.XmlToYaml): EngineOutput {
+        val tree = Xml.parse(readText(item))
+        val root = tree.members.keys.firstOrNull() ?: "根"
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "", "yaml"),
+            writeText(item, Yaml.write(tree, operation.indent), "yaml"),
+            "根元素 $root · ${countElements(tree)} 个节点 · 值一律是文字（XML 里没有类型） · " +
+                "注释与处理指令按约定丢掉 · 属性写成 @名字",
+        )
     }
+
+    /**
+     * YAML → XML。顶层是序列时包一层根元素，每一项写成 `<row>` ——
+     * 一份 XML 只能有一个根元素，不包就会写出两半都解析不了的并排元素。
+     */
+    fun yamlToXml(item: WorkItem, operation: Operation.YamlToXml): EngineOutput {
+        val (tree, notes) = parseYaml(item)
+        val stem = OutputNaming.stem(item.name)
+        val root = operation.root.trim().ifBlank { stem }
+        val (rootName, childName) = Xml.namesFor(tree, root, "row")
+        val xml = try {
+            Xml.render(tree, root = root, item = "row", indent = operation.indent)
+        } catch (bad: IllegalArgumentException) {
+            throw IllegalArgumentException(bad.message ?: "这份 YAML 的键名不能当 XML 标签用")
+        }
+        val shape = if (childName == null) "根元素 $rootName" else "根元素 $rootName · 每一项写成 <$childName>"
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "", "xml"),
+            writeText(item, xml, "xml"),
+            (listOf(shape, "${countElements(tree)} 个节点") + notes).joinToString(" · "),
+        )
+    }
+
+    /**
+     * CSV → XML：一行一个 `<row>`，列名当子元素名。
+     *
+     * [Operation.CsvToXml.header] 关着时用 `列1`、`列2`… —— XML 里每个值都得有个元素名，
+     * 这是给没名字的东西起名字，不是把用户写过的名字改掉。列名不能当标签名时直说，不悄悄改名。
+     */
+    fun csvToXml(item: WorkItem, operation: Operation.CsvToXml): EngineOutput {
+        val decoded = TextCodecs.decodeForConversion(read(item), null)
+        val doc = Csv.parse(decoded.text, Csv.detect(decoded.text))
+        require(!doc.isEmpty) { "这份 CSV 里一行内容都没有" }
+        val rows = if (operation.header) {
+            TableBridge.toRowsJson(doc, true, false)
+        } else {
+            com.fileforge.core.json.JsonArray(
+                doc.records.map { row ->
+                    val members = LinkedHashMap<String, com.fileforge.core.json.Json>()
+                    row.forEachIndexed { index, cell ->
+                        members["列${index + 1}"] = com.fileforge.core.json.JsonString(cell)
+                    }
+                    com.fileforge.core.json.JsonObject(members)
+                },
+            )
+        }
+        val root = operation.root.trim().ifBlank { OutputNaming.stem(item.name) }
+        val xml = try {
+            Xml.render(rows, root = root, item = "row", indent = 2)
+        } catch (bad: IllegalArgumentException) {
+            throw IllegalArgumentException(bad.message ?: "列名不能当 XML 标签用：把首行当列名那条关掉，改用 列1、列2…")
+        }
+        val shape = if (operation.header) {
+            "第一行当列名 · ${doc.records.size - 1} 行数据 × ${doc.widest} 列"
+        } else {
+            "没有列名：列名写成 列1…列${doc.widest}"
+        }
+        val notes = ArrayList(listOf(shape, "根元素 $root · 一行一个 <row>", "格子一律当字符串（007 与 1.50 的写法不会被动）"))
+        if (doc.ragged.isNotEmpty()) notes += "第 ${doc.ragged.joinToString("、")} 行的列数跟别处不一样"
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "", "xml"),
+            writeText(item, xml, "xml"),
+            notes.joinToString(" · "),
+        )
+    }
+
+    /** 读 + 判"像不像 YAML" + 解析；判法与转 JSON / 转 CSV / 转 XML 共用 [parseYamlTree]。 */
+    private fun parseYaml(item: WorkItem): Pair<com.fileforge.core.json.Json, List<String>> =
+        parseYamlTree(item, read(item))
 
     /** XML → JSON。约定（子元素成数组、`@` 属性、`#text`）在 `:core` 的 Xml 头部写着。 */
     fun xmlToJson(item: WorkItem, operation: Operation.XmlToJson): EngineOutput {

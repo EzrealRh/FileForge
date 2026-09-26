@@ -540,6 +540,35 @@ sealed interface Operation {
     data object EpubToDocx : Operation {
         override val label get() = "写成 Word 文档"
     }
+
+    /**
+     * XML → YAML：树与「XML 转 JSON」同一棵，写出规矩与「JSON 转 YAML」同一条。
+     *
+     * XML 里没有类型，所以值一律是文字 —— `1.50` 写出去还是 `1.50`，不会被读成 1.5。
+     */
+    data class XmlToYaml(val indent: Int = 2) : Operation {
+        override val label get() = "转为 YAML"
+    }
+
+    /** YAML → XML。[root] 空着用文件名；顶层是序列时包一层根元素，每项写成 `<item>`。 */
+    data class YamlToXml(val root: String = "", val indent: Int = 2) : Operation {
+        override val label get() = if (root.isBlank()) "转为 XML" else "转为 XML（根元素 $root）"
+    }
+
+    /**
+     * CSV → XML：一行一个元素，列名当子元素名。
+     *
+     * [header] 关着时列名用 `列1`、`列2`… —— XML 里每个值都得有个元素名，
+     * 那是给没名字的东西起名字，不是把用户写过的名字改掉。
+     */
+    data class CsvToXml(val root: String = "", val header: Boolean = true) : Operation {
+        override val label get() = if (header) "转为 XML（首行当列名）" else "转为 XML（列名写成 列1、列2…）"
+    }
+
+    /** YAML → xlsx：摊表用的是「YAML 转 CSV」同一套判据，两条路出来的表一致。 */
+    data object YamlToXlsx : Operation {
+        override val label get() = "转为 Excel"
+    }
 }
 
 enum class PdfPaper(val label: String) { A4("A4"), A5("A5"), Letter("Letter"), FitImage("按图片尺寸") }

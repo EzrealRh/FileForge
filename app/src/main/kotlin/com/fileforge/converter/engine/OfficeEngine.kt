@@ -139,6 +139,20 @@ class OfficeEngine(private val workspace: Workspace) {
     }
 
     /**
+     * YAML 写成一份 xlsx：摊表用的是「YAML 转 CSV」同一套判据（都在 [TableBridge]），
+     * 两条路出来的表行列一致，只是一份是 CSV、一份是能直接打开的工作簿。
+     */
+    fun yamlToXlsx(item: WorkItem): EngineOutput {
+        val (tree, notes) = parseYamlTree(item, read(item))
+        TableBridge.reasonWhyNotTable(tree)?.let { throw IllegalArgumentException("转不成表：$it") }
+        val table = TableBridge.toTable(tree) ?: throw IllegalArgumentException("转不成表：这份 YAML 的形状没认出来")
+        val lines = ArrayList(notes)
+        lines += TableBridge.flatteningNotes(tree)
+        lines += "第一行是列名"
+        return workbook(item, listOf(SheetToWrite(OutputNaming.stem(item.name), table.records)), lines)
+    }
+
+    /**
      * 文本 / Markdown / 网页 / Word 演示正文写成一份 docx。
      *
      * 认哪条路、怎么排版全在 `:core`（那边能脱机单测，也拿 pandoc 逐块对过）；

@@ -239,6 +239,18 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
             is Operation.TextToEpub -> items.forEach { item ->
                 collect(item.name) { listOf(book.fromText(item, operation)) }
             }
+            is Operation.XmlToYaml -> items.forEach { item ->
+                collect(item.name) { listOf(text.xmlToYaml(item, operation)) }
+            }
+            is Operation.YamlToXml -> items.forEach { item ->
+                collect(item.name) { listOf(text.yamlToXml(item, operation)) }
+            }
+            is Operation.CsvToXml -> items.forEach { item ->
+                collect(item.name) { listOf(text.csvToXml(item, operation)) }
+            }
+            is Operation.YamlToXlsx -> items.forEach { item ->
+                collect(item.name) { listOf(office.yamlToXlsx(item)) }
+            }
         }
 
         coroutineContext.ensureActive()

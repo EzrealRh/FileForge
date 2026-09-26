@@ -121,20 +121,53 @@ object Xml {
             name.all { it.isLetterOrDigit() || it in "._-:" }
 
     /**
-     * JSON → XML。
+     * 渲染会用的两个名字：根元素名，以及顶层数组那层子元素名（顶层不是数组时 null）。
      *
-     * 对象只有一个键时那个键当根元素；否则用传进来的 [root] 包一层。数组里每个元素都渲染成
-     * 一个同名子元素（名字取自键；数组套数组时用 `item`）。
+     * 单独拿出来是因为产物说明也要说同一件事 —— 两边各判一次，早晚一个说 `<书>` 一个说 `<item>`。
+     *
+     * 只有一个键、键的值是数组时按数组长度分两种：
+     *  - 0 或 1 个：那个键就是根元素（`<书>…</书>`、空的是 `<书/>`）。读的那一侧把一个根元素收成
+     *    "键 → 只有一个元素的数组"，所以这条是 `render(parse(x)) == x` 成立的前提 —— 不这么分，
+     *    自己写的 XML 读回来再写一遍会多套一层同名元素。
+     *  - 2 个以上：一个文档只能有一个根元素，所以外面包一层 [root]，每项写成以那个键命名的子元素。
+     * 顶层直接是数组（没有键可用）时同理包一层，子元素叫 [item]。
      */
-    fun render(value: Json, root: String = "root", indent: Int = 2): String {
-        val builder = StringBuilder()
-        val (rootName, rootValue) = when {
-            value is JsonObject && value.members.size == 1 -> value.members.keys.first() to value.members.values.first()
-            else -> root to value
+    fun namesFor(value: Json, root: String = "root", item: String = "item"): Pair<String, String?> {
+        val only = (value as? JsonObject)?.members?.takeIf { it.size == 1 }
+        if (only != null) {
+            val key = only.keys.first()
+            val list = only.values.first()
+            if (list !is JsonArray || list.arrayValue.size <= 1) return key to null
+            return root to key
         }
+        return root to if (value is JsonArray) item else null
+    }
+
+    /**
+     * JSON / 那棵共用的树 → XML。
+     *
+     * **一份 XML 文档只能有一个根元素**，所以顶层是数组且有两项以上时必须包一层：根元素用 [root]
+     * 这个名字，每一项写成 [item] 或那个键命名的子元素。以前这里不包 —— 两项以上就写出两个并排的
+     * 根元素，那种文件任何解析器都只认前半截（ElementTree 报 "junk after document element"）。
+     *
+     * 对象只有一个键时那个键当根元素（键的值是"最多一个元素"的数组也算 —— 见 [namesFor]）。
+     * 嵌套层的数组仍写成同名重复元素 —— 读的那一侧把重复元素收成数组，两边是同一条约定。
+     */
+    fun render(value: Json, root: String = "root", item: String = "item", indent: Int = 2): String {
+        val (rootName, childName) = namesFor(value, root, item)
+        // 只有"一个键的对象"才拆掉那一层；多个键的对象必须整个当根元素的内容 ——
+        // 早先这里写成 members.values.firstOrNull()，多键的 YAML 转过来只剩第一个键，别的键静悄悄没了
+        val only = (value as? JsonObject)?.members?.takeIf { it.size == 1 }
+        val rootValue = if (only != null) only.values.first() else value
         require(isElementName(rootName)) { "根元素名「$rootName」不能当 XML 标签用：换个字母开头、不含空格与尖括号的名字" }
+        if (childName != null) {
+            require(isElementName(childName)) { "子元素名「$childName」不能当 XML 标签用：换个字母开头、不含空格与尖括号的名字" }
+        }
+        // 顶层数组要有人包着；包法用现成的"对象的一个键指向数组"那条渲染路，行为与嵌套层一致
+        val body = if (childName == null) rootValue else JsonObject(linkedMapOf(childName to rootValue))
+        val builder = StringBuilder()
         builder.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
-        writeElement(builder, rootName, rootValue, 0, if (indent > 0) indent else 0)
+        writeElement(builder, rootName, body, 0, if (indent > 0) indent else 0)
         return builder.toString()
     }
 

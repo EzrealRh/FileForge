@@ -64,6 +64,10 @@ enum class OperationKind(val label: String, val hint: String) {
     JsonToXml("JSON 转 XML", "键当标签名，数组写成重复元素"),
     XmlToCsv("XML 转 CSV", "取重复出现的那个元素当行，属性与子元素各成一列"),
     XmlToXlsx("XML 转 Excel", "同一张表，落成能直接打开的 .xlsx"),
+    XmlToYaml("XML 转 YAML", "与 XML 转 JSON 同一棵树，值一律是文字"),
+    YamlToXml("YAML 转 XML", "键当标签名，序列写成重复元素；顶层是序列时包一层根元素"),
+    CsvToXml("CSV 转 XML", "一行一个元素，列名当子元素名"),
+    YamlToXlsx("YAML 转 Excel", "摊表用的是 YAML 转 CSV 同一套判据"),
     ;
 
     companion object {
@@ -112,12 +116,12 @@ enum class OperationKind(val label: String, val hint: String) {
             // 纯文本里没有任何记号时"转 HTML"没意义，引擎会拒而不是硬出一页。
             // .html 也算这一族：很多人把网页存成 .txt，反向那两条（抽文字 / 转 MD）本来就要给它
             FormatJson, JsonToCsv, CsvToJson, XmlToJson, JsonToXml, XmlToCsv, XmlToXlsx, MdToHtml, MdToText,
-            YamlToJson, JsonToYaml, YamlToCsv, CsvToYaml -> fileKind.isTextual
+            YamlToJson, JsonToYaml, YamlToCsv, CsvToYaml, XmlToYaml, YamlToXml, CsvToXml -> fileKind.isTextual
             // 网页那两条反过来也宽松：类型说 Text 但内容满是标签的文件照样能抽，
             // 真没有 HTML 标记时引擎会直说"这不是网页"，不硬出一份少了尖括号的文件
             HtmlToText, HtmlToMarkdown -> fileKind.isTextual
             // 反向那两条同理：是不是真表格交给引擎判（空文件、列数不齐都会直说），不在类型层猜
-            CsvToXlsx, JsonToXlsx, HtmlToCsv -> fileKind.isTextual
+            CsvToXlsx, JsonToXlsx, HtmlToCsv, YamlToXlsx -> fileKind.isTextual
             // EPUB 是容器：只看它自己，别在混选时给半可用按钮
             EpubToText, EpubToMarkdown, EpubToDocx -> fileKind == FileKind.Epub
         }

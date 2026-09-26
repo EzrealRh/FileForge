@@ -1,7 +1,10 @@
 package com.fileforge.converter.engine
 
+import com.fileforge.core.data.Yaml
+import com.fileforge.core.data.YamlException
 import com.fileforge.core.doc.Doc
 import com.fileforge.core.doc.TextDoc
+import com.fileforge.core.json.Json
 import com.fileforge.core.model.FileKind
 import com.fileforge.core.text.TextCodecs
 import com.fileforge.converter.data.WorkItem
@@ -38,4 +41,27 @@ internal object SourceText {
         val reading = TextDoc.read(source)
         return Reading(reading.doc, source, listOf(reading.route.note) + notes)
     }
+}
+
+/**
+ * 读一份 YAML：判"像不像 YAML" → 解析成那棵共用的树，顺手记下"按什么编码读的""几份文档"。
+ *
+ * 转 JSON / 转 CSV / 转 XML / 转 Excel 四条路都从这里拿同一棵树 —— 各读各的话，
+ * 同一份 YAML 会出现"这条路转得动、那条路说不是 YAML"的分歧。
+ */
+internal fun parseYamlTree(item: WorkItem, bytes: ByteArray): Pair<Json, List<String>> {
+    val decoded = TextCodecs.decodeForConversion(bytes, null)
+    require(Yaml.looksLikeYaml(decoded.text)) {
+        "这份文件里没找到 YAML 的样子（既没有「键: 值」也没有「- 项」）。它本来就是普通文本。"
+    }
+    val tree = try {
+        Yaml.parse(decoded.text)
+    } catch (bad: YamlException) {
+        throw IllegalArgumentException(bad.message)
+    }
+    val notes = ArrayList<String>()
+    val docs = Yaml.documentCount(decoded.text)
+    if (docs > 1) notes += "文件里有 $docs 份文档（用 --- 分隔），只转了第一份"
+    notes += "按 ${decoded.encoding.label} 读" + if (decoded.hadBom) "（源带 BOM）" else ""
+    return tree to notes
 }

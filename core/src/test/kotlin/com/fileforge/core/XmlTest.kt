@@ -172,8 +172,32 @@ class XmlTest {
         // XML 的 Name 规则允许 Unicode 字母，中文用户的文件里真会有中文标签
         val xml = Xml.render(obj("清单" to arr(obj("名称" to arr(str("甲"))))), indent = 0)
         assertTrue("<清单><名称>甲</名称></清单>" in xml, xml)
-        // 只有子元素套数组，根元素自己不套 —— 与 Python 参照值同一条约定
+        // 顶层只有一个键、键下只有一项：那个键就是根元素（读回来才对得上自己写的 XML）
         assertEquals("甲", Xml.parse(xml).field("清单")!!.field("名称")!!.arrayValue.first().stringValue)
+    }
+
+    @Test
+    fun `顶层数组只出一个根元素，两项以上也不散架`() {
+        val xml = Xml.render(arr(obj("名称" to str("甲")), obj("名称" to str("乙"))), root = "书目", indent = 0)
+        assertEquals("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<书目><item><名称>甲</名称></item><item><名称>乙</名称></item></书目>", xml.trim(), xml)
+        // 真正的判据：XML 解析器只认一个根，两个并排的根等于后半截文件不存在
+        val document = javax.xml.parsers.DocumentBuilderFactory.newInstance().newDocumentBuilder()
+            .parse(java.io.ByteArrayInputStream(xml.toByteArray(Charsets.UTF_8)))
+        assertEquals("书目", document.documentElement.tagName)
+        assertEquals(2, document.documentElement.childNodes.length)
+        // 读回来是"根 → item → 数组"这一层，谁都不会把它当成两份文件
+        val back = Xml.parse(xml)
+        assertEquals(listOf("甲", "乙"), back.field("书目")!!.field("item")!!.arrayValue.map { it.field("名称")!!.arrayValue.first().stringValue })
+    }
+
+    @Test
+    fun `顶层数组的子元素名可以指定，空数组也不许把键名弄丢`() {
+        val named = Xml.render(arr(str("甲"), str("乙")), root = "名单", item = "行", indent = 0)
+        assertEquals("<名单><行>甲</行><行>乙</行></名单>", named.substringAfter("?>").trim(), named)
+        val single = Xml.render(obj("书" to arr(str("甲"), str("乙"))), root = "root", indent = 0)
+        assertTrue("<root><书>甲</书><书>乙</书></root>" == single.substringAfter("?>").trim(), single)
+        val empty = Xml.render(obj("list" to com.fileforge.core.json.JsonArray(emptyList())), root = "包", indent = 0)
+        assertTrue("<list/>" in empty, "空数组要把键名留着：$empty")
     }
 
     @Test

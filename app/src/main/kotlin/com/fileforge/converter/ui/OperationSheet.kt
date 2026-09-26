@@ -680,6 +680,49 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
                 Summary("第一行是列名；格子类型只按字面判，能一字不差读回来的写法才算数字。")
                 Summary("带 DTD 或实体定义的 XML 一律不解析。")
             }
+            OperationKind.XmlToYaml -> {
+                Segmented("缩进宽度", listOf("1", "2", "4", "8"), listOf(1, 2, 4, 8).indexOf(jsonIndent.roundToInt())) {
+                    jsonIndent = listOf(1f, 2f, 4f, 8f)[it]
+                }
+                Summary("与「XML 转 JSON」用的是同一棵树：子元素成列表、属性前面带 @、元素自己的文字进 #text。")
+                Summary("值一律是文字 —— XML 里没有类型，1.50 与 007 不会被改成 1.5 与 7。")
+                Summary("注释、处理指令会丢掉；带 DTD 或实体定义的一律不解析 —— 实体能让转换工具去访问别人写的地址。")
+            }
+            OperationKind.YamlToXml -> {
+                OutlinedTextField(
+                    value = xmlRoot,
+                    onValueChange = { xmlRoot = it },
+                    label = { Text("根元素名（留空用文件名）") },
+                    singleLine = true,
+                    supportingText = { Text("留空就是 ${OutputNaming.stem(items.first().name)}。顶层只有一个键且那个键不是列表时，那个键直接当根元素。") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Segmented("缩进宽度", listOf("1", "2", "4", "8"), listOf(1, 2, 4, 8).indexOf(jsonIndent.roundToInt())) {
+                    jsonIndent = listOf(1f, 2f, 4f, 8f)[it]
+                }
+                Summary("键当标签名，列表写成一组同名元素；带 @ 前缀的键写成属性，#text 写成元素自己的文字。")
+                Summary("一份 XML 只能有一个根元素：顶层是列表时包一层根元素，每一项写成 <row>。")
+                Summary("键名不能当 XML 标签的会直接报错让你改名，不会悄悄换成别的。")
+            }
+            OperationKind.CsvToXml -> {
+                Segmented("首行", listOf("当普通数据行", "当列名"), if (csvHeader) 1 else 0) { csvHeader = it == 1 }
+                OutlinedTextField(
+                    value = xmlRoot,
+                    onValueChange = { xmlRoot = it },
+                    label = { Text("根元素名（留空用文件名）") },
+                    singleLine = true,
+                    supportingText = { Text("留空就是 ${OutputNaming.stem(items.first().name)}。") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Summary("一行一个 <row>，列名当子元素名；没有列名时列名写成 列1、列2…（XML 里每个值都得有个元素名）。")
+                Summary("格子一律当字符串：007 与 1.50 的写法不会被动，与「CSV 转 XML / JSON / YAML」几条路同一套。")
+                Summary("列名不能当 XML 标签名（带空格、以数字开头之类）会直说，不会悄悄改名。")
+            }
+            OperationKind.YamlToXlsx -> {
+                Summary("摊表用的是「YAML 转 CSV」同一套判据：要的是对象数组，第一行是列名，两条路的行列一致。")
+                Summary("格子类型只按字面判：能一字不差读回来的写法才算数字，1.50 与 007 保持文字。")
+                Summary("嵌套的对象与数组压成一格文本并点名是哪一列。")
+            }
             OperationKind.JsonToXml -> {
                 OutlinedTextField(
                     value = xmlRoot,
@@ -854,6 +897,10 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
             OperationKind.YamlToCsv -> Operation.YamlToCsv(csvDelimiter, csvEnding, csvQuoteAll)
             OperationKind.CsvToYaml -> Operation.CsvToYaml(csvHeader, jsonIndent.roundToInt())
             OperationKind.JsonToXml -> Operation.JsonToXml(xmlRoot.trim(), jsonIndent.roundToInt())
+            OperationKind.XmlToYaml -> Operation.XmlToYaml(jsonIndent.roundToInt())
+            OperationKind.YamlToXml -> Operation.YamlToXml(xmlRoot.trim(), jsonIndent.roundToInt())
+            OperationKind.CsvToXml -> Operation.CsvToXml(xmlRoot.trim(), csvHeader)
+            OperationKind.YamlToXlsx -> Operation.YamlToXlsx
             OperationKind.TextToPdf -> Operation.TextToPdf(
                 textSize.roundToInt(), paper, textMargin.roundToInt(), textLeading, textIndent, textNumber,
             )
