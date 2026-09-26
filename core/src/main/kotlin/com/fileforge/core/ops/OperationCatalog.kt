@@ -58,6 +58,8 @@ enum class OperationKind(val label: String, val hint: String) {
     EpubToText("EPUB 提取全书文字", "按 spine 的章节顺序接起来，输出 txt"),
     EpubToMarkdown("EPUB 转 Markdown", "标题、列表、表格写成标记"),
     EpubToDocx("EPUB 写成 Word", "结构与记号走 Word 的样式，可继续编辑"),
+    DocxToMarkdown("Word 转 Markdown", "层级、列表、表格与链接按文件里写的读出来，不靠猜"),
+    DocxToHtml("Word 转网页", "同一棵读回来的树，落成浏览器直接打开的 HTML"),
     ImageToIco("做成图标 ICO", "一次出 16/32/48/256 多个尺寸"),
     IcoToImages("图标拆成图片", "把 .ico 里的每个画面导成 PNG"),
     XmlToJson("XML 转 JSON", "属性加 @、子元素成数组；带 DTD 的不解析"),
@@ -102,6 +104,8 @@ enum class OperationKind(val label: String, val hint: String) {
             TextToPdf, TextToDocx, TextToEpub ->
                 fileKind.isTextual || fileKind == FileKind.Docx || fileKind == FileKind.Pptx
             OfficeToText -> fileKind == FileKind.Docx || fileKind == FileKind.Pptx
+            // 只有 docx 有这一套结构可读：演示文稿的版式是另一套规矩，没做透就不给入口
+            DocxToMarkdown, DocxToHtml -> fileKind == FileKind.Docx
             XlsxToCsv -> fileKind == FileKind.Xlsx
             // 只有真带画面的类型才给"提取音频"，否则用户会对一个纯音频文件点它
             ExtractAudio -> fileKind.isVideo

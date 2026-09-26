@@ -3,6 +3,8 @@ package com.fileforge.converter.engine
 import com.fileforge.core.archive.ZipReader
 import com.fileforge.converter.data.FileSlices
 import com.fileforge.core.model.FileKind
+import com.fileforge.core.office.DocxBody
+import com.fileforge.core.office.DocxRead
 import com.fileforge.core.office.Extracted
 import com.fileforge.core.office.OfficeText
 import com.fileforge.core.office.OoxmlParts
@@ -32,6 +34,14 @@ class OoxmlFile(val file: File) : Closeable {
         }
         return ZipReader.dataOf(entry, slices)
     }
+
+    /**
+     * docx 的**结构**（标题层级、列表、表格、记号、真链接）读成文档树。
+     *
+     * 与抽文字那条不是一条路：那条只把字连起来，样式与编号这些信息它用不上；
+     * 转 Markdown / 转网页要靠这些才能把稿子的层级搬过去。
+     */
+    fun docxStructure(): DocxBody = DocxRead.read { name -> bytesOf(name) }
 
     /** 幻灯片部件，顺序照演示大纲；大纲认不出来时退回按文件名排，并在说明里写清楚。 */
     fun slideParts(): DeclaredSlides {

@@ -7,6 +7,8 @@ import com.fileforge.core.data.Delimiter
 import com.fileforge.core.data.TableBridge
 import com.fileforge.core.data.Xml
 import com.fileforge.core.data.XmlTable
+import com.fileforge.core.doc.Html
+import com.fileforge.core.doc.HtmlWrite
 import com.fileforge.core.doc.TextDoc
 import com.fileforge.core.text.LineEnding
 import com.fileforge.core.model.FileKind
@@ -166,6 +168,46 @@ class OfficeEngine(private val workspace: Workspace) {
             OutputNaming.tagged(item.name, "", "docx"),
             file,
             (listOf("${reading.doc.parts.size} 块内容") + reading.notes + reading.doc.notes + out.notes).joinToString(" · "),
+        )
+    }
+
+    /**
+     * Word（.docx）→ Markdown：结构从文件里**读**（见 `:core` 的 DocxRead），再走与网页同一条渲染。
+     *
+     * 与「Word 提取文字」不是一条路：那条只连字，标题层级、圆点还是编号、表格线都在读的时候丢了。
+     */
+    fun docxToMarkdown(item: WorkItem): EngineOutput {
+        val read = OoxmlFile(item.file).use { pack -> pack.docxStructure() }
+        require(read.doc.parts.isNotEmpty()) { (read.notes + "这份 docx 里没有可读的正文").joinToString(" · ") }
+        val rendered = Html.toMarkdown(HtmlWrite.body(read.doc.parts))
+        val body = rendered.text
+        require(body.isNotBlank()) { "这份 docx 里没有可搬的文字（图与文本框不算正文）" }
+        val notes = ArrayList(read.notes + rendered.notes)
+        notes.add(0, "${read.doc.parts.size} 块内容")
+        val file = workspace.newStagingFile("md").apply { writeText(body, Charsets.UTF_8) }
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "Markdown", "md"),
+            file,
+            notes.filter { it.isNotBlank() }.joinToString(" · "),
+        )
+    }
+
+    /** Word（.docx）→ 网页：同一棵读回来的树，落成浏览器直接打开的 HTML。 */
+    fun docxToHtml(item: WorkItem): EngineOutput {
+        val read = OoxmlFile(item.file).use { pack -> pack.docxStructure() }
+        require(read.doc.parts.isNotEmpty()) { (read.notes + "这份 docx 里没有可读的正文").joinToString(" · ") }
+        val page = HtmlWrite.page(
+            title = OutputNaming.stem(item.name),
+            parts = read.doc.parts,
+            language = com.fileforge.core.book.EpubWrite.languageOf(read.doc),
+        )
+        val notes = ArrayList(read.notes + page.notes)
+        notes.add(0, "${read.doc.parts.size} 块内容 · 带 charset 的完整页面")
+        val file = workspace.newStagingFile("html").apply { writeText(page.html, Charsets.UTF_8) }
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "网页", "html"),
+            file,
+            notes.filter { it.isNotBlank() }.joinToString(" · "),
         )
     }
 

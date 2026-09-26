@@ -674,6 +674,14 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
                 Summary("行与行列数不齐时按最宽的那行补齐，并在结果里说明是哪几行。")
                 Summary("表头那行写成 <th>，与「网页表格转 CSV」读的正是同一种表。")
             }
+            OperationKind.DocxToMarkdown, OperationKind.DocxToHtml -> {
+                Summary("结构是从文件里**读**出来的：标题层级看样式名（`Heading 1` 那套），列表看编号定义（圆点还是 1. 2. 3.、第几层），表格看表格线，链接是能点开的真链接。")
+                Summary("所以不需要按字号猜：稿子里写着这是二级标题，转出去就是二级。")
+                Summary("图片、文本框、页眉页脚与脚注搬不过来；修订里删掉的字按已删除处理 —— 有几处都在结果里说明。")
+                Summary("下划线与等宽这类记号：转网页保留（`<u>`），转 Markdown 没有对应写法，会丢。")
+                Summary("段内跳转（跳到某个书签）在网页与 Markdown 里没有落点，只留文字。")
+                items.forEach { Summary("${it.name} · ${it.sizeLabel}") }
+            }
             OperationKind.EpubToText, OperationKind.EpubToMarkdown, OperationKind.EpubToDocx -> {
                 Summary("章节顺序按包里的 spine 走（`.epub` 里的文件名顺序常常不是阅读顺序）。")
                 Summary("章名优先取目录（NCX）里的名字，其次文档自己的 title，再不行用文件名。")
@@ -932,6 +940,8 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
             OperationKind.CsvToXml -> Operation.CsvToXml(xmlRoot.trim(), csvHeader)
             OperationKind.YamlToXlsx -> Operation.YamlToXlsx
             OperationKind.CsvToHtml -> Operation.CsvToHtml(htmlTitle.trim(), csvHeader)
+            OperationKind.DocxToMarkdown -> Operation.DocxToMarkdown
+            OperationKind.DocxToHtml -> Operation.DocxToHtml
             OperationKind.PdfToHtml -> Operation.PdfToHtml(pageSpec.trim(), htmlTitle.trim())
             OperationKind.TextToPdf -> Operation.TextToPdf(
                 textSize.roundToInt(), paper, textMargin.roundToInt(), textLeading, textIndent, textNumber,

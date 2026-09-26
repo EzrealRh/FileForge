@@ -583,6 +583,19 @@ sealed interface Operation {
     data class PdfToHtml(val spec: String = "", val title: String = "") : Operation {
         override val label get() = "转为网页" + if (spec.isNotBlank()) "（$spec）" else ""
     }
+
+    /**
+     * Word（.docx）→ Markdown：标题层级、列表（圆点还是编号、第几层）、表格与真链接
+     * 从文件里**读出来**的，不是从文字里猜的 —— 稿子里写着这是二级标题，就不用按字号猜。
+     */
+    data object DocxToMarkdown : Operation {
+        override val label get() = "转为 Markdown"
+    }
+
+    /** Word（.docx）→ 网页：与转 Markdown 同一棵读回来的树，落成浏览器直接打开的 HTML。 */
+    data object DocxToHtml : Operation {
+        override val label get() = "转为网页"
+    }
 }
 
 enum class PdfPaper(val label: String) { A4("A4"), A5("A5"), Letter("Letter"), FitImage("按图片尺寸") }

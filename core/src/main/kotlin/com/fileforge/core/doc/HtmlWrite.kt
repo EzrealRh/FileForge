@@ -171,6 +171,7 @@ object HtmlWrite {
                 if (run.bold) piece = "<strong>$piece</strong>"
                 if (run.italic) piece = "<em>$piece</em>"
                 if (run.strike) piece = "<del>$piece</del>"
+                if (run.underline) piece = "<u>$piece</u>"
                 val target = run.link
                 if (!target.isNullOrBlank()) piece = "<a href=\"${escape(target, true)}\">$piece</a>"
                 out.append(breaks(piece))

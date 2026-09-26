@@ -251,6 +251,12 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
             is Operation.YamlToXlsx -> items.forEach { item ->
                 collect(item.name) { listOf(office.yamlToXlsx(item)) }
             }
+            is Operation.DocxToMarkdown -> items.forEach { item ->
+                collect(item.name) { listOf(office.docxToMarkdown(item)) }
+            }
+            is Operation.DocxToHtml -> items.forEach { item ->
+                collect(item.name) { listOf(office.docxToHtml(item)) }
+            }
             is Operation.CsvToHtml -> items.forEach { item ->
                 collect(item.name) { listOf(text.csvToHtml(item, operation)) }
             }
