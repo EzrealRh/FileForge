@@ -58,12 +58,19 @@ def unwrap(node):
 
 
 def heading_levels(ast) -> list:
+    """(层级, 标题文字)。pandoc 3.x 的 Header 是 [层级整数, 属性, 内容]。
+
+    早先按"属性里的 LevelN"取，取不到就每一行都是空串 —— 于是"层级一致"这条
+    实际只判了"标题条数与文字一致"，层级从 2 掉到 1 它不红（本次自查发现）。
+    """
     out = []
     for block in ast["blocks"]:
-        if block.get("t") == "Header":
-            content = unwrap(block)
-            level = next((re.sub("\\D", "", item) for item in unwrap(content[1]) if str(item).startswith("Level")), "")
-            out.append((level, norm(inline_text(content[2]))))
+        if block.get("t") != "Header":
+            continue
+        content = unwrap(block)
+        level = content[0] if isinstance(content, list) and content and isinstance(content[0], int) else "?"
+        inlines = content[2] if isinstance(content, list) and len(content) > 2 else []
+        out.append(("Level%s" % level, norm(inline_text(inlines))))
     return out
 
 
@@ -106,15 +113,20 @@ def tables(ast) -> list:
 
 
 def links(ast) -> list:
-    """Link 的 JSON 是 [Attr, [Inline]]：地址在第二项的第一个位置（不是第二个！）。"""
+    """链接地址集合。
+
+    pandoc 3.x 的 Link 是 [Attr, [内容], [地址, 标题]] —— 地址在**第三项**。
+    早先按"第二项"取，取到的是内容那串 inline，判据退化成"两边都没有链接"，
+    等于这一条从来没判过（改坏链接时它不红）。
+    """
     out = []
 
     def walk(node):
         if isinstance(node, dict):
             if node.get("t") == "Link":
-                content = unwrap(node)
-                if isinstance(content, list) and len(content) > 1 and isinstance(content[1], list) and content[1]:
-                    target = content[1][0]
+                content = node.get("c")
+                if isinstance(content, list) and len(content) > 2 and isinstance(content[2], list) and content[2]:
+                    target = content[2][0]
                     out.append(target if isinstance(target, str) else "")
             walk(node.get("c"))
         elif isinstance(node, list):

@@ -204,6 +204,29 @@ class FileKindSniffTest {
     }
 
     @Test
+    fun `ODT 只拿它那四条与三条共用的路`() {
+        val odt = OperationKind.applicable(setOf(FileKind.Odt))
+        assertTrue(
+            setOf(
+                OperationKind.OdtToText, OperationKind.OdtToMarkdown,
+                OperationKind.OdtToHtml, OperationKind.OdtToDocx,
+                OperationKind.TextToPdf, OperationKind.TextToDocx, OperationKind.TextToEpub,
+            ).all { it in odt },
+            "ODT 该有这四条与三条共用的路：$odt",
+        )
+        assertTrue(OperationKind.DocxToMarkdown !in odt, "Word 那两条结构读法不给 ODT：$odt")
+        assertTrue(OperationKind.OfficeToText !in odt, "「Word 演示提取文字」是 OOXML 那条抽字路，不给 ODT：$odt")
+        assertTrue(OperationKind.XlsxToCsv !in odt && OperationKind.ImageToIco !in odt, "文档不该拿到表格/图片操作：$odt")
+        // ODT 与 txt 混着选：只剩结构无关的那几条共同路
+        val mixed = OperationKind.applicable(setOf(FileKind.Odt, FileKind.Text)).toSet()
+        assertEquals(
+            setOf(OperationKind.TextToPdf, OperationKind.TextToDocx, OperationKind.TextToEpub,
+                OperationKind.PackZip, OperationKind.PackTar),
+            mixed,
+        )
+    }
+
+    @Test
     fun `网页认标记，且与普通文本共用同一族操作`() {
         assertEquals(FileKind.Html, FileTypeSniffer.sniff("<!DOCTYPE html>\n<html>\n<head><title>甲</title>".toByteArray()))
         assertEquals(FileKind.Html, FileTypeSniffer.sniff("   \n\r<html lang=\"zh\"><body>甲</body></html>".toByteArray()))

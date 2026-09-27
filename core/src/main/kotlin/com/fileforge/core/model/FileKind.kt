@@ -6,7 +6,7 @@ import com.fileforge.core.doc.Html
 enum class FileKind {
     Pdf, Png, Jpeg, Gif, WebP, Bmp, Heic, Avif, Mp4, WebM, Mkv, QuickTime,
     Mp3, Aac, M4a, Flac, Ogg, Wav,
-    Zip, Ico, Docx, Xlsx, Pptx, Epub, Tar, Gzip, Text, Html, Unknown;
+    Zip, Ico, Docx, Xlsx, Pptx, Odt, Epub, Tar, Gzip, Text, Html, Unknown;
 
     val isImage: Boolean get() = this in IMAGE_KINDS
     val isVideo: Boolean get() = this in VIDEO_KINDS
@@ -43,6 +43,7 @@ enum class FileKind {
         Docx -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         Xlsx -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         Epub -> "application/epub+zip"
+        Odt -> "application/vnd.oasis.opendocument.text"
         Tar -> "application/x-tar"
         Gzip -> "application/gzip"
         Pptx -> "application/vnd.openxmlformats-officedocument.presentationml.presentation"
@@ -79,6 +80,7 @@ enum class FileKind {
         Docx -> "DOCX"
         Xlsx -> "XLSX"
         Epub -> "EPUB"
+        Odt -> "ODT"
         Tar -> "TAR"
         Gzip -> "GZ"
         Pptx -> "PPTX"

@@ -72,6 +72,10 @@ enum class OperationKind(val label: String, val hint: String) {
     YamlToXlsx("YAML 转 Excel", "摊表用的是 YAML 转 CSV 同一套判据"),
     CsvToHtml("CSV 转网页表格", "一份带 charset 的完整页面，浏览器直接打开"),
     PdfToHtml("PDF 转网页", "结构与转 Word 同源，落成 HTML"),
+    OdtToText("ODT 提取文字", "按 OpenDocument 的结构抽正文，丢了什么逐条写明"),
+    OdtToMarkdown("ODT 转 Markdown", "层级、列表、表格与链接按文件里写的读出来，不靠猜"),
+    OdtToHtml("ODT 转网页", "同一棵读回来的树，落成浏览器直接打开的 HTML"),
+    OdtToDocx("ODT 转 Word", "结构与记号走 Word 的样式，可继续编辑"),
     ;
 
     companion object {
@@ -99,13 +103,16 @@ enum class OperationKind(val label: String, val hint: String) {
             ConvertAudio -> fileKind.isAudio
             // 两种都只认"这是个文本文件"，具体是哪种字幕交给解析器判
             ConvertTextEncoding, ConvertSubtitle -> fileKind.isTextual
-            // 印成 PDF、写成 Word 与写成电子书走同一条来源判定：docx / pptx 先把正文抽出来，
+            // 印成 PDF、写成 Word 与写成电子书走同一条来源判定：docx / pptx / odt 先把正文抽出来，
             // 网页与 Markdown 按内容认，抽出来 / 认出来的是什么就是什么
             TextToPdf, TextToDocx, TextToEpub ->
-                fileKind.isTextual || fileKind == FileKind.Docx || fileKind == FileKind.Pptx
+                fileKind.isTextual || fileKind == FileKind.Docx || fileKind == FileKind.Pptx || fileKind == FileKind.Odt
             OfficeToText -> fileKind == FileKind.Docx || fileKind == FileKind.Pptx
             // 只有 docx 有这一套结构可读：演示文稿的版式是另一套规矩，没做透就不给入口
             DocxToMarkdown, DocxToHtml -> fileKind == FileKind.Docx
+            // ODT 的四条出路共用一次读取（见 `:core` 的 OdtRead）；抽文字也走这棵树，
+            // 因为 ODF 的段落边界本身就是结构信息，连字会把它抹平
+            OdtToText, OdtToMarkdown, OdtToHtml, OdtToDocx -> fileKind == FileKind.Odt
             XlsxToCsv -> fileKind == FileKind.Xlsx
             // 只有真带画面的类型才给"提取音频"，否则用户会对一个纯音频文件点它
             ExtractAudio -> fileKind.isVideo

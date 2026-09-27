@@ -23,6 +23,17 @@ internal object SourceText {
 
     fun of(item: WorkItem): Reading {
         val notes = ArrayList<String>()
+        if (item.kind == FileKind.Odt) {
+            // ODT 直接用读回来的树：段落边界与标题层级是文件里写着的，
+            // 抽平文字再猜版式会把"这是二级标题"猜没 —— 与 docx 那条不是一条路是有意的
+            val read = OoxmlFile(item.file).use { pack -> pack.odtStructure() }
+            require(read.doc.parts.isNotEmpty()) { (read.notes + "这份 ODT 里没有可读的正文").joinToString(" · ") }
+            return Reading(
+                read.doc,
+                com.fileforge.core.doc.HtmlWrite.text(read.doc.parts),
+                listOf("按文件里写的结构排") + read.notes,
+            )
+        }
         val source = when (item.kind) {
             FileKind.Docx, FileKind.Pptx -> {
                 val extracted = OfficeSource.text(item.file, item.kind)

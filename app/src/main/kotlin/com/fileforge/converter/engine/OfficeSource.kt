@@ -2,10 +2,13 @@ package com.fileforge.converter.engine
 
 import com.fileforge.core.archive.ZipReader
 import com.fileforge.converter.data.FileSlices
+import com.fileforge.core.doc.HtmlWrite
 import com.fileforge.core.model.FileKind
 import com.fileforge.core.office.DocxBody
 import com.fileforge.core.office.DocxRead
 import com.fileforge.core.office.Extracted
+import com.fileforge.core.office.OdtBody
+import com.fileforge.core.office.OdtRead
 import com.fileforge.core.office.OfficeText
 import com.fileforge.core.office.OoxmlParts
 import com.fileforge.core.office.OoxmlStructure
@@ -15,7 +18,10 @@ import java.io.Closeable
 import java.io.File
 
 /**
- * 一份打开的 OOXML 包：目录先读，正文按部件取。
+ * 一份打开的 office zip 包：目录先读，正文按部件名取。
+ *
+ * 名字里的 OOXML 是历史：ODF（.odt）也是"zip + 固定部件名"，取字节这一模一样，
+ * 于是并在这里只留一份区间读的写法（两种格式差的是**读哪个部件、怎么解**，那在 core 那边）。
  *
  * 只走区间读，不整包进堆 —— 带视频的 pptx 可以有几百 MB，而正文部件通常只有几百 KB。
  */
@@ -23,7 +29,9 @@ class OoxmlFile(val file: File) : Closeable {
     private val slices = FileSlices(file)
     private val archive = ZipReader.read(slices, file.length())
     val names: List<String> = archive.entries.map { it.name }
-    val kind: FileKind = OoxmlParts.kindOf(names)
+
+    /** ODF 那一族光看条目名分不出是文字还是表格，要把 `mimetype` 那条读出来才知道。 */
+    val kind: FileKind = OoxmlParts.kindOf(names) { name -> bytesOf(name) }
 
     /** 某个部件解压后的字节；没有这个部件就是 null。 */
     fun bytesOf(part: String): ByteArray? {
@@ -42,6 +50,14 @@ class OoxmlFile(val file: File) : Closeable {
      * 转 Markdown / 转网页要靠这些才能把稿子的层级搬过去。
      */
     fun docxStructure(): DocxBody = DocxRead.read { name -> bytesOf(name) }
+
+    /**
+     * odt 的**结构**读成文档树（见 `:core` 的 OdtRead）。
+     *
+     * ODF 的记号全在样式表里，正文只写样式名，所以这一条要连 styles.xml 一起取 ——
+     * 缺了也不报错，只是认不出母样式那一层的引号（读的时候会照字面搬文字并说明）。
+     */
+    fun odtStructure(): OdtBody = OdtRead.read { name -> bytesOf(name) }
 
     /** 幻灯片部件，顺序照演示大纲；大纲认不出来时退回按文件名排，并在说明里写清楚。 */
     fun slideParts(): DeclaredSlides {
@@ -75,9 +91,21 @@ object OfficeSource {
         when (kind) {
             FileKind.Docx -> docx(pack)
             FileKind.Pptx -> pptx(pack)
+            FileKind.Odt -> odt(pack)
             FileKind.Xlsx -> throw IllegalArgumentException("表格请走「表格转 CSV」，它不是连着读的正文")
-            else -> throw IllegalArgumentException("这份包里没找到 Word 或演示文稿的正文部件，它不是 docx 也不是 pptx")
+            else -> throw IllegalArgumentException("这份包里没找到 Word / 演示文稿 / ODT 的正文部件")
         }
+    }
+
+    /**
+     * odt 抽正文：走的是**结构**那棵树，不是连字。
+     *
+     * 段落边界在 ODF 里是写在文件里的（`text:p`），连字会把它抹平成一片换行；
+     * 走树还与转 Markdown / 网页 / Word 四条路同一份读，四条路只会差在怎么落笔。
+     */
+    private fun odt(pack: OoxmlFile): Extracted {
+        val read = pack.odtStructure()
+        return Extracted(HtmlWrite.text(read.doc.parts), read.notes)
     }
 
     private fun docx(pack: OoxmlFile): Extracted {

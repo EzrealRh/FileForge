@@ -596,6 +596,31 @@ sealed interface Operation {
     data object DocxToHtml : Operation {
         override val label get() = "转为网页"
     }
+
+    /**
+     * OpenDocument 文字（.odt）一族：同一次读取（`:core` 的 OdtRead）出四条出路。
+     *
+     * 层级、圆点还是编号、表头这些信息在文件里都写着，抽文字时也不该把它们抹平 ——
+     * 所以这四条都从同一棵树走，树与 docx 那棵同形（Word 与 Writer 的段落/列表/表格是一回事）。
+     */
+    data object OdtToText : Operation {
+        override val label get() = "提取文字"
+    }
+
+    /** ODT → Markdown。 */
+    data object OdtToMarkdown : Operation {
+        override val label get() = "转为 Markdown"
+    }
+
+    /** ODT → 网页。 */
+    data object OdtToHtml : Operation {
+        override val label get() = "转为网页"
+    }
+
+    /** ODT → Word： Writer 的段落样式名换成 Word 的那一套，记号照搬。 */
+    data object OdtToDocx : Operation {
+        override val label get() = "写成 Word 文档"
+    }
 }
 
 enum class PdfPaper(val label: String) { A4("A4"), A5("A5"), Letter("Letter"), FitImage("按图片尺寸") }

@@ -116,10 +116,18 @@ def inline_text(node) -> str:
             if isinstance(content, list) and len(content) > 1 and isinstance(content[1], str):
                 return content[1]
             return ""
+        if kind == "CodeBlock":
+            # 代码块的正文在 pandoc 3.x 里是一个裸字符串（[Attr, "字"]）：
+            # 不接住它，"文字一字不差"那条就不判代码块了，而代码块正是最容易整块丢的地方
+            if isinstance(content, list) and len(content) > 1 and isinstance(content[1], str):
+                return content[1]
+            return inline_text(content)
         if kind == "Code":
-            # Code 是 [Attr, [Inline]]：属性里没有正文，取第二个
+            # pandoc 3.x 把 Code 写成 [Attr, "字"]，更早的写法是 [Attr, [Inline]]：
+            # 只按后一种取的话，代码里的字会被当成没有内容，"文字一字不差"那条就悄悄不判代码了
             if isinstance(content, list) and len(content) > 1:
-                return inline_text(content[1])
+                inner = content[1]
+                return inner if isinstance(inner, str) else inline_text(inner)
             return inline_text(content)
         return inline_text(content)
     if isinstance(node, list):

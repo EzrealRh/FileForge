@@ -14,20 +14,44 @@ object OoxmlParts {
     const val XLSX_WORKBOOK = "xl/workbook.xml"
     const val PPTX_PRESENTATION = "ppt/presentation.xml"
 
+    /** ODF 那一族也是 zip，但它靠 `mimetype` 这条条目说自己是哪一种文档。 */
+    const val ODT_MIMETYPE = "mimetype"
+    const val ODT_CONTENT = "content.xml"
+    const val ODT_MANIFEST = "META-INF/manifest.xml"
+    const val ODT_TEXT = "application/vnd.oasis.opendocument.text"
+
     /**
-     * 只看包里有哪些部件名。
+     * 只看包里有哪些部件名（要判 ODF 时再给一个 [load] 取 `mimetype` 的内容）。
      *
      * 先判 word 再判 xl：一份 docx 里可以嵌表格，但那个嵌入件是以 `.bin` 躺在包里的，
      * 不会变成条目名，所以三条判据不会互相串 —— 反过来说，真有 `xl/workbook.xml` 当条目名时
      * 它就是工作簿本体。
+     *
+     * ODF 放在最后：`content.xml` 这个名字太普通，任何包里都可能出现，只有 `mimetype` 里
+     * 写着 `application/vnd.oasis.opendocument.text` 才算 ODT（`file` 与桌面环境的规矩也是这条）。
+     * `META-INF/manifest.xml` 是兜底：`mimetype` 缺失或被压缩过的包照样能认。
      */
-    fun kindOf(entries: Collection<String>): FileKind = when {
+    fun kindOf(entries: Collection<String>, load: (String) -> ByteArray? = { null }): FileKind = when {
         // EPUB 也是 zip，判据是 container.xml 这个只属于它的部件名
         entries.any { it.equals("META-INF/container.xml", ignoreCase = true) } -> FileKind.Epub
         DOCX_BODY in entries -> FileKind.Docx
         XLSX_WORKBOOK in entries -> FileKind.Xlsx
         PPTX_PRESENTATION in entries -> FileKind.Pptx
+        entries.any { it == ODT_CONTENT } && odtText(entries, load) -> FileKind.Odt
         else -> FileKind.Zip
+    }
+
+    /** 这份 ODF 是不是文字文档：表格 / 演示 / 图形都是同一个包结构，只有 mimetype 分得开。 */
+    private fun odtText(entries: Collection<String>, load: (String) -> ByteArray?): Boolean {
+        val declared = load(ODT_MIMETYPE)?.toString(Charsets.ISO_8859_1)?.trim().orEmpty()
+        if (declared.isNotEmpty()) return declared == ODT_TEXT || declared == "$ODT_TEXT.template"
+        val manifest = load(ODT_MANIFEST) ?: return false
+        val root = runCatching { OoxmlXml.root(manifest, "OpenDocument") }.getOrNull() ?: return false
+        return OoxmlStructure.childrenOf(root, "file-entry").any { entry ->
+            val path = entry.getAttribute("manifest:full-path").ifEmpty { entry.getAttribute("full-path") }
+            val media = entry.getAttribute("manifest:media-type").ifEmpty { entry.getAttribute("media-type") }
+            path == "/" && (media == ODT_TEXT || media == "$ODT_TEXT.template")
+        }
     }
 }
 

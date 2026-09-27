@@ -572,9 +572,9 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
      * 把宽度那把尺子换成真字体量出来的数，以及把排好的行画上去。
      */
     fun textToPdf(item: WorkItem, operation: Operation.TextToPdf): EngineOutput {
-        // docx / pptx 先抽正文再排版：排的是抽出来的那份文字，所以"丢了什么"由抽取那一层说
+        // docx / pptx / odt 先抽正文再排版：排的是抽出来的那份文字，所以"丢了什么"由抽取那一层说
         val body = when (item.kind) {
-            FileKind.Docx, FileKind.Pptx -> OfficeSource.text(item.file, item.kind)
+            FileKind.Docx, FileKind.Pptx, FileKind.Odt -> OfficeSource.text(item.file, item.kind)
             else -> {
                 require(item.file.length() <= MAX_TEXT_BYTES) {
                     "这份文本 ${item.file.length() / 1024 / 1024} MB，超过 ${MAX_TEXT_BYTES / 1024 / 1024} MB 上限"

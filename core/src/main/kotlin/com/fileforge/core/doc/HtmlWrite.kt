@@ -22,9 +22,37 @@ object HtmlWrite {
     fun body(parts: List<DocPart>): String {
         val out = StringBuilder()
         val lists = ListStack()
-        parts.forEach { part -> render(part, out, lists) }
+        mergeCode(parts).forEach { part -> render(part, out, lists) }
         lists.closeAll(out)
         return out.toString()
+    }
+
+    /**
+     * 连着几行的代码段并成一块。
+     *
+     * Word 与 Writer 都把代码块存成"每行一个段落"，照着渲会得到一行一个 `<pre>`：
+     * 别的实现（pandoc）读回来是一整块代码，两边块数对不上还是次要的，
+     * 主要是 `<pre>` 之间的边界让一段代码在网页里成了几块互不相干的字。
+     */
+    private fun mergeCode(parts: List<DocPart>): List<DocPart> {
+        val out = ArrayList<DocPart>()
+        var code = ArrayList<DocRun>()
+        fun flush() {
+            if (code.isNotEmpty()) out += DocParagraph(DocPara(code.toList(), "SourceCode"))
+            code = ArrayList()
+        }
+        parts.forEach { part ->
+            val para = (part as? DocParagraph)?.para
+            if (para != null && para.style == "SourceCode") {
+                if (code.isNotEmpty()) code += DocRun("\n")
+                code += para.runs
+            } else {
+                flush()
+                out += part
+            }
+        }
+        flush()
+        return out
     }
 
     fun page(title: String, parts: List<DocPart>, language: String = "zh", xhtml: Boolean = false): Page {
@@ -44,6 +72,47 @@ object HtmlWrite {
             notes += "这份内容里没有可读的文字，页面只有结构"
         }
         return Page(html, notes)
+    }
+
+    /**
+     * 纯文本：段落空行分开，表格一行一行、格子用制表符分列。
+     *
+     * 列表不加记号 —— 这是"提取文字"那条路要的：粘进别处还能读，不要 `•` 与缩进混进来。
+     * 分隔线也不写：段与段之间的空行已经把那条线说清楚了。
+     * 同一组里（连着几条列表项、连着几行代码）只留一个换行：空行会把一组拆散，
+     * 而代码块的缩进节奏就是它的可读性。换了样式的紧排段落要另起一组。
+     */
+    fun text(parts: List<DocPart>): String {
+        val out = StringBuilder()
+        var wroteAny = false
+        var previousGroup = ""
+        parts.forEach { part ->
+            val lines: List<String>
+            val group: String
+            when (part) {
+                is DocRule -> {
+                    lines = emptyList()
+                    group = ""
+                }
+                is DocTable -> {
+                    lines = part.rows.map { row -> row.joinToString("\t") }
+                    group = "表"
+                }
+                is DocParagraph -> {
+                    val style = part.para.style
+                    val code = style == "SourceCode"
+                    val made = if (code) part.para.text else part.para.text.trim()
+                    lines = if (made.isEmpty()) emptyList() else made.split("\n")
+                    group = if (code || style == "ListParagraph") style else ""
+                }
+            }
+            if (lines.isEmpty()) return@forEach
+            if (wroteAny && (group.isEmpty() || group != previousGroup)) out.append("\n")
+            lines.forEach { line -> out.append(line).append("\n") }
+            wroteAny = true
+            previousGroup = group
+        }
+        return out.toString()
     }
 
     private fun render(part: DocPart, out: StringBuilder, lists: ListStack) {

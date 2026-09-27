@@ -682,6 +682,14 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
                 Summary("段内跳转（跳到某个书签）在网页与 Markdown 里没有落点，只留文字。")
                 items.forEach { Summary("${it.name} · ${it.sizeLabel}") }
             }
+            OperationKind.OdtToText, OperationKind.OdtToMarkdown, OperationKind.OdtToHtml, OperationKind.OdtToDocx -> {
+                Summary("ODT（OpenDocument 文字，LibreOffice / OpenOffice 的默认格式）的记号**不写在正文里**：正文只写「这一段用 T1 样式」，「T1 是粗体」在样式表里。这里就是按这条规矩读回来的。")
+                Summary("标题层级看 `text:outline-level`，列表看该层是圆点样式还是编号样式，表头看它躺在哪一层里 —— 都不用猜。")
+                Summary("四种产物走的是**同一次读取**：抽文字、转 Markdown、转网页、转 Word 只会差在怎么落笔，不会各认各的结构。")
+                Summary("图片、文本框、批注与脚注搬不过来；合并的格子按跨度补空列，整张表不会歪 —— 有几处都在结果里说明。")
+                Summary("段内跳转（跳到某个书签）在网页与 Markdown 里没有落点，只留文字。")
+                items.forEach { Summary("${it.name} · ${it.sizeLabel}") }
+            }
             OperationKind.EpubToText, OperationKind.EpubToMarkdown, OperationKind.EpubToDocx -> {
                 Summary("章节顺序按包里的 spine 走（`.epub` 里的文件名顺序常常不是阅读顺序）。")
                 Summary("章名优先取目录（NCX）里的名字，其次文档自己的 title，再不行用文件名。")
@@ -942,6 +950,10 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
             OperationKind.CsvToHtml -> Operation.CsvToHtml(htmlTitle.trim(), csvHeader)
             OperationKind.DocxToMarkdown -> Operation.DocxToMarkdown
             OperationKind.DocxToHtml -> Operation.DocxToHtml
+            OperationKind.OdtToText -> Operation.OdtToText
+            OperationKind.OdtToMarkdown -> Operation.OdtToMarkdown
+            OperationKind.OdtToHtml -> Operation.OdtToHtml
+            OperationKind.OdtToDocx -> Operation.OdtToDocx
             OperationKind.PdfToHtml -> Operation.PdfToHtml(pageSpec.trim(), htmlTitle.trim())
             OperationKind.TextToPdf -> Operation.TextToPdf(
                 textSize.roundToInt(), paper, textMargin.roundToInt(), textLeading, textIndent, textNumber,

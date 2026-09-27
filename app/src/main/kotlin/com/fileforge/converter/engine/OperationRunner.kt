@@ -257,6 +257,18 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
             is Operation.DocxToHtml -> items.forEach { item ->
                 collect(item.name) { listOf(office.docxToHtml(item)) }
             }
+            is Operation.OdtToText -> items.forEach { item ->
+                collect(item.name) { listOf(office.odtToText(item)) }
+            }
+            is Operation.OdtToMarkdown -> items.forEach { item ->
+                collect(item.name) { listOf(office.odtToMarkdown(item)) }
+            }
+            is Operation.OdtToHtml -> items.forEach { item ->
+                collect(item.name) { listOf(office.odtToHtml(item)) }
+            }
+            is Operation.OdtToDocx -> items.forEach { item ->
+                collect(item.name) { listOf(office.odtToDocx(item)) }
+            }
             is Operation.CsvToHtml -> items.forEach { item ->
                 collect(item.name) { listOf(text.csvToHtml(item, operation)) }
             }

@@ -554,8 +554,11 @@ object Html {
             }
             val head = nested.firstOrNull().orEmpty()
             out.append(indent).append(marker).append(head).append("\n")
+            // 续排要按**这个记号自己的宽度**缩进：`- ` 是两格、`1. ` 是三格、`10. ` 是四格。
+            // 一律缩两格的话，编号列表里嵌的子列表会被读成同级（pandoc 实测把嵌套拍平）
+            val pad = " ".repeat(marker.length)
             nested.drop(1).forEach { extra ->
-                extra.lines().forEach { out.append(indent).append("  ").append(it).append("\n") }
+                extra.lines().forEach { out.append(indent).append(pad).append(it).append("\n") }
             }
         }
         return out.toString().trimEnd('\n')

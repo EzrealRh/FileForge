@@ -16,23 +16,23 @@ import org.w3c.dom.Element
 internal object OoxmlXml {
 
     /** 部件必须是 UTF-8：认不出的一律报错，不拿替换字符凑出一份看着正常的文本。 */
-    fun text(part: ByteArray): String {
-        require(!part.contains(0.toByte())) { "这个部件不是文本，OOXML 要求它是 UTF-8 的 XML" }
+    fun text(part: ByteArray, flavor: String = "OOXML"): String {
+        require(!part.contains(0.toByte())) { "这个部件不是文本，$flavor 要求它是 UTF-8 的 XML" }
         val decoder = Charsets.UTF_8.newDecoder()
             .onMalformedInput(CodingErrorAction.REPORT)
             .onUnmappableCharacter(CodingErrorAction.REPORT)
         val decoded = try {
             decoder.decode(ByteBuffer.wrap(part)).toString()
         } catch (error: CharacterCodingException) {
-            throw IllegalArgumentException("这个部件按 UTF-8 读不出来，它不是合法的 OOXML")
+            throw IllegalArgumentException("这个部件按 UTF-8 读不出来，它不是合法的 $flavor")
         }
         // 带 BOM 的部件规范上不允许，但 LibreOffice 真会写：不剥掉会连首行一起脏掉
         return decoded.removePrefix("\uFEFF")
     }
 
     /** 解成 DOM 的根元素；带 DTD 的部件直接拒。 */
-    fun root(part: ByteArray): Element {
-        val text = text(part)
+    fun root(part: ByteArray, flavor: String = "OOXML"): Element {
+        val text = text(part, flavor)
         Xml.rejectDoctype(text)       // OOXML 从不带 DTD，带了就是别的东西
         val factory = DocumentBuilderFactory.newInstance()
         listOf(
