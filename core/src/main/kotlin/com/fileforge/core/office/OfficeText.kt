@@ -19,6 +19,7 @@ object OoxmlParts {
     const val ODT_CONTENT = "content.xml"
     const val ODT_MANIFEST = "META-INF/manifest.xml"
     const val ODT_TEXT = "application/vnd.oasis.opendocument.text"
+    const val ODT_SPREADSHEET = "application/vnd.oasis.opendocument.spreadsheet"
 
     /**
      * 只看包里有哪些部件名（要判 ODF 时再给一个 [load] 取 `mimetype` 的内容）。
@@ -31,26 +32,38 @@ object OoxmlParts {
      * 写着 `application/vnd.oasis.opendocument.text` 才算 ODT（`file` 与桌面环境的规矩也是这条）。
      * `META-INF/manifest.xml` 是兜底：`mimetype` 缺失或被压缩过的包照样能认。
      */
-    fun kindOf(entries: Collection<String>, load: (String) -> ByteArray? = { null }): FileKind = when {
-        // EPUB 也是 zip，判据是 container.xml 这个只属于它的部件名
-        entries.any { it.equals("META-INF/container.xml", ignoreCase = true) } -> FileKind.Epub
-        DOCX_BODY in entries -> FileKind.Docx
-        XLSX_WORKBOOK in entries -> FileKind.Xlsx
-        PPTX_PRESENTATION in entries -> FileKind.Pptx
-        entries.any { it == ODT_CONTENT } && odtText(entries, load) -> FileKind.Odt
-        else -> FileKind.Zip
+    fun kindOf(entries: Collection<String>, load: (String) -> ByteArray? = { null }): FileKind {
+        val office = when {
+            // EPUB 也是 zip，判据是 container.xml 这个只属于它的部件名
+            entries.any { it.equals("META-INF/container.xml", ignoreCase = true) } -> return FileKind.Epub
+            DOCX_BODY in entries -> return FileKind.Docx
+            XLSX_WORKBOOK in entries -> return FileKind.Xlsx
+            PPTX_PRESENTATION in entries -> return FileKind.Pptx
+            else -> null
+        }
+        office?.let { return it }
+        // ODF：只有 `content.xml` 这个名字太普通，任何包里都可能出，得读 mimetype 才算
+        if (ODT_CONTENT in entries) odfKind(load)?.let { return it }
+        return FileKind.Zip
     }
 
-    /** 这份 ODF 是不是文字文档：表格 / 演示 / 图形都是同一个包结构，只有 mimetype 分得开。 */
-    private fun odtText(entries: Collection<String>, load: (String) -> ByteArray?): Boolean {
+    /** 这份 ODF 是哪一种文档：表格 / 演示 / 图形都同一个包结构，只有 mimetype 分得开。 */
+    private fun odfKind(load: (String) -> ByteArray?): FileKind? = when (declaredMediaType(load)) {
+        ODT_TEXT, "$ODT_TEXT.template" -> FileKind.Odt
+        ODT_SPREADSHEET, "$ODT_SPREADSHEET.template" -> FileKind.Ods
+        else -> null                          // 演示、图形、数据库那几种我们读不了，别乱认
+    }
+
+    private fun declaredMediaType(load: (String) -> ByteArray?): String? {
         val declared = load(ODT_MIMETYPE)?.toString(Charsets.ISO_8859_1)?.trim().orEmpty()
-        if (declared.isNotEmpty()) return declared == ODT_TEXT || declared == "$ODT_TEXT.template"
-        val manifest = load(ODT_MANIFEST) ?: return false
-        val root = runCatching { OoxmlXml.root(manifest, "OpenDocument") }.getOrNull() ?: return false
-        return OoxmlStructure.childrenOf(root, "file-entry").any { entry ->
+        if (declared.isNotEmpty()) return declared
+        val manifest = load(ODT_MANIFEST) ?: return null
+        val root = runCatching { OoxmlXml.root(manifest, "OpenDocument") }.getOrNull() ?: return null
+        return OoxmlStructure.childrenOf(root, "file-entry").firstOrNull { entry ->
             val path = entry.getAttribute("manifest:full-path").ifEmpty { entry.getAttribute("full-path") }
-            val media = entry.getAttribute("manifest:media-type").ifEmpty { entry.getAttribute("media-type") }
-            path == "/" && (media == ODT_TEXT || media == "$ODT_TEXT.template")
+            path == "/"
+        }?.let { entry ->
+            entry.getAttribute("manifest:media-type").ifEmpty { entry.getAttribute("media-type") }
         }
     }
 }

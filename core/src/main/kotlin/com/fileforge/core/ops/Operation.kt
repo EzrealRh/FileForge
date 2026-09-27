@@ -621,6 +621,31 @@ sealed interface Operation {
     data object OdtToDocx : Operation {
         override val label get() = "写成 Word 文档"
     }
+
+    /**
+     * OpenDocument 电子表格（.ods）一族。
+     *
+     * 与 xlsx 那几条同一形状：每张表一份 CSV、整本写成 xlsx / 网页，反向 CSV 写成 .ods。
+     * ODF 的格子靠"重复计数"而不是引用定位，值的类型是文件里写明的（不用像 xlsx 那样猜日期）。
+     */
+    data class OdsToCsv(val delimiter: Delimiter = Delimiter.Comma, val ending: LineEnding = LineEnding.Lf) : Operation {
+        override val label get() = "转为 CSV"
+    }
+
+    /** ODS → xlsx：整本搬成一份 Excel 认的工作簿。 */
+    data object OdsToXlsx : Operation {
+        override val label get() = "转为 Excel"
+    }
+
+    /** ODS → 网页：每张表一块表格，浏览器直接打开。 */
+    data object OdsToHtml : Operation {
+        override val label get() = "转为网页"
+    }
+
+    /** CSV → ODS：一张表，格子类型只按"能不能一字不差读回来"判。 */
+    data object CsvToOds : Operation {
+        override val label get() = "写成 ODS"
+    }
 }
 
 enum class PdfPaper(val label: String) { A4("A4"), A5("A5"), Letter("Letter"), FitImage("按图片尺寸") }

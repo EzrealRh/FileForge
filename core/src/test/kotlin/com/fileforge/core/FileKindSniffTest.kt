@@ -204,6 +204,20 @@ class FileKindSniffTest {
     }
 
     @Test
+    fun `ODS 有自己的三条出路而 CSV 那边多一条`() {
+        val ods = OperationKind.applicable(setOf(FileKind.Ods))
+        assertTrue(
+            setOf(OperationKind.OdsToCsv, OperationKind.OdsToXlsx, OperationKind.OdsToHtml).all { it in ods },
+            "ODS 该有这三条：$ods",
+        )
+        assertTrue(OperationKind.XlsxToCsv !in ods && OperationKind.OdtToMarkdown !in ods, "别把 xlsx / ODT 那几条给 ODS：$ods")
+        assertTrue(OperationKind.UnpackZip !in ods, "认得出是 ODS 就不该只给解压：$ods")
+        val csv = OperationKind.applicable(setOf(FileKind.Text))
+        assertTrue(OperationKind.CsvToOds in csv, "文本该能写成 ODS：$csv")
+        assertTrue(OperationKind.CsvToOds !in OperationKind.applicable(setOf(FileKind.Png)), "图片没有 ODS 可写")
+    }
+
+    @Test
     fun `ODT 只拿它那四条与三条共用的路`() {
         val odt = OperationKind.applicable(setOf(FileKind.Odt))
         assertTrue(

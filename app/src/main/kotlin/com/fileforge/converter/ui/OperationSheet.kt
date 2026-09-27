@@ -690,6 +690,32 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
                 Summary("段内跳转（跳到某个书签）在网页与 Markdown 里没有落点，只留文字。")
                 items.forEach { Summary("${it.name} · ${it.sizeLabel}") }
             }
+            OperationKind.OdsToCsv -> {
+                PickerRow("分隔符", Delimiter.entries.map { it.label }, Delimiter.entries.indexOf(csvDelimiter)) {
+                    csvDelimiter = Delimiter.entries[it]
+                }
+                Segmented("换行", LineEnding.entries.map { it.label }, LineEnding.entries.indexOf(csvEnding)) {
+                    csvEnding = LineEnding.entries[it]
+                }
+                Summary("ODS（LibreOffice / OpenOffice 的表格）每张表出一份 CSV，表名进文件名；只有一张表时不加后缀。")
+                Summary("值的写法照文件里那份**渲染出来的文字**搬：12.345% 不会变成 0.12345，007 不会变成 7。")
+                Summary("ODF 把没用到的整页写成「重复的空行」，尾巴上整排空的剪掉了 —— 否则每张表都是几千行逗号。")
+                Summary("公式给的是文件里存着的算过的结果（不重算）；合并的格子按跨度占位，整张表不会歪。")
+            }
+            OperationKind.OdsToXlsx -> {
+                Summary("整本搬成一份 Excel 认的工作簿：表名收敛到 Excel 的 31 字与非法字符规矩，改了哪几张会说明。")
+                Summary("格子类型不重判 —— ODS 里写着是文字就是文字，写着是数值才是数值。")
+            }
+            OperationKind.OdsToHtml -> {
+                Summary("每张表一块表格，表头那行写成 <th>，与「网页表格转 CSV」读的正是同一种表。")
+                Summary("格子里的换行写成 <br>，列数不齐的按最宽那行补齐。")
+            }
+            OperationKind.CsvToOds -> {
+                Summary("写一份真 .ods：mimetype 第一条不压缩、清单与部件齐全，LibreOffice / Excel / Gnumeric 都打得开。")
+                Summary("格子类型只按「变成数字后能不能一字不差读回来」判：007、1.50、15 位以上的编号按文字写。")
+                Summary("连续空格与制表按 ODF 的写法存（text:s / text:tab），不会被当成可折掉的空白。")
+                items.forEach { Summary("${it.name} · ${it.sizeLabel}") }
+            }
             OperationKind.EpubToText, OperationKind.EpubToMarkdown, OperationKind.EpubToDocx -> {
                 Summary("章节顺序按包里的 spine 走（`.epub` 里的文件名顺序常常不是阅读顺序）。")
                 Summary("章名优先取目录（NCX）里的名字，其次文档自己的 title，再不行用文件名。")
@@ -954,6 +980,10 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
             OperationKind.OdtToMarkdown -> Operation.OdtToMarkdown
             OperationKind.OdtToHtml -> Operation.OdtToHtml
             OperationKind.OdtToDocx -> Operation.OdtToDocx
+            OperationKind.OdsToCsv -> Operation.OdsToCsv(csvDelimiter, csvEnding)
+            OperationKind.OdsToXlsx -> Operation.OdsToXlsx
+            OperationKind.OdsToHtml -> Operation.OdsToHtml
+            OperationKind.CsvToOds -> Operation.CsvToOds
             OperationKind.PdfToHtml -> Operation.PdfToHtml(pageSpec.trim(), htmlTitle.trim())
             OperationKind.TextToPdf -> Operation.TextToPdf(
                 textSize.roundToInt(), paper, textMargin.roundToInt(), textLeading, textIndent, textNumber,

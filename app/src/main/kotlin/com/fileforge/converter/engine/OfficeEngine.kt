@@ -10,10 +10,18 @@ import com.fileforge.core.data.XmlTable
 import com.fileforge.core.doc.Html
 import com.fileforge.core.doc.HtmlWrite
 import com.fileforge.core.doc.TextDoc
+import com.fileforge.core.doc.DocPara
+import com.fileforge.core.doc.DocParagraph
+import com.fileforge.core.doc.DocPart
+import com.fileforge.core.doc.DocRun
+import com.fileforge.core.doc.DocTable
 import com.fileforge.core.text.LineEnding
 import com.fileforge.core.model.FileKind
 import com.fileforge.core.naming.OutputNaming
 import com.fileforge.core.office.DocxWrite
+import com.fileforge.core.office.OdsRead
+import com.fileforge.core.office.OdsWrite
+import com.fileforge.core.office.SheetToWriteOds
 import com.fileforge.core.office.OoxmlStructure
 import com.fileforge.core.office.Sheet
 import com.fileforge.core.office.SheetToWrite
@@ -283,6 +291,95 @@ class OfficeEngine(private val workspace: Workspace) {
         file,
         notes.filter { it.isNotBlank() }.joinToString(" · "),
     )
+
+    /**
+     * ODS 的一张表一份 CSV。多张表时表名进文件名，只有一张就不加后缀（与 xlsx 那条同形）。
+     *
+     * 值的写法照字面搬：`12.345%` 不变成 `0.12345`、`007` 不变成 `7`；
+     * 表格里没填的尾巴整排空行由读的一侧剪掉，导出来不会是一万行逗号。
+     */
+    fun odsToCsv(item: WorkItem, delimiter: Delimiter, ending: LineEnding): List<EngineOutput> {
+        val read = odsBook(item)
+        val sheets = read.sheets.filter { it.rows.isNotEmpty() }
+        require(sheets.isNotEmpty()) { (read.notes + "每张表都是空的").joinToString(" · ") }
+        return sheets.map { sheet ->
+            val notes = ArrayList(read.notes)
+            notes += "${sheet.rows.size} 行 × ${sheet.rows.maxOf { it.size }} 列"
+            if (read.sheets.size > 1) notes += "这本工作簿共 ${read.sheets.size} 张表"
+            EngineOutput(
+                OutputNaming.tagged(item.name, if (read.sheets.size == 1) "" else tag(sheet.name), "csv"),
+                workspace.newStagingFile("csv").apply { writeText(Csv.render(sheet.rows, delimiter, ending), Charsets.UTF_8) },
+                notes.joinToString(" · "),
+            )
+        }
+    }
+
+    /** ODS → xlsx：整本搬成一份 Excel 认的工作簿（表名收敛那套规矩与 CSV/JSON 写成 xlsx 同一条）。 */
+    fun odsToXlsx(item: WorkItem): EngineOutput {
+        val read = odsBook(item)
+        val sheets = read.sheets.filter { it.rows.isNotEmpty() }
+        require(sheets.isNotEmpty()) { (read.notes + "每张表都是空的").joinToString(" · ") }
+        val notes = ArrayList(read.notes)
+        notes += "${sheets.size} 张表"
+        return workbook(
+            item,
+            sheets.map { SheetToWrite(it.name, padToWidth(it.rows)) },
+            notes,
+        )
+    }
+
+    /** ODS → 网页：每张表一块表格，第一行是表头时写成 `<th>`。 */
+    fun odsToHtml(item: WorkItem): EngineOutput {
+        val read = odsBook(item)
+        val parts = read.sheets.filter { it.rows.isNotEmpty() }
+            .flatMap { sheet ->
+                listOf<DocPart>(
+                    DocParagraph(DocPara(listOf(DocRun(sheet.name)), "Heading2")),
+                    DocTable(sheet.header, padToWidth(sheet.rows)),
+                )
+            }
+        require(parts.isNotEmpty()) { (read.notes + "每张表都是空的").joinToString(" · ") }
+        val page = HtmlWrite.page(OutputNaming.stem(item.name), parts, language = "zh")
+        val notes = ArrayList(read.notes + page.notes)
+        notes.add(0, "${parts.size / 2} 张表")
+        val file = workspace.newStagingFile("html").apply { writeText(page.html, Charsets.UTF_8) }
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "网页", "html"),
+            file,
+            notes.filter { it.isNotBlank() }.joinToString(" · "),
+        )
+    }
+
+    /** CSV 写成一份 ODS：一张表，表名用文件名。 */
+    fun csvToOds(item: WorkItem): EngineOutput {
+        val text = com.fileforge.core.text.TextCodecs.decodeForConversion(read(item), null).text
+        val doc = Csv.parse(text)
+        require(!doc.isEmpty) { "这份 CSV 里一行记录都没有" }
+        val notes = ArrayList<String>()
+        if (doc.ragged.isNotEmpty()) {
+            notes += "第 ${doc.ragged.joinToString("、")} 行列数与最宽的 ${doc.widest} 列不齐，右边补了空格子"
+        }
+        val rows = doc.records.map { record -> record + List(doc.widest - record.size) { "" } }
+        val out = OdsWrite.spreadsheet(listOf(SheetToWriteOds(OutputNaming.stem(item.name), rows)), modifiedAt = item.file.lastModified())
+        val file = workspace.newStagingFile("ods").apply { writeBytes(out.bytes) }
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "", "ods"),
+            file,
+            (listOf("1 张表 · ${rows.size} 行 × ${doc.widest} 列") + notes + out.notes).joinToString(" · "),
+        )
+    }
+
+    private fun odsBook(item: WorkItem): com.fileforge.core.office.OdsBook =
+        OoxmlFile(item.file).use { pack ->
+            require(pack.kind == FileKind.Ods) { "这份包里没找到 opendocument.spreadsheet 的 mimetype，它不是 ODS" }
+            OdsRead.read { name -> pack.bytesOf(name) }
+        }
+
+    /** 每行都补到最宽的列数：xlsx 与网页的表格都按整齐的网格排。 */
+    private fun padToWidth(rows: List<List<String>>): List<List<String>> {
+        val width = rows.maxOf { it.size }
+        return rows.map { row -> row + List(width - row.size) { "" } }
+    }
 
     private fun workbook(
         item: WorkItem,

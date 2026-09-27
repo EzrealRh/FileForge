@@ -179,6 +179,23 @@ class OdtReadTest {
     }
 
     @Test
+    fun `合并的两种写法一起写时只占一次`() {
+        // LibreOffice 在被并掉的位置放 covered 格，pandoc 那类写者只给前一格加 spanned；
+        // 真文件会两种一起写 —— 两种都数一遍的话一次合并占两格，整行往右错位
+        val made = parts(
+            "<table:table>" +
+                "<table:table-row>" +
+                "<table:table-cell><text:p>甲</text:p></table:table-cell>" +
+                "<table:table-cell table:number-columns-spanned=\"2\"><text:p>跨两列</text:p></table:table-cell>" +
+                "<table:covered-table-cell/>" +
+                "<table:table-cell><text:p>丁</text:p></table:table-cell>" +
+                "</table:table-row>" +
+                "</table:table>",
+        ).single() as DocTable
+        assertEquals(listOf(listOf("甲", "跨两列", "", "丁")), made.rows)
+    }
+
+    @Test
     fun `表头看它的行躺在哪一层`() {
         val made = parts(
             "<table:table>" +
@@ -266,7 +283,8 @@ class OdtReadTest {
         }
         assertEquals(FileKind.Odt, kindWith("application/vnd.oasis.opendocument.text"))
         assertEquals(FileKind.Odt, kindWith("application/vnd.oasis.opendocument.text.template"))
-        assertEquals(FileKind.Zip, kindWith("application/vnd.oasis.opendocument.spreadsheet"))
+        assertEquals(FileKind.Ods, kindWith("application/vnd.oasis.opendocument.spreadsheet"))
+        assertEquals(FileKind.Zip, kindWith("application/vnd.oasis.opendocument.presentation"))
         assertEquals(FileKind.Zip, kindWith(null))
         // 只有条目名判不出 ODT（这是规矩不是缺陷）：docx 那三条仍然先判
         assertEquals(FileKind.Docx, OoxmlParts.kindOf(listOf("mimetype", "content.xml", "word/document.xml")))

@@ -76,6 +76,10 @@ enum class OperationKind(val label: String, val hint: String) {
     OdtToMarkdown("ODT 转 Markdown", "层级、列表、表格与链接按文件里写的读出来，不靠猜"),
     OdtToHtml("ODT 转网页", "同一棵读回来的树，落成浏览器直接打开的 HTML"),
     OdtToDocx("ODT 转 Word", "结构与记号走 Word 的样式，可继续编辑"),
+    OdsToCsv("ODS 表格转 CSV", "每张表一份 CSV；重复出来的空行剪掉，写法不被改"),
+    OdsToXlsx("ODS 转 Excel", "整本搬成 Excel 认的工作簿，表名收敛成 Excel 的规矩"),
+    OdsToHtml("ODS 转网页表格", "每张表一块表格，浏览器直接打开"),
+    CsvToOds("CSV 写成 ODS", "LibreOffice / Excel / Gnumeric 都打得开；007 与 1.50 保持文字"),
     ;
 
     companion object {
@@ -113,6 +117,9 @@ enum class OperationKind(val label: String, val hint: String) {
             // ODT 的四条出路共用一次读取（见 `:core` 的 OdtRead）；抽文字也走这棵树，
             // 因为 ODF 的段落边界本身就是结构信息，连字会把它抹平
             OdtToText, OdtToMarkdown, OdtToHtml, OdtToDocx -> fileKind == FileKind.Odt
+            // ODS 的三条出路共用一次读取；是不是真空表交给引擎判（判不动会直说）
+            OdsToCsv, OdsToXlsx, OdsToHtml -> fileKind == FileKind.Ods
+            CsvToOds -> fileKind.isTextual
             XlsxToCsv -> fileKind == FileKind.Xlsx
             // 只有真带画面的类型才给"提取音频"，否则用户会对一个纯音频文件点它
             ExtractAudio -> fileKind.isVideo

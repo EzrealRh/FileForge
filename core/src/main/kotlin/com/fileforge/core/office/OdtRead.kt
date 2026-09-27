@@ -245,10 +245,15 @@ object OdtRead {
 
     private fun row(element: Element, ctx: Ctx, out: ArrayList<List<String>>) {
         val cells = ArrayList<String>()
+        var coveredLeft = 0
         children(element) { node ->
             val cell = node as? Element ?: return@children
             when (localName(cell)) {
-                "table-cell", "covered-table-cell" -> cell(cell, ctx, cells)
+                "table-cell" -> cell(cell, ctx, cells).also { coveredLeft = it }
+                // 合并有两种写法（LibreOffice 放 covered 格，pandoc 那类只给前一格加 spanned），
+                // 真文件会两种一起写：被 spanned 补出来的那几格不能再被 covered 数一遍，
+                // 否则一次合并占两格，整行往右错位
+                "covered-table-cell" -> if (coveredLeft-- > 0) Unit else cells += ""
                 else -> Unit
             }
         }
@@ -269,8 +274,10 @@ object OdtRead {
      *    否则表头四列正文三列，读回来整张表是斜的
      *  - `table:number-columns-repeated` 是**同样的格子再来几份**（LibreOffice 用它写一排空格子），
      *    每份自己再按跨度补空列
+     *
+     * 返回"这一格已经替后面几个 `covered-table-cell` 占好了位置"。
      */
-    private fun cell(element: Element, ctx: Ctx, out: ArrayList<String>) {
+    private fun cell(element: Element, ctx: Ctx, out: ArrayList<String>): Int {
         val parts = ArrayList<String>()
         children(element) { node ->
             val child = node as? Element ?: return@children
@@ -303,10 +310,12 @@ object OdtRead {
             ctx.tally.bump("hugeRepeat")
             repeated = MAX_REPEAT
         }
-        repeat(repeated.coerceAtLeast(1)) {
+        val times = repeated.coerceAtLeast(1)
+        repeat(times) {
             out += text
             repeat(spanned - 1) { out += "" }
         }
+        return (spanned - 1) * times
     }
 
     /**
