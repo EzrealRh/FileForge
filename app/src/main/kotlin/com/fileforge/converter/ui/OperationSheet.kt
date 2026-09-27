@@ -682,6 +682,14 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
                 Summary("段内跳转（跳到某个书签）在网页与 Markdown 里没有落点，只留文字。")
                 items.forEach { Summary("${it.name} · ${it.sizeLabel}") }
             }
+            OperationKind.PptxToText, OperationKind.PptxToMarkdown, OperationKind.PptxToHtml, OperationKind.PptxToDocx -> {
+                Summary("演示稿的版式不是大纲：字号与颜色是设计，不按它猜层级。这里读的是文件自己写的东西 —— 形状自己说它是标题还是正文（`p:ph type`）。")
+                Summary("列表看段落的记号定义：`buNone` 明说不是列表，`buChar` 是圆点，`buAutoNum` 是编号，`lvl` 是第几层；什么也没写的按普通段落排 —— 那种白靠的是母版与版式里的默认样式，不在这一页的文件里，有几段这种情况都会说明。")
+                Summary("每页前面补一行「第 N 页」：稿子是一页一页的，接成连续散文会让两页的句子看起来是同一段。")
+                Summary("表格的表头看 `firstRow`，跨列与跨行的格子按空位补齐；图片、图表、嵌入对象、演讲者备注搬不过来，有几处都在结果里说明。")
+                Summary("链接是从那一页的关系表里拿的**照字面**的地址；指着包内另一页的那种（「跳到第 3 页」）在转出来的文件里没有能点过去的地方，只留文字并数一笔。")
+                items.forEach { Summary("${it.name} · ${it.sizeLabel}") }
+            }
             OperationKind.OdtToText, OperationKind.OdtToMarkdown, OperationKind.OdtToHtml, OperationKind.OdtToDocx -> {
                 Summary("ODT（OpenDocument 文字，LibreOffice / OpenOffice 的默认格式）的记号**不写在正文里**：正文只写「这一段用 T1 样式」，「T1 是粗体」在样式表里。这里就是按这条规矩读回来的。")
                 Summary("标题层级看 `text:outline-level`，列表看该层是圆点样式还是编号样式，表头看它躺在哪一层里 —— 都不用猜。")
@@ -984,6 +992,10 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
             OperationKind.OdsToXlsx -> Operation.OdsToXlsx
             OperationKind.OdsToHtml -> Operation.OdsToHtml
             OperationKind.CsvToOds -> Operation.CsvToOds
+            OperationKind.PptxToText -> Operation.PptxToText
+            OperationKind.PptxToMarkdown -> Operation.PptxToMarkdown
+            OperationKind.PptxToHtml -> Operation.PptxToHtml
+            OperationKind.PptxToDocx -> Operation.PptxToDocx
             OperationKind.PdfToHtml -> Operation.PdfToHtml(pageSpec.trim(), htmlTitle.trim())
             OperationKind.TextToPdf -> Operation.TextToPdf(
                 textSize.roundToInt(), paper, textMargin.roundToInt(), textLeading, textIndent, textNumber,

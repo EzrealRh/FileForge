@@ -23,6 +23,17 @@ internal object SourceText {
 
     fun of(item: WorkItem): Reading {
         val notes = ArrayList<String>()
+        if (item.kind == FileKind.Pptx) {
+            // 演示稿也用读回来的树：哪一块是标题、哪几条是列表是那一页自己写的，
+            // 抽平文字再排版会把它们抹成一片正文
+            val read = OoxmlFile(item.file).use { pack -> pack.pptxStructure() }
+            require(read.doc.parts.isNotEmpty()) { (read.notes + "这份演示文稿里没有可读的正文").joinToString(" · ") }
+            return Reading(
+                read.doc,
+                com.fileforge.core.doc.HtmlWrite.text(read.doc.parts),
+                listOf("按文件里写的结构排") + read.notes,
+            )
+        }
         if (item.kind == FileKind.Odt) {
             // ODT 直接用读回来的树：段落边界与标题层级是文件里写着的，
             // 抽平文字再猜版式会把"这是二级标题"猜没 —— 与 docx 那条不是一条路是有意的
@@ -35,7 +46,7 @@ internal object SourceText {
             )
         }
         val source = when (item.kind) {
-            FileKind.Docx, FileKind.Pptx -> {
+            FileKind.Docx -> {
                 val extracted = OfficeSource.text(item.file, item.kind)
                 notes += extracted.losses
                 extracted.text

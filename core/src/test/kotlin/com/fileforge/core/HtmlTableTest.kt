@@ -145,4 +145,20 @@ class HtmlTableTest {
         val table = one(page("<table><tr><td>a &amp; b</td><td>说\"你好\"</td><td>c &lt; d</td></tr></table>"))
         assertEquals(listOf("a & b", "说\"你好\"", "c < d"), table.rows.single())
     }
+
+    @Test
+    fun `没有表头的表写成 Markdown 时空着表头那一行`() {
+        val with = markdown("<table><tr><th>列甲</th><th>列乙</th></tr><tr><td>一</td><td>二</td></tr></table>")
+        val without = markdown("<table><tr><td>列甲</td><td>列乙</td></tr><tr><td>一</td><td>二</td></tr></table>")
+        // 首行是 th 才有表头；没有表头时那一行空着，两行数据都留在正文里
+        assertTrue(with.first().contains("列甲"), with.first())
+        assertTrue(without.first().all { it == '|' || it == ' ' }, without.first())
+        assertEquals(with.size + 1, without.size)
+        assertEquals(with[1], without[1])
+        assertEquals(with[0], without[2])
+        assertEquals(with.last(), without.last())
+    }
+
+    private fun markdown(body: String): List<String> =
+        com.fileforge.core.doc.Html.toMarkdown(page(body)).text.trim().lines()
 }

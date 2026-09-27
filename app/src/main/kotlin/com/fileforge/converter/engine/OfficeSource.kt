@@ -7,6 +7,8 @@ import com.fileforge.core.model.FileKind
 import com.fileforge.core.office.DocxBody
 import com.fileforge.core.office.DocxRead
 import com.fileforge.core.office.Extracted
+import com.fileforge.core.office.PptxRead
+import com.fileforge.core.office.PptxSlideBody
 import com.fileforge.core.office.OdtBody
 import com.fileforge.core.office.OdtRead
 import com.fileforge.core.office.OfficeText
@@ -58,6 +60,14 @@ class OoxmlFile(val file: File) : Closeable {
      * 缺了也不报错，只是认不出母样式那一层的引号（读的时候会照字面搬文字并说明）。
      */
     fun odtStructure(): OdtBody = OdtRead.read { name -> bytesOf(name) }
+
+    /**
+     * pptx 的**结构**读成文档树（见 `:core` 的 PptxRead）。
+     *
+     * 页序按演示大纲（`presentation.xml` 的 sldIdLst）走，与"抽文字"那条同一次判定；
+     * 每页的关系表单独取 —— 链接地址挂在页上，不在包级的关系表里。
+     */
+    fun pptxStructure(): PptxSlideBody = PptxRead.read({ name -> bytesOf(name) }, names)
 
     /** 幻灯片部件，顺序照演示大纲；大纲认不出来时退回按文件名排，并在说明里写清楚。 */
     fun slideParts(): DeclaredSlides {

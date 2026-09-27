@@ -646,6 +646,31 @@ sealed interface Operation {
     data object CsvToOds : Operation {
         override val label get() = "写成 ODS"
     }
+
+    /**
+     * 演示文稿（.pptx）的结构读法：这一页哪句是标题、哪几条是圆点、哪几条是编号、
+     * 表格的表头是哪一行 —— 都按文件里写的读，不按字号猜（演示稿的字号是版式设计）。
+     *
+     * 与「Word 演示提取文字」那条不是一路：那条只把字连起来，层级与记号在读的时候就丢了。
+     */
+    data object PptxToText : Operation {
+        override val label get() = "提取文字"
+    }
+
+    /** pptx → Markdown。 */
+    data object PptxToMarkdown : Operation {
+        override val label get() = "转为 Markdown"
+    }
+
+    /** pptx → 网页：一页一节，页界留着。 */
+    data object PptxToHtml : Operation {
+        override val label get() = "转为网页"
+    }
+
+    /** pptx → Word：演示稿摊成一份能继续编辑的文档。 */
+    data object PptxToDocx : Operation {
+        override val label get() = "写成 Word 文档"
+    }
 }
 
 enum class PdfPaper(val label: String) { A4("A4"), A5("A5"), Letter("Letter"), FitImage("按图片尺寸") }

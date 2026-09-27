@@ -577,9 +577,12 @@ object Html {
             it.replace("|", "\\|").ifBlank { " " }
         }
         val out = ArrayList<String>()
-        out += line(rows.first())
+        // 首行是不是表头由文件说（那一行的格是 th）。没有表头时 Markdown 的表格只有
+        // "表头空着"这一种写法能表达 —— 空表头那一行读回来就是没有表头行（pandoc 实测）。
+        val header = tableRows(node).firstOrNull()?.children?.any { it.name == "th" } == true
+        out += line(if (header) rows.first() else List(width) { "" })
         out += "|" + List(width) { "---" }.joinToString("|") + "|"
-        rows.drop(1).forEach { out += line(it) }
+        (if (header) rows.drop(1) else rows).forEach { out += line(it) }
         return out.joinToString("\n")
     }
 

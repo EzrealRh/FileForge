@@ -19,6 +19,7 @@ ROOT = os.path.join(HERE, "..")
 YAML_DIR = os.path.join(ROOT, "core", "src", "main", "kotlin", "com", "fileforge", "core", "data")
 ENV = dict(os.environ, GRADLE_USER_HOME="D:/gradle-home")
 DUMP = 'gradlew.bat --offline :core:test --rerun --tests "com.fileforge.core.YamlFixtureTest"'
+DUMP_MATRIX = 'gradlew.bat --offline :core:test --rerun --tests "com.fileforge.core.DataMatrixTest"'
 STAMP = os.path.join(ROOT, "core", "build", "yaml", "typing.out.yaml")
 
 # (说明, 原样, 改成, 期望红的那条)
@@ -89,7 +90,10 @@ def main():
             io.open(path, "w", encoding="utf-8", newline="\n").write(source)
     finally:
         io.open(path, "w", encoding="utf-8", newline="\n").write(source)
+        # 收尾要把所有被这次改坏牵连到的产物区都重刷一遍：YamlFixtureTest 之外，
+        # 数据族那几条判据读的是 DataMatrixTest 落的产物，只重刷自己这一区会把坏产物留给别人
         subprocess.run(DUMP, cwd=ROOT, shell=True, capture_output=True, env=ENV)
+        subprocess.run(DUMP_MATRIX, cwd=ROOT, shell=True, capture_output=True, env=ENV)
     print("\n".join(verdicts))
     toothless = [line for line in verdicts if "没红" in line or "跳过" in line]
     if toothless:

@@ -80,6 +80,10 @@ enum class OperationKind(val label: String, val hint: String) {
     OdsToXlsx("ODS 转 Excel", "整本搬成 Excel 认的工作簿，表名收敛成 Excel 的规矩"),
     OdsToHtml("ODS 转网页表格", "每张表一块表格，浏览器直接打开"),
     CsvToOds("CSV 写成 ODS", "LibreOffice / Excel / Gnumeric 都打得开；007 与 1.50 保持文字"),
+    PptxToText("PPT 提取文字", "按页抽出结构：标题、圆点与编号、表格与真链接都留着"),
+    PptxToMarkdown("PPT 转 Markdown", "占位符类型决定层级，列表记号按文件里写的读，不按字号猜"),
+    PptxToHtml("PPT 转网页", "一页一节，页界与结构都留着"),
+    PptxToDocx("PPT 写成 Word", "演示稿摊成一份能继续编辑的文档"),
     ;
 
     companion object {
@@ -112,7 +116,7 @@ enum class OperationKind(val label: String, val hint: String) {
             TextToPdf, TextToDocx, TextToEpub ->
                 fileKind.isTextual || fileKind == FileKind.Docx || fileKind == FileKind.Pptx || fileKind == FileKind.Odt
             OfficeToText -> fileKind == FileKind.Docx || fileKind == FileKind.Pptx
-            // 只有 docx 有这一套结构可读：演示文稿的版式是另一套规矩，没做透就不给入口
+            // Word 的结构读法只给 docx：演示文稿那一套记号在别的文件里（见下面 PptxTo* 那条）
             DocxToMarkdown, DocxToHtml -> fileKind == FileKind.Docx
             // ODT 的四条出路共用一次读取（见 `:core` 的 OdtRead）；抽文字也走这棵树，
             // 因为 ODF 的段落边界本身就是结构信息，连字会把它抹平
@@ -120,6 +124,8 @@ enum class OperationKind(val label: String, val hint: String) {
             // ODS 的三条出路共用一次读取；是不是真空表交给引擎判（判不动会直说）
             OdsToCsv, OdsToXlsx, OdsToHtml -> fileKind == FileKind.Ods
             CsvToOds -> fileKind.isTextual
+            // 演示文稿的结构读法：只给 pptx（ODF 的演示另说，见 README 的"还没验证的"）
+            PptxToText, PptxToMarkdown, PptxToHtml, PptxToDocx -> fileKind == FileKind.Pptx
             XlsxToCsv -> fileKind == FileKind.Xlsx
             // 只有真带画面的类型才给"提取音频"，否则用户会对一个纯音频文件点它
             ExtractAudio -> fileKind.isVideo

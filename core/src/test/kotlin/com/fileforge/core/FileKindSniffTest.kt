@@ -204,6 +204,40 @@ class FileKindSniffTest {
     }
 
     @Test
+    fun `PPTX 只拿它那四条结构路`() {
+        val pptx = OperationKind.applicable(setOf(FileKind.Pptx))
+        assertTrue(
+            setOf(
+                OperationKind.PptxToText, OperationKind.PptxToMarkdown,
+                OperationKind.PptxToHtml, OperationKind.PptxToDocx,
+                OperationKind.OfficeToText, OperationKind.TextToPdf,
+                OperationKind.TextToDocx, OperationKind.TextToEpub,
+            ).all { it in pptx },
+            "PPTX 该有那四条，加上抽文字与三条共用的路：$pptx",
+        )
+        assertTrue(
+            OperationKind.DocxToMarkdown !in pptx && OperationKind.OdtToMarkdown !in pptx,
+            "别把 Word / ODT 的结构读法摆给演示稿：$pptx",
+        )
+        assertTrue(
+            OperationKind.XlsxToCsv !in pptx && OperationKind.OdsToCsv !in pptx,
+            "演示稿没有格子可转 CSV：$pptx",
+        )
+        assertTrue(
+            OperationKind.PptxToMarkdown !in OperationKind.applicable(setOf(FileKind.Docx)),
+            "docx 不配「PPT 转 Markdown」",
+        )
+        // 演示稿与 txt 混着选：只剩结构无关的那几条共同路
+        assertEquals(
+            setOf(
+                OperationKind.TextToPdf, OperationKind.TextToDocx, OperationKind.TextToEpub,
+                OperationKind.PackZip, OperationKind.PackTar,
+            ),
+            OperationKind.applicable(setOf(FileKind.Pptx, FileKind.Text)).toSet(),
+        )
+    }
+
+    @Test
     fun `ODS 有自己的三条出路而 CSV 那边多一条`() {
         val ods = OperationKind.applicable(setOf(FileKind.Ods))
         assertTrue(
