@@ -686,6 +686,31 @@ sealed interface Operation {
     data object PptxToDocx : Operation {
         override val label get() = "写成 Word 文档"
     }
+
+    /**
+     * RTF（.rtf，WordPad 与老版 Word 存的那套）的结构读法：粗体、标题层级、列表记号、
+     * 表格与真链接都写在控制字里，按文本转会把它们读成一片 `\pard\plain`。
+     *
+     * 四条路共用一次读取（见 `:core` 的 RtfRead），与 pptx 那四条同一个形状。
+     */
+    data object RtfToText : Operation {
+        override val label get() = "提取文字"
+    }
+
+    /** rtf → Markdown：记号按文件里写的读，不靠字号猜。 */
+    data object RtfToMarkdown : Operation {
+        override val label get() = "转为 Markdown"
+    }
+
+    /** rtf → 网页：段落、列表与表格原样搬到浏览器里。 */
+    data object RtfToHtml : Operation {
+        override val label get() = "转为网页"
+    }
+
+    /** rtf → Word：老格式搬进能继续编辑的新格式。 */
+    data object RtfToDocx : Operation {
+        override val label get() = "写成 Word 文档"
+    }
 }
 
 enum class PdfPaper(val label: String) { A4("A4"), A5("A5"), Letter("Letter"), FitImage("按图片尺寸") }

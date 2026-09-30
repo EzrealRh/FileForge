@@ -302,6 +302,18 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
             is Operation.PptxToDocx -> items.forEach { item ->
                 collect(item.name) { listOf(office.pptxToDocx(item)) }
             }
+            is Operation.RtfToText -> items.forEach { item ->
+                collect(item.name) { listOf(office.rtfToText(item)) }
+            }
+            is Operation.RtfToMarkdown -> items.forEach { item ->
+                collect(item.name) { listOf(office.rtfToMarkdown(item)) }
+            }
+            is Operation.RtfToHtml -> items.forEach { item ->
+                collect(item.name) { listOf(office.rtfToHtml(item)) }
+            }
+            is Operation.RtfToDocx -> items.forEach { item ->
+                collect(item.name) { listOf(office.rtfToDocx(item)) }
+            }
             is Operation.CsvToHtml -> items.forEach { item ->
                 collect(item.name) { listOf(text.csvToHtml(item, operation)) }
             }

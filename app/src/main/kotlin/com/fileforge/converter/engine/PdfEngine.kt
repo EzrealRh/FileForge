@@ -575,6 +575,11 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
         // docx / pptx / odt 先抽正文再排版：排的是抽出来的那份文字，所以"丢了什么"由抽取那一层说
         val body = when (item.kind) {
             FileKind.Docx, FileKind.Pptx, FileKind.Odt -> OfficeSource.text(item.file, item.kind)
+            // RTF 抽正文走结构读法：连控制字一起印到纸上是最难看的产物，段落边界也按文件里写的分
+            FileKind.Rtf -> {
+                val read = com.fileforge.core.office.RtfRead.read(item.file.readBytes())
+                Extracted(com.fileforge.core.doc.HtmlWrite.text(read.doc.parts), read.notes)
+            }
             else -> {
                 require(item.file.length() <= MAX_TEXT_BYTES) {
                     "这份文本 ${item.file.length() / 1024 / 1024} MB，超过 ${MAX_TEXT_BYTES / 1024 / 1024} MB 上限"

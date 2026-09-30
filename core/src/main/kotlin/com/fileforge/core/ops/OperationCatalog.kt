@@ -87,6 +87,10 @@ enum class OperationKind(val label: String, val hint: String) {
     PptxToMarkdown("PPT 转 Markdown", "占位符类型决定层级，列表记号按文件里写的读，不按字号猜"),
     PptxToHtml("PPT 转网页", "一页一节，页界与结构都留着"),
     PptxToDocx("PPT 写成 Word", "演示稿摊成一份能继续编辑的文档"),
+    RtfToText("RTF 提取文字", "粗体、标题、列表与表格写在控制字里，按控制字读才不烂"),
+    RtfToMarkdown("RTF 转 Markdown", "记号按文件里写的读；控制字本身不会跟着进正文"),
+    RtfToHtml("RTF 转网页", "段落、列表、表格与真链接搬到浏览器里"),
+    RtfToDocx("RTF 写成 Word", "老格式搬进能继续编辑的新格式，丢了什么逐条写明"),
     ;
 
     companion object {
@@ -119,10 +123,11 @@ enum class OperationKind(val label: String, val hint: String) {
             // 印成 PDF 排的是抽出来的文字；写成 Word 与写成电子书走文档树，
             // 所以 xlsx 只进后两条 —— 表格里那种网格还没法在 PDF 里画出来
             TextToPdf ->
-                fileKind.isTextual || fileKind == FileKind.Docx || fileKind == FileKind.Pptx || fileKind == FileKind.Odt
+                fileKind.isTextual || fileKind == FileKind.Docx || fileKind == FileKind.Pptx ||
+                    fileKind == FileKind.Odt || fileKind == FileKind.Rtf
             TextToDocx, TextToEpub, TextToOdt ->
                 fileKind.isTextual || fileKind == FileKind.Docx || fileKind == FileKind.Pptx ||
-                    fileKind == FileKind.Odt || fileKind == FileKind.Xlsx
+                    fileKind == FileKind.Odt || fileKind == FileKind.Xlsx || fileKind == FileKind.Rtf
             OfficeToText -> fileKind == FileKind.Docx || fileKind == FileKind.Pptx
             // Word 的结构读法只给 docx：演示文稿那一套记号在别的文件里（见下面 PptxTo* 那条）
             DocxToMarkdown, DocxToHtml -> fileKind == FileKind.Docx
@@ -134,6 +139,9 @@ enum class OperationKind(val label: String, val hint: String) {
             CsvToOds -> fileKind.isTextual
             // 演示文稿的结构读法：只给 pptx（ODF 的演示另说，见 README 的"还没验证的"）
             PptxToText, PptxToMarkdown, PptxToHtml, PptxToDocx -> fileKind == FileKind.Pptx
+            // RTF 的四条出路共用一次读取（见 `:core` 的 RtfRead）：结构都在控制字里，
+            // 按文本走会得到一份带 \pard 的产物，所以不给"文本那几条"
+            RtfToText, RtfToMarkdown, RtfToHtml, RtfToDocx -> fileKind == FileKind.Rtf
             XlsxToCsv, XlsxToHtml, XlsxToMarkdown -> fileKind == FileKind.Xlsx
             // 只有真带画面的类型才给"提取音频"，否则用户会对一个纯音频文件点它
             ExtractAudio -> fileKind.isVideo

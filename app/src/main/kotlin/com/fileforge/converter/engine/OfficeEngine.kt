@@ -400,6 +400,66 @@ class OfficeEngine(private val workspace: Workspace) {
         )
     }
 
+    /**
+     * RTF 的四条出路：一次读取（`:core` 的 RtfRead），四条路只差怎么落笔。
+     *
+     * 与"按文本转"不是一条路：RTF 的粗体、标题层级、列表记号与表格全写在控制字里，
+     * 当成文本会得到一份带 `\pard\plain` 的产物。
+     */
+    private fun rtfReading(item: WorkItem): com.fileforge.core.office.RtfBody =
+        com.fileforge.core.office.RtfRead.read(item.file.readBytes())
+
+    /** rtf → 纯文本：段落空行分开，表格按制表符分列。 */
+    fun rtfToText(item: WorkItem): EngineOutput {
+        val read = rtfReading(item)
+        val body = HtmlWrite.text(read.doc.parts)
+        require(body.isNotBlank()) { "这份 RTF 里没有可搬的文字（图片与控制字不算正文）" }
+        val notes = ArrayList(read.notes)
+        notes.add(0, "${read.doc.parts.size} 块内容")
+        return written(item, "纯文本", "txt", workspace.newStagingFile("txt").apply { writeText(body, Charsets.UTF_8) }, notes)
+    }
+
+    /** rtf → Markdown：走与网页同一棵树的渲染层，再把 HTML 翻成标记。 */
+    fun rtfToMarkdown(item: WorkItem): EngineOutput {
+        val read = rtfReading(item)
+        require(read.doc.parts.isNotEmpty()) { (read.notes + "这份 RTF 里没有可读的正文").joinToString(" · ") }
+        val rendered = Html.toMarkdown(HtmlWrite.body(read.doc.parts))
+        val body = rendered.text
+        require(body.isNotBlank()) { "这份 RTF 里没有可搬的文字（图片与控制字不算正文）" }
+        val notes = ArrayList(read.notes + rendered.notes)
+        notes.add(0, "${read.doc.parts.size} 块内容")
+        return written(item, "Markdown", "md", workspace.newStagingFile("md").apply { writeText(body, Charsets.UTF_8) }, notes)
+    }
+
+    /** rtf → 网页：一份带 charset 的完整页面，浏览器直接打开。 */
+    fun rtfToHtml(item: WorkItem): EngineOutput {
+        val read = rtfReading(item)
+        require(read.doc.parts.isNotEmpty()) { (read.notes + "这份 RTF 里没有可读的正文").joinToString(" · ") }
+        val page = HtmlWrite.page(
+            title = OutputNaming.stem(item.name),
+            parts = read.doc.parts,
+            language = com.fileforge.core.book.EpubWrite.languageOf(read.doc),
+        )
+        val notes = ArrayList(read.notes + page.notes)
+        notes.add(0, "${read.doc.parts.size} 块内容 · 带 charset 的完整页面")
+        return written(item, "网页", "html", workspace.newStagingFile("html").apply { writeText(page.html, Charsets.UTF_8) }, notes)
+    }
+
+    /** rtf → Word：老格式搬进能继续编辑的新格式（记号搬到 Word 认的那一套样式上）。 */
+    fun rtfToDocx(item: WorkItem): EngineOutput {
+        val read = rtfReading(item)
+        require(read.doc.parts.isNotEmpty()) { (read.notes + "这份 RTF 里没有可读的正文").joinToString(" · ") }
+        val out = DocxWrite.document(read.doc, modifiedAt = item.file.lastModified())
+        val notes = ArrayList(read.notes)
+        notes.add(0, "${read.doc.parts.size} 块内容")
+        val file = workspace.newStagingFile("docx").apply { writeBytes(out.bytes) }
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "", "docx"),
+            file,
+            (notes + out.notes).joinToString(" · "),
+        )
+    }
+
     /** 文本类产物的一条路：文件名 + 说明拼法都一样，只换扩展名与正文。 */
     private fun written(
         item: WorkItem,

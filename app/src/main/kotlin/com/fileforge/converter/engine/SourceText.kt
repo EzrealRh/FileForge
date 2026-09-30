@@ -10,7 +10,7 @@ import com.fileforge.core.text.TextCodecs
 import com.fileforge.converter.data.WorkItem
 
 /**
- * 任何来源（纯文本 / Markdown / 网页 / Word / 演示）摊成一棵文档树，只判断一次。
+ * 任何来源（纯文本 / Markdown / 网页 / Word / 演示 / ODT / RTF / Excel）摊成一棵文档树，只判断一次。
  *
  * 写成 Word、印成 PDF 与写成电子书三条出路都从这里拿同一棵树：
  * 各判各的话，同一份 Markdown 会出现"这份产物按记号排、那份按空行分段"两种结果，
@@ -54,6 +54,17 @@ internal object SourceText {
             // 抽平文字再猜版式会把"这是二级标题"猜没 —— 与 docx 那条不是一条路是有意的
             val read = OoxmlFile(item.file).use { pack -> pack.odtStructure() }
             require(read.doc.parts.isNotEmpty()) { (read.notes + "这份 ODT 里没有可读的正文").joinToString(" · ") }
+            return Reading(
+                read.doc,
+                com.fileforge.core.doc.HtmlWrite.text(read.doc.parts),
+                listOf("按文件里写的结构排") + read.notes,
+            )
+        }
+        if (item.kind == FileKind.Rtf) {
+            // RTF 直接用读回来的树：粗体、标题层级、列表记号与表格都写在控制字里，
+            // 按原文排会把 "\b 粗体\b0" 这样的东西原样印出去
+            val read = com.fileforge.core.office.RtfRead.read(item.file.readBytes())
+            require(read.doc.parts.isNotEmpty()) { (read.notes + "这份 RTF 里没有可读的正文").joinToString(" · ") }
             return Reading(
                 read.doc,
                 com.fileforge.core.doc.HtmlWrite.text(read.doc.parts),

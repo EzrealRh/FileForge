@@ -207,7 +207,7 @@ class FileKindSniffTest {
     fun `写成 ODT 跟着写成 Word 那一条走`() {
         // 同一棵树：能写成 Word 的来源就能写成 ODT，别多别少
         for (kind in listOf(FileKind.Text, FileKind.Html, FileKind.Docx,
-                            FileKind.Pptx, FileKind.Odt, FileKind.Xlsx)) {
+                            FileKind.Pptx, FileKind.Odt, FileKind.Xlsx, FileKind.Rtf)) {
             val ops = OperationKind.applicable(setOf(kind))
             assertEquals(
                 OperationKind.TextToDocx in ops,
@@ -250,6 +250,54 @@ class FileKindSniffTest {
                 OperationKind.PackZip, OperationKind.PackTar,
             ),
             OperationKind.applicable(setOf(FileKind.Pptx, FileKind.Text)).toSet(),
+        )
+    }
+
+    @Test
+    fun `RTF 按魔数认出来而它不是纯文本`() {
+        assertEquals(FileKind.Rtf, FileTypeSniffer.sniff(h(0 to s("{\\rtf1"))))
+        // 只有 `{\rtf` 而没有版本号 1 不算：那是随便一段带大括号的文字
+        // （用整份填满字节，不留零 —— 留零的话先看 NUL 的文本判据会把它判成 Unknown，测不到想测的那条）
+        val notRtf = ("{\\rtfx plain text here" + " tail".repeat(12)).toByteArray(Charsets.ISO_8859_1)
+        assertEquals(FileKind.Text, FileTypeSniffer.sniff(notRtf))
+        // BOM 允许写在前面（有的编辑器存的就是带 BOM 的那一种）；凑够 12 字节，短的头一律先算 Unknown
+        val withBom = byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte()) +
+            s("{\\rtf1\\ansi").map { it.toByte() }.toByteArray()
+        assertEquals(FileKind.Rtf, FileTypeSniffer.sniff(withBom))
+        // 不是 isTextual：转编码、转字幕那两条按文本改字节的操作会把控制字改烂
+        assertFalse(FileKind.Rtf.isTextual, "RTF 不该被当纯文本处理")
+        assertEquals("RTF", FileKind.Rtf.badge)
+    }
+
+    @Test
+    fun `RTF 只拿它那四条结构路`() {
+        val rtf = OperationKind.applicable(setOf(FileKind.Rtf))
+        assertTrue(
+            setOf(
+                OperationKind.RtfToText, OperationKind.RtfToMarkdown,
+                OperationKind.RtfToHtml, OperationKind.RtfToDocx,
+                OperationKind.TextToPdf, OperationKind.TextToDocx,
+                OperationKind.TextToOdt, OperationKind.TextToEpub,
+            ).all { it in rtf },
+            "RTF 该有那四条，加上共用那棵树写出去的三条与印成 PDF：$rtf",
+        )
+        assertTrue(
+            OperationKind.OfficeToText !in rtf && OperationKind.DocxToMarkdown !in rtf &&
+                OperationKind.OdtToMarkdown !in rtf && OperationKind.PptxToMarkdown !in rtf,
+            "抽正文那几条是给包着的格式用的：$rtf",
+        )
+        assertTrue(
+            OperationKind.ConvertTextEncoding !in rtf && OperationKind.ConvertSubtitle !in rtf,
+            "RTF 不是纯文本，不配按文本改字节的那两条：$rtf",
+        )
+        assertTrue(OperationKind.RtfToMarkdown !in OperationKind.applicable(setOf(FileKind.Docx)), "docx 不配「RTF 转 Markdown」")
+        // RTF 与 txt 混着选：只剩结构无关的那几条共同路
+        assertEquals(
+            setOf(
+                OperationKind.TextToPdf, OperationKind.TextToDocx, OperationKind.TextToOdt, OperationKind.TextToEpub,
+                OperationKind.PackZip, OperationKind.PackTar,
+            ),
+            OperationKind.applicable(setOf(FileKind.Rtf, FileKind.Text)).toSet(),
         )
     }
 

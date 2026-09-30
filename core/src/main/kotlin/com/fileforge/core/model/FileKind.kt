@@ -6,7 +6,7 @@ import com.fileforge.core.doc.Html
 enum class FileKind {
     Pdf, Png, Jpeg, Gif, WebP, Bmp, Heic, Avif, Mp4, WebM, Mkv, QuickTime,
     Mp3, Aac, M4a, Flac, Ogg, Wav,
-    Zip, Ico, Docx, Xlsx, Pptx, Odt, Ods, Epub, Tar, Gzip, Text, Html, Unknown;
+    Zip, Ico, Docx, Xlsx, Pptx, Odt, Ods, Epub, Tar, Gzip, Rtf, Text, Html, Unknown;
 
     val isImage: Boolean get() = this in IMAGE_KINDS
     val isVideo: Boolean get() = this in VIDEO_KINDS
@@ -48,6 +48,7 @@ enum class FileKind {
         Tar -> "application/x-tar"
         Gzip -> "application/gzip"
         Pptx -> "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        Rtf -> "application/rtf"
         Text -> "text/plain"
         Html -> "text/html"
         Unknown -> "application/octet-stream"
@@ -86,6 +87,7 @@ enum class FileKind {
         Tar -> "TAR"
         Gzip -> "GZ"
         Pptx -> "PPTX"
+        Rtf -> "RTF"
         Text -> "文本"
         Html -> "HTML"
         Unknown -> "文件"
@@ -147,11 +149,26 @@ object FileTypeSniffer {
             // gzip 的两位魔数；里面装的是 tar 还是单个文件，由解包那边看过第一块再说
             u(0) == 0x1F && u(1) == 0x8B -> FileKind.Gzip
             // tar 没有开头的魔数：名字落在第 257 字节的 ustar 上，还要头块自己的校验和对得上
+            looksLikeRtf(header) -> FileKind.Rtf
             com.fileforge.core.archive.Tar.looksLikeTar(header) -> FileKind.Tar
             looksLikeHtml(header) -> FileKind.Html
             looksLikeText(header) -> FileKind.Text
             else -> FileKind.Unknown
         }
+    }
+
+    /**
+     * RTF 的魔数就是开头那六个字节 `{\rtf1`（BOM 允许在前面）。
+     *
+     * 只认开头，不"在头几百字节里找"：普通文本里贴一段 RTF 源码不该被当成 RTF 文件 ——
+     * 判成 RTF 之后抽文字会把控制字当命令执行掉，那是丢字，不是清理。
+     */
+    fun looksLikeRtf(header: ByteArray): Boolean {
+        val at = if (header.size >= 3 && (header[0].toInt() and 0xFF) == 0xEF &&
+            (header[1].toInt() and 0xFF) == 0xBB && (header[2].toInt() and 0xFF) == 0xBF
+        ) 3 else 0
+        if (header.size < at + 6) return false
+        return String(header, at, 6, Charsets.US_ASCII) == "{\\rtf1"
     }
 
     /**

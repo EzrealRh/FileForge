@@ -304,6 +304,7 @@ class MetaReader {
         FileKind.Odt -> "ODT 文档"
         FileKind.Ods -> "ODS 表格"
         FileKind.Pptx -> "PPTX 演示"
+        FileKind.Rtf -> "RTF 文档"
         FileKind.Text -> "文本文件"
         FileKind.Html -> "HTML 网页"
         FileKind.Mp3 -> "MP3 音频"
