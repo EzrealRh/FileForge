@@ -241,6 +241,22 @@ class OfficeEngine(private val workspace: Workspace) {
     }
 
     /**
+     * 任何来源 → RTF：与写成 ODT 拿的是同一棵树，只是落笔换成控制字的老规矩。
+     * 字节全 ASCII：内容里的非 ASCII 一律 `\uN ?`，编码页与文件无关。
+     */
+    fun toRtf(item: WorkItem): EngineOutput {
+        val reading = SourceText.of(item)
+        val out = com.fileforge.core.office.RtfWrite.document(reading.doc, title = OutputNaming.stem(item.name))
+        val file = workspace.newStagingFile("rtf").apply { writeBytes(out.bytes) }
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "", "rtf"),
+            file,
+            (listOf("${reading.doc.parts.size} 块内容") + reading.notes + reading.doc.notes + out.notes)
+                .joinToString(" · "),
+        )
+    }
+
+    /**
      * Word（.docx）→ Markdown：结构从文件里**读**（见 `:core` 的 DocxRead），再走与网页同一条渲染。
      *
      * 与「Word 提取文字」不是一条路：那条只连字，标题层级、圆点还是编号、表格线都在读的时候丢了。

@@ -245,6 +245,9 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
             is Operation.TextToOdt -> items.forEach { item ->
                 collect(item.name) { listOf(office.toOdt(item)) }
             }
+            is Operation.TextToRtf -> items.forEach { item ->
+                collect(item.name) { listOf(office.toRtf(item)) }
+            }
             is Operation.TextToEpub -> items.forEach { item ->
                 collect(item.name) { listOf(book.fromText(item, operation)) }
             }

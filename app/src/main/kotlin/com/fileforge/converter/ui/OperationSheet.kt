@@ -627,6 +627,12 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
                 Summary("列表的圆点与序号由软件画，不是写在文字里；表格的表头那行躺在 `header-rows` 里，别家编辑器也认它是表头。")
                 Summary("文档树里没有列宽这件事：表格每列按等宽写，说明里会写明。")
             }
+            OperationKind.TextToRtf -> {
+                Summary("写成 RTF（写字板 / 老版 Word 的富文本）：与「写成 Word」拿的是同一棵树，落笔换成控制字。")
+                Summary("整份文件的字节全 ASCII：中文与特殊字符一律写成 \\u 转义，编码页与文件无关，谁的读法都一样。")
+                Summary("标题层级写在样式表的 outlinelevel 上（样式号本身不是层级）；列表用 {\\*\\pn} 的老写法，圆点与序号由软件画。")
+                Summary("分隔线写成带下边线的空段，引用块按普通段落写，代码段用等宽字体 —— RTF 没有的东西不硬编，逐条写在说明里。")
+            }
             OperationKind.TextToDocx -> {
                 Summary("标题、列表、表格、引用、代码块、加粗斜体删除线写成 Word 的样式；链接是真链接，点开能跳。")
                 Summary("列表的圆点与序号由 Word 自己画（不是写在文字里），删一行、加一行都不会错位。")
@@ -1037,6 +1043,7 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
             OperationKind.JsonToXlsx -> Operation.JsonToXlsx
             OperationKind.TextToDocx -> Operation.TextToDocx
             OperationKind.TextToOdt -> Operation.TextToOdt
+            OperationKind.TextToRtf -> Operation.TextToRtf
             OperationKind.TextToEpub -> Operation.TextToEpub(epubTitle.trim(), epubAuthor.trim())
             OperationKind.IcoToImages -> Operation.IcoToImages
             OperationKind.EpubToText -> Operation.EpubToText

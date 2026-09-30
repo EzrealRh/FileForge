@@ -662,6 +662,11 @@ sealed interface Operation {
         override val label get() = "写成 ODT"
     }
 
+    /** 文字 / Markdown / 网页 / Office 文档 → RTF：同一棵树，落笔换成控制字；字节全 ASCII。 */
+    data object TextToRtf : Operation {
+        override val label get() = "写成 RTF"
+    }
+
     /**
      * 演示文稿（.pptx）的结构读法：这一页哪句是标题、哪几条是圆点、哪几条是编号、
      * 表格的表头是哪一行 —— 都按文件里写的读，不按字号猜（演示稿的字号是版式设计）。

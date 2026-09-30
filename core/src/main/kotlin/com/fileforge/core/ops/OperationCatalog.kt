@@ -45,6 +45,7 @@ enum class OperationKind(val label: String, val hint: String) {
     XlsxToHtml("Excel 转网页", "每张表一块表格，浏览器直接打开；行列按文件里的位置对齐"),
     XlsxToMarkdown("Excel 转 Markdown", "表名当小标题，一张表一节"),
     TextToOdt("写成 ODT", "LibreOffice / OpenOffice 的默认格式：标题层级、列表、表格与链接都留着"),
+    TextToRtf("写成 RTF", "WordPad / 老版 Word 的富文本：字节全 ASCII，标题层级、列表、表格与链接都留着"),
     MdToHtml("Markdown 转 HTML", "出一份带 charset 的完整页面；认不出标记会直说"),
     MdToText("Markdown 去标记", "吃掉标记，列表记号与表格分列留着"),
     HtmlToText("网页抽文字", "段落列表表格留着，脚本样式页眉丢掉"),
@@ -125,7 +126,7 @@ enum class OperationKind(val label: String, val hint: String) {
             TextToPdf ->
                 fileKind.isTextual || fileKind == FileKind.Docx || fileKind == FileKind.Pptx ||
                     fileKind == FileKind.Odt || fileKind == FileKind.Rtf
-            TextToDocx, TextToEpub, TextToOdt ->
+            TextToDocx, TextToEpub, TextToOdt, TextToRtf ->
                 fileKind.isTextual || fileKind == FileKind.Docx || fileKind == FileKind.Pptx ||
                     fileKind == FileKind.Odt || fileKind == FileKind.Xlsx || fileKind == FileKind.Rtf
             OfficeToText -> fileKind == FileKind.Docx || fileKind == FileKind.Pptx
