@@ -621,6 +621,12 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
                 Summary("嵌套的对象与数组会压成一格文字，字段数不齐时缺的地方留空 —— 都会逐条写明。")
                 Summary("与「JSON 转 CSV」用的是同一套摊平判据，两条路出来的表内容一致。")
             }
+            OperationKind.TextToOdt -> {
+                Summary("写成 ODT（LibreOffice / OpenOffice 的默认格式）：与「写成 Word」拿的是同一棵树，只是落笔换成 ODF 的规矩。")
+                Summary("标题层级写在 `text:outline-level` 上（大纲与目录认这个），粗斜删与等宽写在样式表里，正文只引样式名 —— 改一处样式全篇跟着变。")
+                Summary("列表的圆点与序号由软件画，不是写在文字里；表格的表头那行躺在 `header-rows` 里，别家编辑器也认它是表头。")
+                Summary("文档树里没有列宽这件事：表格每列按等宽写，说明里会写明。")
+            }
             OperationKind.TextToDocx -> {
                 Summary("标题、列表、表格、引用、代码块、加粗斜体删除线写成 Word 的样式；链接是真链接，点开能跳。")
                 Summary("列表的圆点与序号由 Word 自己画（不是写在文字里），删一行、加一行都不会错位。")
@@ -1019,6 +1025,7 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
             OperationKind.HtmlToCsv -> Operation.HtmlToCsv(csvDelimiter, csvEnding)
             OperationKind.JsonToXlsx -> Operation.JsonToXlsx
             OperationKind.TextToDocx -> Operation.TextToDocx
+            OperationKind.TextToOdt -> Operation.TextToOdt
             OperationKind.TextToEpub -> Operation.TextToEpub(epubTitle.trim(), epubAuthor.trim())
             OperationKind.IcoToImages -> Operation.IcoToImages
             OperationKind.EpubToText -> Operation.EpubToText

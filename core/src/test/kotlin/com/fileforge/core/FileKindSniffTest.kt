@@ -196,11 +196,27 @@ class FileKindSniffTest {
         // docx 和 txt 混着选：只剩几条路都走得通的操作
         assertEquals(
             setOf(
-                OperationKind.TextToPdf, OperationKind.TextToDocx, OperationKind.TextToEpub,
+                OperationKind.TextToPdf, OperationKind.TextToDocx, OperationKind.TextToOdt, OperationKind.TextToEpub,
                 OperationKind.PackZip, OperationKind.PackTar,
             ),
             OperationKind.applicable(setOf(FileKind.Docx, FileKind.Text)).toSet(),
         )
+    }
+
+    @Test
+    fun `写成 ODT 跟着写成 Word 那一条走`() {
+        // 同一棵树：能写成 Word 的来源就能写成 ODT，别多别少
+        for (kind in listOf(FileKind.Text, FileKind.Html, FileKind.Docx,
+                            FileKind.Pptx, FileKind.Odt, FileKind.Xlsx)) {
+            val ops = OperationKind.applicable(setOf(kind))
+            assertEquals(
+                OperationKind.TextToDocx in ops,
+                OperationKind.TextToOdt in ops,
+                "$kind 的「写成 Word」与「写成 ODT」该同时给或同时不给：$ops",
+            )
+        }
+        assertTrue(OperationKind.TextToOdt !in OperationKind.applicable(setOf(FileKind.Png)), "图片没有正文可写")
+        assertTrue(OperationKind.TextToOdt !in OperationKind.applicable(setOf(FileKind.Zip)), "压缩包不摊成文档")
     }
 
     @Test
@@ -211,7 +227,7 @@ class FileKindSniffTest {
                 OperationKind.PptxToText, OperationKind.PptxToMarkdown,
                 OperationKind.PptxToHtml, OperationKind.PptxToDocx,
                 OperationKind.OfficeToText, OperationKind.TextToPdf,
-                OperationKind.TextToDocx, OperationKind.TextToEpub,
+                OperationKind.TextToDocx, OperationKind.TextToOdt, OperationKind.TextToEpub,
             ).all { it in pptx },
             "PPTX 该有那四条，加上抽文字与三条共用的路：$pptx",
         )
@@ -230,7 +246,7 @@ class FileKindSniffTest {
         // 演示稿与 txt 混着选：只剩结构无关的那几条共同路
         assertEquals(
             setOf(
-                OperationKind.TextToPdf, OperationKind.TextToDocx, OperationKind.TextToEpub,
+                OperationKind.TextToPdf, OperationKind.TextToDocx, OperationKind.TextToOdt, OperationKind.TextToEpub,
                 OperationKind.PackZip, OperationKind.PackTar,
             ),
             OperationKind.applicable(setOf(FileKind.Pptx, FileKind.Text)).toSet(),
@@ -258,7 +274,7 @@ class FileKindSniffTest {
             setOf(
                 OperationKind.OdtToText, OperationKind.OdtToMarkdown,
                 OperationKind.OdtToHtml, OperationKind.OdtToDocx,
-                OperationKind.TextToPdf, OperationKind.TextToDocx, OperationKind.TextToEpub,
+                OperationKind.TextToPdf, OperationKind.TextToDocx, OperationKind.TextToOdt, OperationKind.TextToEpub,
             ).all { it in odt },
             "ODT 该有这四条与三条共用的路：$odt",
         )
@@ -268,7 +284,7 @@ class FileKindSniffTest {
         // ODT 与 txt 混着选：只剩结构无关的那几条共同路
         val mixed = OperationKind.applicable(setOf(FileKind.Odt, FileKind.Text)).toSet()
         assertEquals(
-            setOf(OperationKind.TextToPdf, OperationKind.TextToDocx, OperationKind.TextToEpub,
+            setOf(OperationKind.TextToPdf, OperationKind.TextToDocx, OperationKind.TextToOdt, OperationKind.TextToEpub,
                 OperationKind.PackZip, OperationKind.PackTar),
             mixed,
         )
@@ -302,7 +318,7 @@ class FileKindSniffTest {
         assertTrue(
             setOf(
                 OperationKind.XlsxToCsv, OperationKind.XlsxToHtml, OperationKind.XlsxToMarkdown,
-                OperationKind.TextToDocx, OperationKind.TextToEpub,
+                OperationKind.TextToDocx, OperationKind.TextToOdt, OperationKind.TextToEpub,
             ).all { it in xlsx },
             "xlsx 该有这几条：$xlsx",
         )

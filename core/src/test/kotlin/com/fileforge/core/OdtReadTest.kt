@@ -179,6 +179,24 @@ class OdtReadTest {
     }
 
     @Test
+    fun `正文行裹在 table-body 里也读得出`() {
+        // LibreOffice 与 pandoc 写的 .odt 都把正文行裹进 table:table-body（表头那行在 header-rows 里）：
+        // 只认裸的 table-row 与 header-rows 的话，真文件里一张表除了表头一行都读不出来
+        val made = parts(
+            "<table:table table:name=\"T1\">" +
+                "<table:table-header-rows><table:table-row>" +
+                "<table:table-cell><text:p>名称</text:p></table:table-cell>" +
+                "</table:table-row></table:table-header-rows>" +
+                "<table:table-body>" +
+                "<table:table-row><table:table-cell><text:p>甲</text:p></table:table-cell></table:table-row>" +
+                "<table:table-row><table:table-cell><text:p>乙</text:p></table:table-cell></table:table-row>" +
+                "</table:table-body></table:table>",
+        ).single() as DocTable
+        assertTrue(made.header, "表头看它躺在 header-rows 里")
+        assertEquals(listOf(listOf("名称"), listOf("甲"), listOf("乙")), made.rows)
+    }
+
+    @Test
     fun `合并的两种写法一起写时只占一次`() {
         // LibreOffice 在被并掉的位置放 covered 格，pandoc 那类写者只给前一格加 spanned；
         // 真文件会两种一起写 —— 两种都数一遍的话一次合并占两格，整行往右错位

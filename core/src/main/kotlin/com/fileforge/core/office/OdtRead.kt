@@ -228,6 +228,13 @@ object OdtRead {
             val child = node as? Element ?: return@children
             when (localName(child)) {
                 "table-row" -> row(child, ctx, rows)
+                "table-body", "table-footer-rows" ->
+                    // 真文件（LibreOffice 与 pandoc 写的）把正文的行裹在 table:table-body 里：
+                    // 只认裸的 table-row 与 header-rows 的话，一张表除了表头一行都读不出来
+                    children(child) { inner ->
+                        val made = inner as? Element ?: return@children
+                        if (localName(made) == "table-row") row(made, ctx, rows)
+                    }
                 "table-header-rows" -> {
                     header = true
                     children(child) { inner ->

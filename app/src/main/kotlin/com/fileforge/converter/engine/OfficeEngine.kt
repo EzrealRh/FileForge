@@ -223,6 +223,24 @@ class OfficeEngine(private val workspace: Workspace) {
     }
 
     /**
+     * 任何来源 → OpenDocument 文字（.odt）：与写成 Word 拿的是同一棵树，
+     * 只是落笔换成 ODF 的规矩（记号在样式表里、层级在 `text:outline-level` 上）。
+     */
+    fun toOdt(item: WorkItem): EngineOutput {
+        val reading = SourceText.of(item)
+        val out = com.fileforge.core.office.OdtWrite.document(
+            reading.doc, title = OutputNaming.stem(item.name), modifiedAt = item.file.lastModified(),
+        )
+        val file = workspace.newStagingFile("odt").apply { writeBytes(out.bytes) }
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "", "odt"),
+            file,
+            (listOf("${reading.doc.parts.size} 块内容") + reading.notes + reading.doc.notes + out.notes)
+                .joinToString(" · "),
+        )
+    }
+
+    /**
      * Word（.docx）→ Markdown：结构从文件里**读**（见 `:core` 的 DocxRead），再走与网页同一条渲染。
      *
      * 与「Word 提取文字」不是一条路：那条只连字，标题层级、圆点还是编号、表格线都在读的时候丢了。
