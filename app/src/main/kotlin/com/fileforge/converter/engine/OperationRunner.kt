@@ -191,6 +191,12 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
             is Operation.XlsxToCsv -> items.forEach { item ->
                 collect(item.name) { office.toCsv(item, operation.delimiter, operation.ending) }
             }
+            is Operation.XlsxToHtml -> items.forEach { item ->
+                collect(item.name) { listOf(office.xlsxToHtml(item)) }
+            }
+            is Operation.XlsxToMarkdown -> items.forEach { item ->
+                collect(item.name) { listOf(office.xlsxToMarkdown(item)) }
+            }
             is Operation.MdToHtml -> items.forEach { item ->
                 collect(item.name) { listOf(text.markdownToHtml(item)) }
             }

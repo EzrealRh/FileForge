@@ -574,6 +574,12 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
                 Summary("数字照文件里的写法原样搬：1.50 不会变成 1.5，007 不会变成 7。")
                 Summary("公式给的是文件里存着的**算过的结果**；没算过的格子（比如别的工具刚写完还没打开过的）会是空格，并写明有几格。")
             }
+            OperationKind.XlsxToHtml, OperationKind.XlsxToMarkdown -> {
+                Summary("每张表一节，表名当小标题：与「表格转 CSV」用的是同一次读格子，两边的数不会打架。")
+                Summary("行列按文件里的位置对齐 —— `<c r=\"C3\">` 前面没有 A、B 两格时也补在正确的位置上，不整行左移。")
+                Summary("日期按样式认出来再写成 ISO 读法；数字照文件里的写法原样搬（1.50 不变 1.5）。")
+                Summary("表头那一行留空：普通区域里 xlsx 没说首行是表头（那是「格式化为表格」时另外声明的事），没声明就不抬。")
+            }
             OperationKind.MdToHtml -> {
                 Summary("认 CommonMark 加上 GFM 常用的表格、任务列表、删除线；围栏代码带语言名。")
                 Summary("成品是一份完整网页（带 charset），浏览器双击就能看；认不出任何 Markdown 记号时会直接说明，不硬转。")
@@ -1003,6 +1009,8 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
             OperationKind.ImageToIco -> Operation.ImageToIco(icoSizes())
             OperationKind.OfficeToText -> Operation.OfficeToText
             OperationKind.XlsxToCsv -> Operation.XlsxToCsv(csvDelimiter, csvEnding)
+            OperationKind.XlsxToHtml -> Operation.XlsxToHtml
+            OperationKind.XlsxToMarkdown -> Operation.XlsxToMarkdown
             OperationKind.MdToHtml -> Operation.MdToHtml
             OperationKind.MdToText -> Operation.MdToText
             OperationKind.HtmlToText -> Operation.HtmlToText

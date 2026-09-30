@@ -42,6 +42,8 @@ enum class OperationKind(val label: String, val hint: String) {
     TextToPdf("文本印成 PDF", "自动断行分页，中文可在字之间断"),
     OfficeToText("Word 演示提取文字", "docx / pptx 抽正文，丢了什么逐条写明"),
     XlsxToCsv("表格转 CSV", "每张表一份 CSV，日期不再是序列号"),
+    XlsxToHtml("Excel 转网页", "每张表一块表格，浏览器直接打开；行列按文件里的位置对齐"),
+    XlsxToMarkdown("Excel 转 Markdown", "表名当小标题，一张表一节"),
     MdToHtml("Markdown 转 HTML", "出一份带 charset 的完整页面；认不出标记会直说"),
     MdToText("Markdown 去标记", "吃掉标记，列表记号与表格分列留着"),
     HtmlToText("网页抽文字", "段落列表表格留着，脚本样式页眉丢掉"),
@@ -113,8 +115,13 @@ enum class OperationKind(val label: String, val hint: String) {
             ConvertTextEncoding, ConvertSubtitle -> fileKind.isTextual
             // 印成 PDF、写成 Word 与写成电子书走同一条来源判定：docx / pptx / odt 先把正文抽出来，
             // 网页与 Markdown 按内容认，抽出来 / 认出来的是什么就是什么
-            TextToPdf, TextToDocx, TextToEpub ->
+            // 印成 PDF 排的是抽出来的文字；写成 Word 与写成电子书走文档树，
+            // 所以 xlsx 只进后两条 —— 表格里那种网格还没法在 PDF 里画出来
+            TextToPdf ->
                 fileKind.isTextual || fileKind == FileKind.Docx || fileKind == FileKind.Pptx || fileKind == FileKind.Odt
+            TextToDocx, TextToEpub ->
+                fileKind.isTextual || fileKind == FileKind.Docx || fileKind == FileKind.Pptx ||
+                    fileKind == FileKind.Odt || fileKind == FileKind.Xlsx
             OfficeToText -> fileKind == FileKind.Docx || fileKind == FileKind.Pptx
             // Word 的结构读法只给 docx：演示文稿那一套记号在别的文件里（见下面 PptxTo* 那条）
             DocxToMarkdown, DocxToHtml -> fileKind == FileKind.Docx
@@ -126,7 +133,7 @@ enum class OperationKind(val label: String, val hint: String) {
             CsvToOds -> fileKind.isTextual
             // 演示文稿的结构读法：只给 pptx（ODF 的演示另说，见 README 的"还没验证的"）
             PptxToText, PptxToMarkdown, PptxToHtml, PptxToDocx -> fileKind == FileKind.Pptx
-            XlsxToCsv -> fileKind == FileKind.Xlsx
+            XlsxToCsv, XlsxToHtml, XlsxToMarkdown -> fileKind == FileKind.Xlsx
             // 只有真带画面的类型才给"提取音频"，否则用户会对一个纯音频文件点它
             ExtractAudio -> fileKind.isVideo
             // 只放开了 JPEG 和 PNG：这两种容器的清理能做到段级照抄。

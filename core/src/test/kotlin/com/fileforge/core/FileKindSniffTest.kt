@@ -296,10 +296,20 @@ class FileKindSniffTest {
         assertTrue(OperationKind.ConvertTextEncoding in html, "网页也要能换编码：$html")
         assertTrue(OperationKind.TextToPdf in html, "网页能印成 PDF：$html")
         assertTrue(OperationKind.TextToDocx in html, "网页能写成 Word：$html")
-        // 表格没有"连着读的正文"，摆一条"写成 Word"只会产出一份把格子摊平的文档
+        // xlsx 现在写得真表格：写成 Word 与写成电子书走文档树，行列在产物里还是行列；
+        // 但印成 PDF 排的是文字（PDF 那边还画不出表格网格），这一条不给
+        val xlsx = OperationKind.applicable(setOf(FileKind.Xlsx))
         assertTrue(
-            OperationKind.TextToDocx !in OperationKind.applicable(setOf(FileKind.Xlsx)),
-            "xlsx 不该拿到「写成 Word」",
+            setOf(
+                OperationKind.XlsxToCsv, OperationKind.XlsxToHtml, OperationKind.XlsxToMarkdown,
+                OperationKind.TextToDocx, OperationKind.TextToEpub,
+            ).all { it in xlsx },
+            "xlsx 该有这几条：$xlsx",
+        )
+        assertTrue(OperationKind.TextToPdf !in xlsx, "PDF 还画不了表格网格，先不给 xlsx「印成 PDF」：$xlsx")
+        assertTrue(
+            OperationKind.OdsToCsv !in xlsx && OperationKind.CsvToXlsx !in xlsx,
+            "xlsx 既不是 ODS，也不是「把文本写成 xlsx」的来料：$xlsx",
         )
         // 网页与纯文本混着选：这两条对两边都成立（引擎自己判有没有标签）
         assertTrue(

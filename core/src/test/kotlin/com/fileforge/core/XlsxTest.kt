@@ -3,8 +3,15 @@ package com.fileforge.core
 import com.fileforge.core.archive.ZipReader
 import com.fileforge.core.data.Csv
 import com.fileforge.core.data.Delimiter
+import com.fileforge.core.doc.Doc
+import com.fileforge.core.doc.DocParagraph
+import com.fileforge.core.doc.DocTable
+import com.fileforge.core.doc.Html
+import com.fileforge.core.doc.HtmlWrite
+import com.fileforge.core.office.DocxWrite
 import com.fileforge.core.office.OoxmlStructure
 import com.fileforge.core.office.Xlsx
+import com.fileforge.core.office.XlsxSheets
 import java.io.ByteArrayOutputStream
 import java.io.File
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -249,5 +256,93 @@ class XlsxTest {
             File(dir, "book.xlsx.sheet${index + 1}.notes").writeText(sheet.notes.joinToString("\n"), Charsets.UTF_8)
         }
         assertEquals(3, dir.listFiles()?.count { it.name.startsWith("book.xlsx") && it.name.endsWith(".csv") })
+    }
+
+    // ---- 一批表 → 文档树（转网页 / 转 Markdown / 写成 Word 与电子书共用这一份）--------
+
+    private fun tree() = XlsxSheets.book { load(it) }
+
+    private fun tables() = XlsxSheets.parts(tree().sheets).filterIsInstance<DocTable>()
+
+    @Test
+    fun `每张表一节_表名当小标题`() {
+        val parts = XlsxSheets.parts(tree().sheets)
+        assertEquals(listOf("费用", "第三张"), parts.filterIsInstance<DocParagraph>().map { it.para.text })
+        assertEquals(listOf(7, 1), tables().map { it.rows.size })
+    }
+
+    @Test
+    fun `空表不占一节但被说出来`() {
+        val notes = XlsxSheets.notes(tree().sheets)
+        assertTrue(notes.any { "空表" in it && "没占一节" in it }, notes.toString())
+        val made = XlsxSheets.parts(tree().sheets).filterIsInstance<DocTable>()
+        assertEquals("${made.size} 张表 · ${made.sumOf { it.rows.size }} 行", XlsxSheets.summary(tree().sheets).first())
+    }
+
+    @Test
+    fun `首行不被抬成表头`() {        // 普通区域里 xlsx 没说"首行是表头"：那是「格式化为表格」时由 xl/tables 另外声明的事
+        assertEquals(listOf(false, false), tables().map { it.header })
+    }
+
+    @Test
+    fun `稀疏的行列补在文件说的那个位置上`() {
+        assertEquals(listOf(5, 1), tables().map { it.rows.maxOf { row -> row.size } })
+        val table = tables().first()
+        assertTrue(table.rows.all { it.size == 5 }, "有行没补齐到 5 列：${table.rows}")
+        assertEquals("第五行只有 D 列有东西", table.rows[4][3])
+        assertEquals("", table.rows[4].first())
+        assertEquals("纯文字", table.rows[6][1])
+    }
+
+    @Test
+    fun `日期与数字的写法照读回来的样子进格子`() {
+        val rows = tables().first().rows
+        assertEquals("38.5", rows[1][1])
+        assertTrue(rows[1][2].matches(Regex("""\d{4}-\d{2}-\d{2}.*""")), "日期没转成 ISO 写法：${rows[1][2]}")
+        assertTrue(rows.flatten().none { it.matches(Regex("""\d{4,6}""")) }, "格子里还留着序列号")
+        assertEquals("含中文的格子，带逗号,", rows[3][0])
+    }
+
+    @Test
+    fun `部件找不到的那张表进 reasons_不静悄悄少一张`() {
+        val refs = Xlsx.sheets { load(it) }
+        val lost = refs.mapNotNull { it.part }.first()
+        val read = XlsxSheets.book { name -> if (name == lost) null else load(name) }
+        assertEquals(refs.size - 1, read.sheets.size)
+        assertEquals(1, read.reasons.size)
+        assertTrue(read.reasons.single().isNotBlank(), read.reasons.toString())
+    }
+
+    /**
+     * 真实夹具的三条产物落盘：判据跑的是磁盘上这些文件。
+     *
+     * 断言放在产文件**之后**：先断言会让坏实现把上一轮的旧产物留下，外部判据拿着旧文件说全绿。
+     */
+    @Test
+    fun `表的产物落盘供外部判据对照`() {
+        val dir = File("build/xlsxread").apply { mkdirs() }
+        dir.listFiles()?.forEach { old -> if (old.isFile) old.delete() }
+        val read = tree()
+        val parts = XlsxSheets.parts(read.sheets)
+        require(parts.isNotEmpty()) { "什么块都没读到，夹具或读法坏了" }
+        val grid = read.sheets.flatMap { sheet ->
+            listOf("表 ${sheet.name}") + sheet.rows.map { row -> row.joinToString("\t") }
+        }.joinToString("\n")
+        File(dir, "book.xlsx").writeBytes(book)
+        File(dir, "book.grid.txt").writeText("$grid\n", Charsets.UTF_8)
+        File(dir, "book.md").writeText(Html.toMarkdown(HtmlWrite.body(parts)).text, Charsets.UTF_8)
+        File(dir, "book.html").writeText(HtmlWrite.page("book", parts, language = "zh").html, Charsets.UTF_8)
+        File(dir, "book.docx").writeBytes(DocxWrite.document(Doc(parts, emptyList()), modifiedAt = 0L).bytes)
+        File(dir, "book.notes.txt").writeText(
+            (XlsxSheets.summary(read.sheets) + XlsxSheets.notes(read.sheets) + read.reasons)
+                .joinToString("\n") + "\n",
+            Charsets.UTF_8,
+        )
+        assertEquals(
+            3,
+            dir.listFiles().orEmpty().count {
+                it.name.endsWith(".md") || it.name.endsWith(".html") || it.name.endsWith(".docx")
+            },
+        )
     }
 }

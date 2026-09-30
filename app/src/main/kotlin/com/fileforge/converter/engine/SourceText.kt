@@ -23,6 +23,21 @@ internal object SourceText {
 
     fun of(item: WorkItem): Reading {
         val notes = ArrayList<String>()
+        if (item.kind == FileKind.Xlsx) {
+            // 工作簿摊成"一张表一节"：写成 Word 与写成电子书里拿到的是真表格，不是一片制表符
+            val book = OoxmlFile(item.file).use { pack -> com.fileforge.core.office.XlsxSheets.book { name -> pack.bytesOf(name) } }
+            val parts = com.fileforge.core.office.XlsxSheets.parts(book.sheets)
+            require(parts.isNotEmpty()) {
+                book.reasons.ifEmpty { listOf("每张表都是空的") }.joinToString(" · ")
+            }
+            val telling = ArrayList(listOf("按文件里写的结构排"))
+            telling += com.fileforge.core.office.XlsxSheets.summary(book.sheets)
+            telling += com.fileforge.core.office.XlsxSheets.notes(book.sheets)
+            if (book.reasons.isNotEmpty()) {
+                telling += "另有 ${book.reasons.size} 张表没转出来：${book.reasons.joinToString("、")}"
+            }
+            return Reading(Doc(parts, telling), com.fileforge.core.doc.HtmlWrite.text(parts), telling)
+        }
         if (item.kind == FileKind.Pptx) {
             // 演示稿也用读回来的树：哪一块是标题、哪几条是列表是那一页自己写的，
             // 抽平文字再排版会把它们抹成一片正文

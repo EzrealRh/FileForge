@@ -26,6 +26,7 @@ import com.fileforge.core.office.OoxmlStructure
 import com.fileforge.core.office.Sheet
 import com.fileforge.core.office.SheetToWrite
 import com.fileforge.core.office.Xlsx
+import com.fileforge.core.office.XlsxSheets
 import com.fileforge.core.office.XlsxWrite
 import java.io.File
 
@@ -83,19 +84,61 @@ class OfficeEngine(private val workspace: Workspace) {
     /** 一次读入：哪张表读成了、哪张读不成为什么，一起带回去。 */
     private class Readout(val sheets: List<Sheet>, val reasons: List<String>)
 
+    /**
+     * xlsx → 网页：每张表一块表格，表名当小标题。
+     *
+     * 与「表格转 CSV」共用同一次读格子，所以两边的数不会打架。
+     */
+    fun xlsxToHtml(item: WorkItem): EngineOutput {
+        val read = readSheets(item.file)
+        val parts = XlsxSheets.parts(read.sheets)
+        require(parts.isNotEmpty()) { failures(read) }
+        val page = HtmlWrite.page(OutputNaming.stem(item.name), parts, language = "zh")
+        val notes = ArrayList(xlsxNotes(read))
+        notes += page.notes
+        val file = workspace.newStagingFile("html").apply { writeText(page.html, Charsets.UTF_8) }
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "网页", "html"),
+            file,
+            notes.joinToString(" · "),
+        )
+    }
+
+    /** xlsx → Markdown：一张表一节；首行不当表头（普通区域里文件没说它是表头）。 */
+    fun xlsxToMarkdown(item: WorkItem): EngineOutput {
+        val read = readSheets(item.file)
+        val parts = XlsxSheets.parts(read.sheets)
+        require(parts.isNotEmpty()) { failures(read) }
+        val rendered = Html.toMarkdown(HtmlWrite.body(parts))
+        val notes = ArrayList(xlsxNotes(read))
+        notes += rendered.notes
+        val file = workspace.newStagingFile("md").apply { writeText(rendered.text, Charsets.UTF_8) }
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "Markdown", "md"),
+            file,
+            notes.joinToString(" · "),
+        )
+    }
+
+    /** 这份 xlsx 的格子（表名 + 补齐后的行）：转网页、转 Markdown 与写成 Word / 电子书共用。 */
+    fun xlsxParts(item: WorkItem): List<DocPart> =
+        XlsxSheets.parts(readSheets(item.file).sheets)
+
+    /** xlsx 那侧要说清的话：几张表几行几列、哪张没转出来。 */
+    private fun xlsxNotes(read: Readout): List<String> {
+        val notes = ArrayList(XlsxSheets.summary(read.sheets))
+        notes += XlsxSheets.notes(read.sheets).filter { it !in notes }
+        if (read.reasons.isNotEmpty()) notes += "另有 ${read.reasons.size} 张表没转出来：${read.reasons.joinToString("、")}"
+        return notes
+    }
+
+    private fun failures(read: Readout): String =
+        read.reasons.ifEmpty { listOf("每张表都是空的") }.joinToString(" · ")
+
     private fun readSheets(file: File): Readout = OoxmlFile(file).use { pack ->
         require(pack.kind == FileKind.Xlsx) { "这份包里没找到 xl/workbook.xml，它不是 xlsx" }
-        val strings = Xlsx.sharedStrings(pack.bytesOf(Xlsx.SHARED_STRINGS))
-        val styles = Xlsx.dateStyles(pack.bytesOf(Xlsx.STYLES))
-        val epoch = Xlsx.uses1904(pack.bytesOf(OoxmlStructure.WORKBOOK))
-        val sheets = ArrayList<Sheet>()
-        val reasons = ArrayList<String>()
-        pack.sheetRefs().forEach { ref ->
-            val bytes = ref.part?.let { pack.bytesOf(it) }
-            if (bytes == null) reasons += "${ref.name}：${ref.part ?: "包里找不到对应部件"} 读不出来"
-            else sheets += Xlsx.sheet(ref.name, bytes, strings, styles, epoch)
-        }
-        Readout(sheets, reasons)
+        val book = XlsxSheets.book { name -> pack.bytesOf(name) }
+        Readout(book.sheets, book.reasons)
     }
 
     private fun tag(sheetName: String): String = OutputNaming.sanitize(sheetName).take(MAX_SHEET_TAG)
