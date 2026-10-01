@@ -55,14 +55,26 @@ class TextCodecTest {
         assertTrue(decoded.hadBom, "要报出这份带 BOM，界面得让用户知道会不会多一个字符")
         assertEquals("你好", decoded.text, "BOM 本身不能留在正文里")
 
-        // UTF-16LE 的 4 字节 BOM 不能被 2 字节那条抢走，否则后两个零字节会变成正文里的字符
-        val utf16 = bytes(0xFF, 0xFE, 0x00, 0x00) + "a\u0000".toByteArray(Charsets.ISO_8859_1)
-        assertEquals(TextEncoding.Utf16Le, TextCodecs.detectBom(utf16))
+        // FF FE 00 00 按 Unicode 规范是 UTF-32LE 的签名，必须排在 FF FE 前面 ——
+        // 当成 UTF-16LE 解的话，真正的 UTF-32 文件出来的是隔字节的乱码
+        val utf32 = bytes(0xFF, 0xFE, 0x00, 0x00) + "a".toByteArray(Charsets.UTF_32LE)
+        assertEquals(TextEncoding.Utf32Le, TextCodecs.detectBom(utf32))
+        val utf32Decoded = TextCodecs.decode(utf32, TextEncoding.Utf32Le)
+        assertEquals("a", utf32Decoded.text, "BOM 之后的正文按 UTF-32 解")
 
         val encoded = TextCodecs.encode("x", TextEncoding.Utf8, bom = true)
         assertEquals(4, encoded.bytes.size)
         assertEquals(TextEncoding.Utf8, TextCodecs.detectBom(encoded.bytes))
         assertNull(TextCodecs.bomBytes(TextEncoding.Gb18030), "GBK 没有 BOM 这种东西")
+    }
+
+    @Test
+    fun `UTF-32 两个方向都编得回也解得回`() {
+        listOf(TextEncoding.Utf32Le, TextEncoding.Utf32Be).forEach { encoding ->
+            assertTrue(TextCodecs.roundTrips("你好，world！\uD83D\uDE00", encoding), "${encoding.label} 往返不丢字")
+            val bom = TextCodecs.bomBytes(encoding)!!
+            assertEquals(encoding, TextCodecs.detectBom(bom + "正文".toByteArray(charset(encoding.charsetName))))
+        }
     }
 
     @Test

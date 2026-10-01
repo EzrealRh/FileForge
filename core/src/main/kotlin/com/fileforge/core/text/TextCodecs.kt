@@ -15,6 +15,8 @@ enum class TextEncoding(val label: String, val charsetName: String, val shortTag
     Latin1("ISO-8859-1（西欧单字节）", "ISO-8859-1", "latin1"),
     Utf16Le("UTF-16 小端", "UTF-16LE", "utf16le"),
     Utf16Be("UTF-16 大端", "UTF-16BE", "utf16be"),
+    Utf32Le("UTF-32 小端", "UTF-32LE", "utf32le"),
+    Utf32Be("UTF-32 大端", "UTF-32BE", "utf32be"),
     ;
 }
 
@@ -39,11 +41,11 @@ object TextCodecs {
         val clean: Boolean get() = replaced == 0
     }
 
-    /** 各编码的 BOM（UTF-16 的两个方向靠 BOM 区分，所以两个都登记）。 */
+    /** 各编码的 BOM（UTF-16/32 的方向靠 BOM 区分，所以四个都登记）。 */
     private val boms = listOf(
         byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte()) to TextEncoding.Utf8,
-        byteArrayOf(-1, -2, 0, 0) to TextEncoding.Utf16Le,
-        byteArrayOf(0, 0, -2, -1) to TextEncoding.Utf16Be,
+        byteArrayOf(0, 0, 0xFE.toByte(), 0xFF.toByte()) to TextEncoding.Utf32Be,
+        byteArrayOf(-1, -2, 0, 0) to TextEncoding.Utf32Le,
         byteArrayOf(-1, -2) to TextEncoding.Utf16Le,
         byteArrayOf(-2, -1) to TextEncoding.Utf16Be,
     )
@@ -51,7 +53,7 @@ object TextCodecs {
     fun available(encoding: TextEncoding): Boolean =
         runCatching { Charset.forName(encoding.charsetName) }.isSuccess
 
-    /** 这份字节带的 BOM（没有返回 null）。长的先匹配，否则 UTF-16LE 的 4 字节 BOM 会被 2 字节抢走。 */
+    /** 这份字节带的 BOM（没有返回 null）。长的先匹配：`FF FE 00 00` 是 UTF-32LE 的签名，必须排在 `FF FE` 前面。 */
     fun detectBom(bytes: ByteArray): TextEncoding? {
         for ((bom, encoding) in boms.sortedByDescending { it.first.size }) {
             if (bytes.size >= bom.size && bom.indices.all { bytes[it] == bom[it] }) return encoding
@@ -63,6 +65,8 @@ object TextCodecs {
         TextEncoding.Utf8 -> byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte())
         TextEncoding.Utf16Le -> byteArrayOf(-1, -2)
         TextEncoding.Utf16Be -> byteArrayOf(-2, -1)
+        TextEncoding.Utf32Le -> byteArrayOf(-1, -2, 0, 0)
+        TextEncoding.Utf32Be -> byteArrayOf(0, 0, -2, -1)
         else -> null
     }
 
