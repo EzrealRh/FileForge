@@ -291,12 +291,17 @@ object Epub {
     }
 
     /**
-     * 内容文档的编码三层判：BOM → UTF-16 形状（有的工具写 UTF-16 不带 BOM）→ 声明的编码
-     * （XHTML 是 `<?xml encoding=…?>`，HTML 章节是 `<meta charset=…>`）。
+     * 内容文档的编码判定（按优先级）：
      *
-     * 中文电子书大量用 GBK/GB18030 写章节：没有第三层的话，那些章节会按 UTF-8 硬解成乱码。
-     * 按声明解出来**必须一个替换符都没有**才敢用（猜错的编码解出来是能打开的乱码），
-     * 解完重编成 UTF-8 时把声明里的编码名一并改成 utf-8，否则下游解析器按旧声明又读歪一次。
+     * 1. BOM 与 UTF-16 形状 —— 有的工具写 UTF-16 不带 BOM，看"每隔一字节是 0"的形状。
+     * 2. 字节层的 UTF-8：中文 UTF-8 不会恰好是合法 GBK，GBK 中文也很难是合法 UTF-8，
+     *    所以"合法且带多字节的 UTF-8"基本一锤定音 —— **声明瞎写 gb2312 的野文件就栽在这**。
+     *    少量坏字节（截断、混编）按替换符修补，占比小到不可能是"整份被硬解"的程度；
+     *    声明若写着别的编码要一并改写成 utf-8，不然下游解析器按旧声明又读歪一次。
+     * 3. 声明的编码（XML 声明的 encoding / HTML 的 meta charset）：严格解，零替换符才采信。
+     * 4. 没声明或声明不可用、且字节确实不是 UTF-8：试 GB18030（GBK 超集，中文电子书
+     *    的最大公约数），同样要求干净。
+     * 都不行就原样交出去 —— 那时替换符会出现在结果里，界面照实转达，比硬猜一个方向强。
      */
     private fun decode(bytes: ByteArray): ByteArray {
         if (bytes.size < 4) return bytes
@@ -312,40 +317,57 @@ object Epub {
             else -> null
         }
         if (utf16 != null) return String(bytes, utf16).toByteArray(Charsets.UTF_8)
-
-        // 声明说是 GBK/Big5 之前，先看字节自己：中文 UTF-8 文件不会恰好是合法的 GBK/Big5，
-        // 反过来 GBK 中文也很难是合法 UTF-8 —— 所以"合法且带多字节的 UTF-8"与"声明 gb2312"
-        // 并存时，声明是瞎写的，按 UTF-8 走（真 GBK 文件过不了严格 UTF-8 校验，不受影响）。
-        // 声明还瞎写着别的编码就得改写掉，不然下游解析器按旧声明又读歪一次。
-        if (com.fileforge.core.text.TextCodecs.isValidUtf8(bytes) &&
-            bytes.any { (it.toInt() and 0xFF) >= 0x80 }
-        ) {
-            val text = String(bytes, Charsets.UTF_8)
-            return text
-                .replace(Regex("""(<\?xml[^>]*?encoding\s*=\s*["'])[^"']+(["'])"""), "$1UTF-8$2")
-                .replace(Regex("""(charset\s*=\s*["']?)[A-Za-z0-9_.-]+"""), "$1utf-8")
-                .toByteArray(Charsets.UTF_8)
-        }
+        if (bytes.none { (it.toInt() and 0xFF) >= 0x80 }) return bytes      // 纯 ASCII，编码无关
 
         val head = String(bytes, 0, minOf(bytes.size, 4096), Charsets.ISO_8859_1)
         val declared = (XML_ENCODING.find(head) ?: META_CHARSET.find(head))?.groupValues?.get(1)?.lowercase()
-            ?: return bytes
-        if (declared == "utf-8" || declared == "utf8") return bytes
-        val target = runCatching { java.nio.charset.Charset.forName(declared) }.getOrNull() ?: return bytes
-        val text = runCatching {
-            java.nio.ByteBuffer.wrap(bytes).let { buffer ->
-                target.newDecoder()
-                    .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
-                    .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
-                    .decode(buffer).toString()
+
+        // 2) 字节层的 UTF-8。整份严格合法最好；有坏字节时看替换符占比 —— 真 GBK 文件被硬解
+        //    的话替换符是十几万级别的，几百个以内的都是"UTF-8 里混了几根刺"
+        val utf8 = runCatching {
+            Charsets.UTF_8.newDecoder()
+                .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                .decode(java.nio.ByteBuffer.wrap(bytes)).toString()
+        }
+        if (utf8.isSuccess) return declaredUtf8(utf8.getOrThrow())
+        val lenient = Charsets.UTF_8.newDecoder()
+            .onMalformedInput(java.nio.charset.CodingErrorAction.REPLACE)
+            .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPLACE)
+            .decode(java.nio.ByteBuffer.wrap(bytes)).toString()
+        val bad = lenient.count { it == '\uFFFD' }
+        if (bad <= 4 + bytes.size / 1000) return declaredUtf8(lenient)
+
+        // 3) 声明的非 UTF-8 编码（gbk / gb18030 / big5…）：严格解，零替换符才采信
+        if (declared != null && declared != "utf-8" && declared != "utf8") {
+            val target = runCatching { java.nio.charset.Charset.forName(declared) }.getOrNull()
+            if (target != null) {
+                val text = runCatching {
+                    target.newDecoder()
+                        .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                        .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                        .decode(java.nio.ByteBuffer.wrap(bytes)).toString()
+                }.getOrNull()
+                if (text != null && !text.contains('\uFFFD')) return declaredUtf8(text)
             }
-        }.getOrNull() ?: return bytes          // 声明与实际字节对不上：不硬猜，交给 UTF-8 走替换计数那条路
-        if (text.contains('\uFFFD')) return bytes
-        val fixed = text
-            .replace(Regex("""(<\?xml[^>]*?encoding\s*=\s*["'])[^"']+(["'])"""), "$1UTF-8$2")
-            .replace(Regex("""(charset\s*=\s*["']?)[A-Za-z0-9_.-]+"""), "$1utf-8")
-        return fixed.toByteArray(Charsets.UTF_8)
+        }
+
+        // 4) 没声明（或声明不可用）且确实不是 UTF-8：试 GB18030，干净才采信
+        if (declared == null) {
+            val asGbk = java.nio.charset.Charset.forName("GB18030").newDecoder()
+                .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                .decode(java.nio.ByteBuffer.wrap(bytes)).toString()
+            if (!asGbk.contains('\uFFFD')) return declaredUtf8(asGbk)
+        }
+        return bytes
     }
+
+    /** 解出来的文字重编 UTF-8 时，把声明里的编码名一并改成 utf-8，防下游按旧声明再读歪。 */
+    private fun declaredUtf8(text: String): ByteArray = text
+        .replace(Regex("""(<\?xml[^>]*?encoding\s*=\s*["'])[^"']+(["'])"""), "$1UTF-8$2")
+        .replace(Regex("""(charset\s*=\s*["']?)[A-Za-z0-9_.-]+"""), "$1utf-8")
+        .toByteArray(Charsets.UTF_8)
 
     private fun String.ifNotEmpty(): String? = if (isEmpty()) null else this
 

@@ -251,4 +251,33 @@ class EpubTest {
         assertEquals("第一章", read.chapters.single().title, "标题不能是乱码")
         assertTrue(read.chapters.single().source.contains("其实我是 UTF-8"), read.chapters.single().source.take(80))
     }
+
+    @Test
+    fun `UTF-8 章节混进少量坏字节时按 UTF-8 修补而不是整份按声明硬解`() {
+        // 把 0xFF 塞进"你好，"和"这一段"之间：严格 UTF-8 失败，但替换符只有 1 个 ——
+        // 是"混了刺的 UTF-8"，不是"整份 GBK 被硬解"（那种替换符是十几万级别）
+        val head = """<?xml version="1.0" encoding="gb2312"?><html xmlns="http://www.w3.org/1999/xhtml">""" +
+            "<head><title>第一章</title></head><body><p>你好，"
+        val tail = "这一段后面混进了一个坏字节，其余要完好。</p></body></html>"
+        val bytes = head.toByteArray(Charsets.UTF_8) + byteArrayOf(0xFF.toByte()) + tail.toByteArray(Charsets.UTF_8)
+        val opf = opf(
+            """<item id="a" href="text/ch1.xhtml" media-type="application/xhtml+xml"/>""",
+            """<itemref idref="a"/>""",
+        )
+        val read = Epub.read(book(opf, "OEBPS/text/ch1.xhtml" to bytes))
+        assertEquals("第一章", read.chapters.single().title)
+        assertTrue(read.chapters.single().source.contains("其余要完好"), read.chapters.single().source.take(120))
+    }
+
+    @Test
+    fun `没声明编码的 GBK 章节按 GB18030 兜底`() {
+        val chapter = "<html><head><title>第一章</title></head><body><p>繁杂的中文内容测试通过</p></body></html>"
+            .toByteArray(charset("GB18030"))
+        val opf = opf(
+            """<item id="a" href="text/ch1.xhtml" media-type="application/xhtml+xml"/>""",
+            """<itemref idref="a"/>""",
+        )
+        val read = Epub.read(book(opf, "OEBPS/text/ch1.xhtml" to chapter))
+        assertTrue(read.chapters.single().source.contains("繁杂的中文内容测试"), read.chapters.single().source.take(80))
+    }
 }
