@@ -235,4 +235,20 @@ class EpubTest {
         val read = Epub.read(book(opf, "OEBPS/text/ch1.html" to chapter))
         assertTrue(read.chapters.single().source.contains("简体中文内容测试"), read.chapters.single().source.take(80))
     }
+
+    @Test
+    fun `声明写着 gb2312 但字节其实是 UTF-8 时按字节走`() {
+        // 野文件常见：声明瞎写。UTF-8 按 GBK 解出来"很干净"，零替换符的闸门拦不住这个方向，
+        // 所以字节本身是合法且带多字节的 UTF-8 时，直接按 UTF-8 走并改写声明
+        val chapter = ("""<?xml version="1.0" encoding="gb2312"?><html xmlns="http://www.w3.org/1999/xhtml">""" +
+            "<head><title>第一章</title></head><body><p>你好，其实我是 UTF-8 的字节。</p></body></html>")
+            .toByteArray(Charsets.UTF_8)
+        val opf = opf(
+            """<item id="a" href="text/ch1.xhtml" media-type="application/xhtml+xml"/>""",
+            """<itemref idref="a"/>""",
+        )
+        val read = Epub.read(book(opf, "OEBPS/text/ch1.xhtml" to chapter))
+        assertEquals("第一章", read.chapters.single().title, "标题不能是乱码")
+        assertTrue(read.chapters.single().source.contains("其实我是 UTF-8"), read.chapters.single().source.take(80))
+    }
 }

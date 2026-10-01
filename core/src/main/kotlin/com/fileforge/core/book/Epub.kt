@@ -313,6 +313,20 @@ object Epub {
         }
         if (utf16 != null) return String(bytes, utf16).toByteArray(Charsets.UTF_8)
 
+        // 声明说是 GBK/Big5 之前，先看字节自己：中文 UTF-8 文件不会恰好是合法的 GBK/Big5，
+        // 反过来 GBK 中文也很难是合法 UTF-8 —— 所以"合法且带多字节的 UTF-8"与"声明 gb2312"
+        // 并存时，声明是瞎写的，按 UTF-8 走（真 GBK 文件过不了严格 UTF-8 校验，不受影响）。
+        // 声明还瞎写着别的编码就得改写掉，不然下游解析器按旧声明又读歪一次。
+        if (com.fileforge.core.text.TextCodecs.isValidUtf8(bytes) &&
+            bytes.any { (it.toInt() and 0xFF) >= 0x80 }
+        ) {
+            val text = String(bytes, Charsets.UTF_8)
+            return text
+                .replace(Regex("""(<\?xml[^>]*?encoding\s*=\s*["'])[^"']+(["'])"""), "$1UTF-8$2")
+                .replace(Regex("""(charset\s*=\s*["']?)[A-Za-z0-9_.-]+"""), "$1utf-8")
+                .toByteArray(Charsets.UTF_8)
+        }
+
         val head = String(bytes, 0, minOf(bytes.size, 4096), Charsets.ISO_8859_1)
         val declared = (XML_ENCODING.find(head) ?: META_CHARSET.find(head))?.groupValues?.get(1)?.lowercase()
             ?: return bytes
