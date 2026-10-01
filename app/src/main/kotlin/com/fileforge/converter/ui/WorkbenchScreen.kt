@@ -24,6 +24,7 @@ import androidx.compose.material.icons.outlined.PictureAsPdf
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.PhotoAlbum
+import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.RuleFolder
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Download
@@ -34,6 +35,8 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -51,7 +54,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
@@ -72,6 +77,7 @@ fun WorkbenchScreen(
 ) {
     val state by viewModel.state.collectAsState()
     val snackbar = remember { SnackbarHostState() }
+    var overflowOpen by remember { mutableStateOf(false) }
 
     // 用序号当 key，否则连着两条同文案的提示会被吞掉
     LaunchedEffect(state.notice?.seq) {
@@ -120,6 +126,20 @@ fun WorkbenchScreen(
                         Icon(
                             Icons.Outlined.Delete,
                             contentDescription = if (state.selection.isEmpty()) "清空工作台" else "删除选中的 ${state.selection.size} 个",
+                        )
+                    }
+                    // 「检查更新」在顶栏的更多菜单里常驻：它原来躺在筛选条里，
+                    // 而筛选条横向滚、它又排在最后，屏幕一窄就像没有这个功能
+                    IconButton(onClick = { overflowOpen = true }) {
+                        Icon(Icons.Outlined.MoreVert, contentDescription = "更多")
+                    }
+                    DropdownMenu(expanded = overflowOpen, onDismissRequest = { overflowOpen = false }) {
+                        DropdownMenuItem(
+                            text = { Text("检查更新") },
+                            onClick = {
+                                overflowOpen = false
+                                viewModel.openUpdateSheet()
+                            },
                         )
                     }
                 },
@@ -212,14 +232,6 @@ fun WorkbenchScreen(
                             selected = state.groupByBatch,
                             onClick = viewModel::toggleBatchGroup,
                             label = { Text("按批次", maxLines = 1) },
-                        )
-                        // 更新入口写成字：光一个箭头图标没人认得出是"检查更新"
-                        androidx.compose.material3.AssistChip(
-                            onClick = viewModel::openUpdateSheet,
-                            label = { Text("检查更新", maxLines = 1) },
-                            leadingIcon = {
-                                Icon(Icons.Outlined.Download, contentDescription = null, modifier = Modifier.size(18.dp))
-                            },
                         )
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

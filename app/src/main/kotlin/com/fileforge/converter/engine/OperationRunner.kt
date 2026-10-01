@@ -54,6 +54,9 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
             is Operation.CompressImage -> items.forEach { item ->
                 collect(item.name) { listOf(images.compress(item, operation, ::staging)) }
             }
+            is Operation.ImageWatermark -> items.forEach { item ->
+                collect(item.name) { listOf(images.watermark(item, operation, ::staging)) }
+            }
             is Operation.ImagesToPdf -> collect("${items.size} 张图片") {
                 listOf(pdf.imagesToPdf(items, operation.paper, operation.marginDp))
             }

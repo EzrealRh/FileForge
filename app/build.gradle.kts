@@ -1,4 +1,4 @@
-val appVersion = "0.38.0"
+val appVersion = "0.39.0"
 
 plugins {
     alias(libs.plugins.android.application)
@@ -14,7 +14,7 @@ android {
         applicationId = "com.fileforge.converter"
         minSdk = 26
         targetSdk = 35
-        versionCode = 52
+        versionCode = 53
         versionName = appVersion
         resourceConfigurations += listOf("zh", "en")
     }

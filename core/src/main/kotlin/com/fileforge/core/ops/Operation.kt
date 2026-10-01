@@ -53,6 +53,17 @@ sealed interface Operation {
         override val label get() = "合成为 PDF"
     }
 
+    /** 图片加文字水印：单处（居中或四角）或平铺，白字按透明度叠上去，格式跟源走。 */
+    data class ImageWatermark(
+        val text: String,
+        val spot: Int = 0,
+        val tiled: Boolean = false,
+        val opacityPercent: Int = 30,
+        val tilt: Int = 0,
+    ) : Operation {
+        override val label get() = "图片加水印"
+    }
+
     /** 按目标体积分割，尾部不足一份的剩余页单独成文件。 */
     data class SplitPdfBySize(val targetBytes: Long) : Operation {
         override val label get() = "按 ${targetLabel(targetBytes)} 分割"

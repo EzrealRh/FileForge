@@ -231,6 +231,11 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
     var watermarkOpacity by mutableStateOf(18f)
     var watermarkTilt by mutableStateOf(45f)
     var watermarkGray by mutableStateOf(45f)
+    var imageWatermarkText by mutableStateOf("")
+    var imageWatermarkSpot by mutableStateOf(0)
+    var imageWatermarkTiled by mutableStateOf(false)
+    var imageWatermarkOpacity by mutableStateOf(35f)
+    var imageWatermarkTilt by mutableStateOf(0f)
 
     @Composable
     fun Content() {
@@ -375,6 +380,28 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
                 IntSlider("倾斜", watermarkTilt, -90f..90f, { "%.0f°".format(it) }, step = 5f) { watermarkTilt = it }
                 PageSpecField("留空=整份都盖；也可只盖几页，例：1,5-8", "没点到的页原样带过去")
                 Summary("1x1 就是页面正中一块；行列调大就平铺，字会自动按格子宽度缩放")
+            }
+            OperationKind.ImageWatermark -> {
+                OutlinedTextField(
+                    value = imageWatermarkText,
+                    onValueChange = { imageWatermarkText = it },
+                    label = { Text("水印文字") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Segmented("位置", listOf("居中", "右下", "左下", "右上", "左上"), imageWatermarkSpot) {
+                    imageWatermarkSpot = it
+                }
+                Segmented("排布", listOf("单处", "平铺整张"), if (imageWatermarkTiled) 1 else 0) {
+                    imageWatermarkTiled = it == 1
+                }
+                IntSlider("不透明度", imageWatermarkOpacity, 5f..100f, { "%.0f%%".format(it) }) {
+                    imageWatermarkOpacity = it
+                }
+                IntSlider("倾斜", imageWatermarkTilt, -90f..90f, { "%.0f°".format(it) }, step = 5f) {
+                    imageWatermarkTilt = it
+                }
+                Summary("白字带阴影叠在画面上，字号按画面自适应；输出格式跟源走（PNG 保持 PNG）")
             }
             OperationKind.CompressVideo -> {
                 Segmented("封装", VideoFormat.entries.map { it.label }, videoFormat.ordinal) {
@@ -908,6 +935,7 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
         if (kind == OperationKind.RemovePdfPages && pageSpec.isBlank()) return "先写要删哪些页"
         if (kind == OperationKind.MergePdfs && items.size < 2) return "合并 PDF 至少选两个文件"
         if (kind == OperationKind.PdfWatermark && watermarkText.isBlank()) return "先写要盖的水印文字"
+        if (kind == OperationKind.ImageWatermark && imageWatermarkText.isBlank()) return "先写要盖的水印文字"
         if (kind == OperationKind.JsonToXml && xmlRoot.isNotBlank() && !Xml.isElementName(xmlRoot.trim())) {
             return "根元素名「${xmlRoot.trim()}」不能当 XML 标签用"
         }
@@ -951,6 +979,10 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
                 watermarkText.trim(), watermarkColumns.roundToInt(), watermarkRows.roundToInt(),
                 watermarkOpacity.roundToInt(), watermarkTilt.roundToInt(), watermarkGray.roundToInt(),
                 pageSpec.trim(),
+            )
+            OperationKind.ImageWatermark -> Operation.ImageWatermark(
+                imageWatermarkText.trim(), imageWatermarkSpot, imageWatermarkTiled,
+                imageWatermarkOpacity.roundToInt(), imageWatermarkTilt.roundToInt(),
             )
             OperationKind.MergePdfs -> Operation.MergePdfs
             OperationKind.PdfToImages -> Operation.PdfToImages(imageFormat, pdfScale.roundToInt().toFloat(), quality.roundToInt())

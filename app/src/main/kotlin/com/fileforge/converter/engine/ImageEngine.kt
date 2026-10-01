@@ -7,6 +7,7 @@ import android.os.Build
 import com.fileforge.core.data.Ico
 import com.fileforge.core.data.IcoImage
 import com.fileforge.core.meta.ImageMeta
+import com.fileforge.core.model.FileKind
 import com.fileforge.core.naming.OutputNaming
 import com.fileforge.core.ops.ImageFormat
 import com.fileforge.core.ops.Operation
@@ -19,6 +20,9 @@ import kotlin.math.roundToInt
 
 /** 位图解码上限：超过这个尺寸先按 2 的幂降采样，避免大图解码就 OOM。 */
 private const val DECODE_CEILING = 4096
+
+/** 图片水印的落位顺序，与操作面板上的「位置」选项一一对应。 */
+private val SPOT_LABELS = listOf("居中", "右下", "左下", "右上", "左上")
 
 class ImageEngine {
 
@@ -55,6 +59,80 @@ class ImageEngine {
         val ok = bitmap.compress(compressFormat(format), quality.coerceIn(1, 100), stream)
         if (!ok) throw IllegalStateException("${format.label} 编码失败")
         return stream.toByteArray()
+    }
+
+    /**
+     * 图片加文字水印：白字按透明度叠上去，可带阴影保证浅色背景上读得见，
+     * 单处（居中或四角）或隔行错位的平铺。像素重编一次，输出格式跟源走
+     * （PNG 保持 PNG 留住透明通道，HEIC/其他出 JPG）。
+     */
+    fun watermark(item: WorkItem, operation: Operation.ImageWatermark, staging: (String) -> File): EngineOutput {
+        val text = operation.text.trim()
+        require(text.isNotEmpty()) { "先写要盖的水印文字" }
+        val decoded = decode(item.file)
+        val painted = decoded.copy(Bitmap.Config.ARGB_8888, true)
+        decoded.recycle()
+        val canvas = android.graphics.Canvas(painted)
+        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.argb(operation.opacityPercent.coerceIn(3, 100) * 255 / 100, 255, 255, 255)
+            textSize = max(painted.width, painted.height) / 14f
+            setShadowLayer(6f, 2f, 2f, android.graphics.Color.argb(110, 0, 0, 0))
+        }
+        val textWidth = paint.measureText(text)
+        val metrics = paint.fontMetrics
+        val textHeight = metrics.descent - metrics.ascent
+        val margin = max(painted.width, painted.height) / 30f
+
+        fun drawOne(x: Float, y: Float) {
+            canvas.save()
+            if (operation.tilt != 0) canvas.rotate(operation.tilt.toFloat(), x + textWidth / 2f, y)
+            canvas.drawText(text, x, y, paint)
+            canvas.restore()
+        }
+
+        if (operation.tiled) {
+            val stepX = textWidth + margin * 2f
+            val stepY = textHeight + margin * 2f
+            var row = 0
+            var y = -textHeight
+            while (y < painted.height + textHeight) {
+                // 隔行错位半格：铺出来才是水印的样子，不是表格
+                var x = -textWidth + if (row % 2 == 0) 0f else stepX / 2f
+                while (x < painted.width) {
+                    drawOne(x, y)
+                    x += stepX
+                }
+                y += stepY
+                row++
+            }
+        } else {
+            val spot = operation.spot.coerceIn(0, 4)
+            val x = when (spot) {
+                0, 2 -> (painted.width - textWidth) / 2f
+                1, 3 -> painted.width - textWidth - margin
+                else -> margin
+            }
+            val y = when (spot) {
+                0 -> (painted.height + textHeight) / 2f
+                1, 2 -> painted.height - metrics.descent - margin
+                else -> margin - metrics.ascent
+            }
+            drawOne(x, y)
+        }
+
+        val format = when (item.kind) {
+            FileKind.Png -> ImageFormat.Png
+            FileKind.WebP -> ImageFormat.WebP
+            else -> ImageFormat.Jpeg
+        }
+        val bytes = encode(painted, format, 92)
+        painted.recycle()
+        val placement = if (operation.tiled) "平铺" else SPOT_LABELS.getOrElse(operation.spot) { "居中" }
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "水印", format.extension),
+            staging(format.extension).apply { writeBytes(bytes) },
+            "「${text.take(12)}」$placement · ${operation.opacityPercent.coerceIn(3, 100)}% 不透明 · ${SizeInput.format(sizeOf(bytes))}",
+        )
     }
 
     fun convert(item: WorkItem, operation: Operation.ConvertImage, staging: (String) -> File): EngineOutput {

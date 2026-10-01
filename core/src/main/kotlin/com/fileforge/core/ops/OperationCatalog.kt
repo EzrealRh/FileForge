@@ -6,6 +6,7 @@ import com.fileforge.core.model.FileKind
 enum class OperationKind(val label: String, val hint: String) {
     ConvertImage("图片格式转换", "JPG / PNG / WebP 互转"),
     CompressImage("压缩图片", "按质量或目标体积"),
+    ImageWatermark("图片加文字水印", "单处或平铺，透明度可选"),
     ImagesToPdf("图片合成 PDF", "一张一页"),
     CompressPdf("压缩 PDF", "内嵌图片降采样重编，文字不动"),
     SplitPdfBySize("PDF 按体积分割", "每份不超过目标大小"),
@@ -103,7 +104,8 @@ enum class OperationKind(val label: String, val hint: String) {
         }
 
         private fun compatible(kind: OperationKind, fileKind: FileKind): Boolean = when (kind) {
-            ConvertImage, CompressImage -> fileKind.isImage && fileKind != FileKind.Gif && fileKind != FileKind.Ico
+            ConvertImage, CompressImage, ImageWatermark ->
+                fileKind.isImage && fileKind != FileKind.Gif && fileKind != FileKind.Ico
             // 图标要走专门通路：解码成位图后一次出多个尺寸；普通格式转换只会给一张
             ImageToIco -> fileKind.isImage && fileKind != FileKind.Gif && fileKind != FileKind.Ico
             IcoToImages -> fileKind == FileKind.Ico
