@@ -419,22 +419,41 @@ class MemoryZipSink : ZipSink {
 /**
  * zip 的写侧：本地头 → 数据 → 中央目录 → EOCD。
  *
- * 三处刻意的选择：
+ * 四处刻意的选择：
  *  - 文件名一律 **UTF-8 + 置 0x800 标志位**，不置位的话中文名在别的机器上就是一堆乱码
  *  - **已经压过的类型直接存原文**（见 [ZipItem.NO_DEFLATE]）：Deflate 对 jpg/mp4/zip 只会越压越大，
  *    还白烧一遍 CPU。这条判据按扩展名而不是"先压一次比大小"，因为流式打包不能把整份先攒在内存里
  *  - 本地头的长度**先占 0 再回填**，不写 data descriptor：占位回填让流式打包成立，
  *    而 descriptor 那套反而让一些老工具找不到中央目录
+ *  - **zip64 与否在写本地头之前就得定死**：扩展字段占的是定长两位，写完再想塞是塞不进去的。
+ *    超限的真值一律搬进 0x0001 扩展字段，32 位处留哨兵（0xFFFFFFFF / 0xFFFF），
+ *    整包层面超限则落 EOCD64 + 定位器 —— 读侧的 [ZipReader] 按同一套规矩解
  */
 object ZipWriter {
 
     private const val LOCAL_SIG = 0x04034B50L
     private const val CENTRAL_SIG = 0x02014B50L
     private const val EOCD_SIG = 0x06054B50L
+    private const val EOCD64_SIG = 0x06064B50L
+    private const val EOCD64_LOCATOR_SIG = 0x07064B50L
     private const val UTF8_FLAG = 0x800
     private const val VERSION = 20
     private const val MADE_BY_DOS = 0x00        // 高字节是"哪个系统写的"：0 = DOS/Windows，最不容易被挑刺
     private const val ARCHIVE_ATTRIBUTE = 0x20
+    private const val ZIP64_EXTRA_ID = 0x0001
+    private const val ZIP64_VERSION = 45
+
+    /** 32 位字段装不下时的占位符：真值搬进 zip64 扩展字段，这里只留哨兵。 */
+    private const val ZIP64_SENTINEL = 0xFFFF_FFFFL
+    private const val ZIP64_SENTINEL_COUNT = 0xFFFF
+
+    /**
+     * zip64 的两道门槛，也是测试的注水口：真实的 4 GB / 65535 条在单测里根本够不着。
+     * 尺寸与偏移到 [zip64SizeLimit]（含）就得走扩展字段，条数严格多于 [zip64EntryCountLimit]
+     * 才落 EOCD64。谁改了谁负责还原，不然同一个 JVM 里的后续用例全被带偏。
+     */
+    internal var zip64SizeLimit: Long = 0xFFFF_FFFFL
+    internal var zip64EntryCountLimit: Long = 0xFFFFL
 
     fun write(items: List<ZipItem>): ByteArray {
         val sink = MemoryZipSink()
@@ -455,9 +474,20 @@ object ZipWriter {
             val method = if (item.skipDeflate) ZipMethod.Stored.code else ZipMethod.Deflate.code
             val (dosTime, dosDate) = dosOf(item.modifiedAt)
             val headerAt = sink.position()
+            // 是否 zip64 必须在写本地头之前定死：扩展长度占的是定长两位，事后再想加塞是加不进去的。
+            // 此时只有 item.size 可看（压缩后的大小要等压完才知道），真压完发现长度也超了而这里没预留
+            // —— 只能炸出来，写个 32 位截断的假包出去更糟（见下方回填处）。
+            val sizeZip64 = item.size >= zip64SizeLimit
+            val extra64 = if (sizeZip64) short16(ZIP64_EXTRA_ID) + short16(16) + ByteArray(16) else ByteArray(0)
             // 长度与 CRC 先占 0：压完才知道，写完回头补那 12 个字节
-            sink.write(localHeader(name.size, method, 0L, 0L, 0L, dosTime, dosDate))
+            sink.write(
+                localHeader(
+                    name.size, extra64.size, if (sizeZip64) ZIP64_VERSION else VERSION,
+                    method, 0L, 0L, 0L, dosTime, dosDate,
+                ),
+            )
             sink.write(name)
+            sink.write(extra64)
             val crc = CRC32()
             val counted = CountingSink(sink)
             var size = 0L
@@ -480,18 +510,49 @@ object ZipWriter {
                 size = plain.count
             }
             val compressed = counted.count
+            if (!sizeZip64 && (size >= zip64SizeLimit || compressed >= zip64SizeLimit)) {
+                throw IllegalStateException(
+                    "条目「${item.name}」实际写出的长度（原始 $size、压缩后 $compressed）超出 32 位门槛，" +
+                        "但写本地头时按 item.size=${item.size} 没预留 zip64 扩展，回填时补不进去 —— " +
+                        "请核对 ZipItem.size 是否如实传参",
+                )
+            }
             sink.seek(headerAt + 14)
-            sink.write(long32(crc.value) + long32(compressed) + long32(size))
-            sink.seek(headerAt + 30 + name.size + compressed)
+            if (sizeZip64) {
+                // 两个 32 位长度一起上哨兵：真值整对搬进扩展字段，读的人不用猜哪一个才是真溢出的
+                sink.write(long32(crc.value) + long32(ZIP64_SENTINEL) + long32(ZIP64_SENTINEL))
+                sink.seek(headerAt + 30 + name.size + 4)    // 跳过扩展头（id + 长度），回填两枚 8 字节真值
+                sink.write(long64(size) + long64(compressed))
+            } else {
+                sink.write(long32(crc.value) + long32(compressed) + long32(size))
+            }
+            sink.seek(headerAt + 30 + name.size + extra64.size + compressed)
             records += CentralRecord(name, method, crc.value, compressed, size, dosTime, dosDate, headerAt)
         }
         val directoryAt = sink.position()
         records.forEach { record ->
-            sink.write(centralHeader(record))
-            sink.write(record.name)
+            val (header, extra) = centralHeader(record)
+            sink.write(header)
+            sink.write(record.name)     // 名字在前、扩展在后，规范定的次序颠倒一个字节都读不回来
+            sink.write(extra)
         }
         val directorySize = sink.position() - directoryAt
-        sink.write(eocd(records.size, directorySize, directoryAt))
+        // 条数超 65535、或中央目录本身超 4 GB：EOCD 里四个字段全换哨兵，真值落在它前面的 EOCD64，
+        // 再由 20 字节的定位器告诉读的人 EOCD64 在哪。三者缺一，zip64 的包就成了解不开的谜。
+        val archiveZip64 = records.size > zip64EntryCountLimit ||
+            directorySize >= zip64SizeLimit || directoryAt >= zip64SizeLimit
+        if (archiveZip64) {
+            val recordAt = sink.position()
+            sink.write(eocd64(records.size.toLong(), directorySize, directoryAt))
+            sink.write(eocd64Locator(recordAt))
+        }
+        sink.write(
+            eocd(
+                if (archiveZip64) ZIP64_SENTINEL_COUNT else records.size,
+                if (archiveZip64) ZIP64_SENTINEL else directorySize,
+                if (archiveZip64) ZIP64_SENTINEL else directoryAt,
+            ),
+        )
     }
 
     /** 边读边算 CRC，同时数出真实字节数（[ZipItem.size] 只是调用方给的参考值）。 */
@@ -510,43 +571,60 @@ object ZipWriter {
         output.flush()
     }
 
-    /** 本地头：定长 30 字节，之后是名字与数据。 */
+    /** 本地头：定长 30 字节，之后是名字、（zip64 条目才有的）扩展字段与数据。 */
     private fun localHeader(
-        nameLength: Int, method: Int, crc: Long,
+        nameLength: Int, extraLength: Int, version: Int, method: Int, crc: Long,
         compressedSize: Long, size: Long, time: Int, date: Int,
-    ): ByteArray = ByteArrayOutputStream(30).apply {
+    ): ByteArray = ByteArrayOutputStream(30 + extraLength).apply {
         write(long32(LOCAL_SIG))
-        write(short16(VERSION))                     // version needed
+        write(short16(version))                     // version needed：zip64 条目得报 45，老实现会因此装聋
         write(short16(UTF8_FLAG))                   // flags
         write(short16(method))
         write(short16(time)); write(short16(date))
         write(long32(crc))
         write(long32(compressedSize)); write(long32(size))
-        write(short16(nameLength)); write(short16(0))   // 名字长度、扩展长度
+        write(short16(nameLength)); write(short16(extraLength))   // 名字长度、扩展长度
     }.toByteArray()
 
     /**
-     * 中央目录头：定长 46 字节。比本地头多一个「谁写的」，而且长度字段全部在这份里 ——
-     * 少写那 2 字节会让所有偏移整体错开一位，所以这里**不跟本地头共用前缀**，
-     * 一张表照着规范写下来，读回来对不对由 ZipTest 兜。
+     * 中央目录头：定长 46 字节，名字与 zip64 扩展由调用方跟在后面（规范定的顺序：名字在前、扩展在后）。
+     * 比本地头多一个「谁写的」，而且长度字段全部在这份里 —— 少写那 2 字节会让所有偏移整体错开一位，
+     * 所以这里**不跟本地头共用前缀**，一张表照着规范写下来，读回来对不对由 ZipTest 兜。
+     *
+     * zip64 扩展只收真正超了门槛的字段，顺序照它们在本头里的出场次序排：
+     * 原始长度 → 压缩后长度 → 头偏移（读侧就按"谁是哨兵谁占位"的顺序领，多一个少一个都会读串位）。
      */
-    private fun centralHeader(record: CentralRecord): ByteArray = ByteArrayOutputStream(46).apply {
-        write(long32(CENTRAL_SIG))
-        write(short16(MADE_BY_DOS))                 // version made by
-        write(short16(VERSION))                     // version needed
-        write(short16(UTF8_FLAG))                   // flags
-        write(short16(record.method))
-        write(short16(record.time)); write(short16(record.date))
-        write(long32(record.crc))
-        write(long32(record.compressedSize)); write(long32(record.size))
-        write(short16(record.name.size))            // 名字长度
-        write(short16(0))                           // 扩展长度
-        write(short16(0))                           // 注释长度
-        write(short16(0))                           // 起始盘
-        write(short16(0))                           // 内部属性
-        write(long32(ARCHIVE_ATTRIBUTE.toLong()))   // 外部属性
-        write(long32(record.localOffset))
-    }.toByteArray()
+    private fun centralHeader(record: CentralRecord): Pair<ByteArray, ByteArray> {
+        val size64 = record.size >= zip64SizeLimit
+        val compressed64 = record.compressedSize >= zip64SizeLimit
+        val offset64 = record.localOffset >= zip64SizeLimit
+        val body = ByteArrayOutputStream(24).apply {
+            if (size64) write(long64(record.size))
+            if (compressed64) write(long64(record.compressedSize))
+            if (offset64) write(long64(record.localOffset))
+        }.toByteArray()
+        val extra = if (body.isEmpty()) ByteArray(0) else short16(ZIP64_EXTRA_ID) + short16(body.size) + body
+        val version = if (extra.isEmpty()) VERSION else ZIP64_VERSION
+        val header = ByteArrayOutputStream(46).apply {
+            write(long32(CENTRAL_SIG))
+            write(short16(MADE_BY_DOS))                 // version made by
+            write(short16(version))                     // version needed
+            write(short16(UTF8_FLAG))                   // flags
+            write(short16(record.method))
+            write(short16(record.time)); write(short16(record.date))
+            write(long32(record.crc))
+            write(long32(if (compressed64) ZIP64_SENTINEL else record.compressedSize))
+            write(long32(if (size64) ZIP64_SENTINEL else record.size))
+            write(short16(record.name.size))            // 名字长度
+            write(short16(extra.size))                  // 扩展长度
+            write(short16(0))                           // 注释长度
+            write(short16(0))                           // 起始盘
+            write(short16(0))                           // 内部属性
+            write(long32(ARCHIVE_ATTRIBUTE.toLong()))   // 外部属性
+            write(long32(if (offset64) ZIP64_SENTINEL else record.localOffset))
+        }.toByteArray()
+        return header to extra
+    }
 
     private fun eocd(count: Int, directorySize: Long, directoryAt: Long): ByteArray =
         ByteArrayOutputStream(22).apply {
@@ -556,6 +634,29 @@ object ZipWriter {
             write(long32(directorySize)); write(long32(directoryAt))
             write(short16(0))                               // 注释长度
         }.toByteArray()
+
+    /** zip64 的结束记录：EOCD 装不下的真值全在这条 56 字节的记录里（头上的 44 = 总长减去签名与长度本身）。 */
+    private fun eocd64(count: Long, directorySize: Long, directoryAt: Long): ByteArray =
+        ByteArrayOutputStream(56).apply {
+            write(long32(EOCD64_SIG))
+            write(long64(44L))
+            write(short16(ZIP64_VERSION)); write(short16(ZIP64_VERSION))   // made by、version needed
+            write(long32(0L)); write(long32(0L))           // 单盘打包，盘号一律 0
+            write(long64(count)); write(long64(count))     // 本盘条数、总条数
+            write(long64(directorySize)); write(long64(directoryAt))
+        }.toByteArray()
+
+    /** 定位器：贴着普通 EOCD 前面放，读的人从 EOCD 往前退 20 字节就能找到 EOCD64。 */
+    private fun eocd64Locator(recordAt: Long): ByteArray =
+        ByteArrayOutputStream(20).apply {
+            write(long32(EOCD64_LOCATOR_SIG))
+            write(long32(0L))                               // EOCD64 所在的盘
+            write(long64(recordAt))
+            write(long32(1L))                               // 总盘数：单盘
+        }.toByteArray()
+
+    /** 64 位小端：zip64 的真值全是 8 字节，这一行写错位，读回来就是天文数字。 */
+    private fun long64(value: Long) = ByteArray(8) { i -> (value ushr (8 * i)).toByte() }
 
     /** 数出真正写出去多少字节：压缩后长度要在回填本地头时用。 */
     private class CountingSink(private val sink: ZipSink) : ZipSink {

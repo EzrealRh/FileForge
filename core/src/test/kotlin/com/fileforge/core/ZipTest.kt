@@ -8,6 +8,7 @@ import com.fileforge.core.archive.ZipItem
 import com.fileforge.core.archive.ZipReader
 import com.fileforge.core.archive.ZipWriter
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -168,11 +169,147 @@ class ZipTest {
         )
     }
 
-    private fun ByteArray.indexOfSignature(signature: ByteArray): Int {
-        for (start in 0..size - signature.size) {
+    private fun ByteArray.indexOfSignature(signature: ByteArray, from: Int = 0): Int {
+        for (start in from..size - signature.size) {
             if (signature.indices.all { this[start + it] == signature[it] }) return start
         }
         error("找不到签名")
+    }
+
+    // ---- 写：zip64 ---------------------------------------------------------------
+    //
+    // 真实的门槛是 4 GB / 65535 条，单测够不着，所以把 ZipWriter 的两道门槛注水到几字节几条，
+    // 让 zip64 的路径在小包上也能走通。判据照旧是双份的：自家 reader 要读得动，
+    // JDK 的 ZipFile（另一套独立实现）也要认 —— 只有自家 reader 认的 zip64 是没用处的。
+
+    @Test
+    fun `单条尺寸超门槛时写 zip64 扩展且内容原样回来`() {
+        withZip64Limits(sizeLimit = 100) {
+            val body = ByteArray(200) { (it % 13).toByte() }
+            val packed = ZipWriter.write(listOf(ZipItem("big.bin", body, FIXED_TIME)))
+            // 本地头：扩展 20 字节（id + 长度 + 两条 8 字节），32 位长度让位给哨兵，version 也要抬到 45
+            assertEquals(20, u16le(packed, 28), "本地头扩展长度")
+            assertEquals(0xFFFFFFFFL, u32le(packed, 18), "本地头压缩后长度")
+            assertEquals(0xFFFFFFFFL, u32le(packed, 22), "本地头原始长度")
+            assertEquals(45, u16le(packed, 4), "本地头 version needed")
+            // 中央目录：只有原始长度真超了门槛，压缩后与偏移照旧写 32 位，扩展里只挂真超的那枚
+            val centralAt = packed.indexOfSignature(byteArrayOf(0x50, 0x4B, 0x01, 0x02))
+            assertEquals(45, u16le(packed, centralAt + 6), "中央 version needed")
+            assertEquals(0xFFFFFFFFL, u32le(packed, centralAt + 24), "中央原始长度")
+            assertNotEquals(0xFFFFFFFFL, u32le(packed, centralAt + 20), "压缩后没超门槛，不该上哨兵")
+            assertEquals(12, u16le(packed, centralAt + 30), "中央扩展 = 头 4 字节 + 一枚 8 字节真值")
+            assertEquals(200L, u64le(packed, centralAt + 46 + u16le(packed, centralAt + 28) + 4), "扩展头之后才是真值")
+            // 三个读法都得认：自家 reader、JDK 的 ZipFile
+            val archive = ZipReader.read(packed)
+            assertEquals(body.toList(), ZipReader.dataOf(archive.entries.single(), packed).toList())
+            javaZipFileRoundTrip(packed, "big.bin", body)
+        }
+    }
+
+    @Test
+    fun `直存条目两条长度都超门槛时真值按头序进扩展`() {
+        withZip64Limits(sizeLimit = 100) {
+            val body = ByteArray(300) { (it * 7).toByte() }
+            val item = ZipItem("raw.bin", body.size.toLong(), FIXED_TIME, stored = true) { body.inputStream() }
+            val packed = ZipWriter.write(listOf(item))
+            // 直存的压缩后长度等于原始长度：两条都超门槛，中央扩展里按头序先原始后压缩，共 16 字节
+            val centralAt = packed.indexOfSignature(byteArrayOf(0x50, 0x4B, 0x01, 0x02))
+            assertEquals(20, u16le(packed, centralAt + 30), "中央扩展长度")
+            assertEquals(0xFFFFFFFFL, u32le(packed, centralAt + 20), "中央压缩后长度")
+            assertEquals(0xFFFFFFFFL, u32le(packed, centralAt + 24), "中央原始长度")
+            val bodyAt = centralAt + 46 + u16le(packed, centralAt + 28) + 4   // 跳过扩展头（id + 长度）
+            assertEquals(300L, u64le(packed, bodyAt), "扩展第一枚是原始长度")
+            assertEquals(300L, u64le(packed, bodyAt + 8), "扩展第二枚是压缩后长度")
+            val archive = ZipReader.read(packed)
+            assertEquals(300L, archive.entries.single().size)
+            assertEquals(300L, archive.entries.single().compressedSize)
+            assertEquals(body.toList(), ZipReader.dataOf(archive.entries.single(), packed).toList())
+            javaZipFileRoundTrip(packed, "raw.bin", body)
+        }
+    }
+
+    @Test
+    fun `中央目录的头偏移超门槛时真值排在扩展最后`() {
+        withZip64Limits(sizeLimit = 100) {
+            val body = ByteArray(80) { (it % 5).toByte() }
+            fun stored(name: String) =
+                ZipItem(name, body.size.toLong(), FIXED_TIME, stored = true) { body.inputStream() }
+            val packed = ZipWriter.write(listOf(stored("one.bin"), stored("two.bin")))
+            // 第一条本地头 + 名字 + 数据占 117 字节，第二条的头偏移因此过了门槛，但两条的长度都没有
+            val centralSig = byteArrayOf(0x50, 0x4B, 0x01, 0x02)
+            val second = packed.indexOfSignature(centralSig, packed.indexOfSignature(centralSig) + 4)
+            assertEquals(12, u16le(packed, second + 30), "扩展里只该有一枚 8 字节偏移")
+            assertEquals(0xFFFFFFFFL, u32le(packed, second + 42), "第二条的偏移要上哨兵")
+            assertEquals(117L, u64le(packed, second + 46 + u16le(packed, second + 28) + 4), "扩展头之后才是偏移真值")
+            assertEquals(0, u16le(packed, packed.indexOfSignature(centralSig) + 30), "第一条没超门槛，不该带扩展")
+            val archive = ZipReader.read(packed)
+            assertEquals(117L, archive.entries[1].localHeaderAt, "偏移得从扩展里原样读回来")
+            javaZipFileRoundTrip(packed, "two.bin", body)
+        }
+    }
+
+    @Test
+    fun `条目数超门槛时落 EOCD64 与定位器且各方都读得到全部条目`() {
+        withZip64Limits(countLimit = 2) {
+            val bodies = listOf("甲".toByteArray(), "乙".toByteArray(), "丙".toByteArray())
+            val packed = ZipWriter.write(bodies.mapIndexed { i, body -> ZipItem("$i.txt", body, FIXED_TIME) })
+            // EOCD64 定长 56、定位器定长 20，之后只剩 22 字节的普通 EOCD；定位器要指回 EOCD64 的位置
+            val recordAt = packed.indexOfSignature(byteArrayOf(0x50, 0x4B, 0x06, 0x06))
+            val locatorAt = packed.indexOfSignature(byteArrayOf(0x50, 0x4B, 0x06, 0x07))
+            assertEquals(56, locatorAt - recordAt, "EOCD64 与定位器之间不该有别的字节")
+            assertEquals(locatorAt + 20 + 22, packed.size, "定位器之后应该只剩普通 EOCD")
+            assertEquals(recordAt.toLong(), u64le(packed, locatorAt + 8), "定位器要指回 EOCD64")
+            assertEquals(3L, u64le(packed, recordAt + 32), "条数真值在 EOCD64 里")
+            // 门槛降到了 2：普通 EOCD 的条数必须让位给哨兵，否则读的人不知道该去看 EOCD64
+            assertEquals(0xFFFF, u16le(packed, packed.size - 22 + 10), "普通 EOCD 的条数该是哨兵")
+            val archive = ZipReader.read(packed)
+            assertEquals(3, archive.entries.size)
+            bodies.forEachIndexed { i, body ->
+                assertEquals(body.toList(), ZipReader.dataOf(archive.entries[i], packed).toList())
+            }
+            val file = java.io.File("build/archive/zip64-count.zip").apply { parentFile.mkdirs(); writeBytes(packed) }
+            java.util.zip.ZipFile(file).use { zf ->
+                assertEquals(3, zf.size(), "JDK 得从 EOCD64 里数出全部条目")
+                bodies.forEachIndexed { i, body ->
+                    assertEquals(body.toList(), zf.getInputStream(zf.getEntry("$i.txt")).use { it.readBytes() }.toList())
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `不超门槛的小包一个 zip64 字节都不该有`() {
+        val packed = ZipWriter.write(
+            listOf(ZipItem("a.txt", "内容".toByteArray(), FIXED_TIME), ZipItem("b.bin", ByteArray(50), FIXED_TIME)),
+        )
+        assertFalse(packed.containsSig(byteArrayOf(0x50, 0x4B, 0x06, 0x06)), "不该有 EOCD64")
+        assertFalse(packed.containsSig(byteArrayOf(0x50, 0x4B, 0x06, 0x07)), "不该有定位器")
+        // 顺着本地头链走一遍：扩展长度必须全 0，中央记录同理 —— 多写一个 0x0001 就有工具会看错
+        var local = 0
+        repeat(2) {
+            assertEquals(0, u16le(packed, local + 28), "第 ${it + 1} 条本地头不该带扩展")
+            local += 30 + u16le(packed, local + 26) + u16le(packed, local + 28) + u32le(packed, local + 18).toInt()
+        }
+        val centralSig = byteArrayOf(0x50, 0x4B, 0x01, 0x02)
+        val firstCentral = packed.indexOfSignature(centralSig)
+        val secondCentral = packed.indexOfSignature(centralSig, firstCentral + 4)
+        listOf(firstCentral, secondCentral).forEachIndexed { i, at ->
+            assertEquals(0, u16le(packed, at + 30), "第 ${i + 1} 条中央记录不该带扩展")
+            assertEquals(20, u16le(packed, at + 6), "version needed 该还是 20")
+        }
+        val archive = ZipReader.read(packed)
+        assertEquals(2, archive.entries.size)
+    }
+
+    @Test
+    fun `没预留扩展却真超了门槛要炸出来而不是写坏包`() {
+        withZip64Limits(sizeLimit = 100) {
+            // 谎报尺寸：item.size 说 10，真实字节 300 —— 本地头写完才发现 32 位装不下，回填已无扩展可补
+            val liar = ZipItem("liar.bin", 10L, FIXED_TIME, stored = true) { ByteArray(300).inputStream() }
+            val error = runCatching { ZipWriter.write(listOf(liar)) }.exceptionOrNull()
+            assertTrue(error is IllegalStateException, "实际抛了：$error")
+            assertTrue(error!!.message!!.contains("liar.bin"), "报错要能定位到条目：${error.message}")
+        }
     }
 
     // ---- 决策 -------------------------------------------------------------------
@@ -286,6 +423,56 @@ class ZipTest {
         modifiedAt = FIXED_TIME,
         externalAttributes = externalAttributes,
     )
+
+    /** 把 ZipWriter 的 zip64 门槛临时注水到测试够得着的量级，走完无论成败都还原。 */
+    private fun <T> withZip64Limits(
+        sizeLimit: Long = ZipWriter.zip64SizeLimit,
+        countLimit: Long = ZipWriter.zip64EntryCountLimit,
+        block: () -> T,
+    ): T {
+        val oldSize = ZipWriter.zip64SizeLimit
+        val oldCount = ZipWriter.zip64EntryCountLimit
+        ZipWriter.zip64SizeLimit = sizeLimit
+        ZipWriter.zip64EntryCountLimit = countLimit
+        return try {
+            block()
+        } finally {
+            ZipWriter.zip64SizeLimit = oldSize
+            ZipWriter.zip64EntryCountLimit = oldCount
+        }
+    }
+
+    /** JDK 的 ZipFile 是另一套独立实现：它也读得动、解得对，才算真的跨过了实现的门槛。 */
+    private fun javaZipFileRoundTrip(packed: ByteArray, name: String, body: ByteArray) {
+        val file = java.io.File("build/archive/zip64-check-$name").apply { parentFile.mkdirs(); writeBytes(packed) }
+        java.util.zip.ZipFile(file).use { zf ->
+            val entry = requireNotNull(zf.getEntry(name)) { "ZipFile 里找不到 $name" }
+            assertEquals(body.size.toLong(), entry.size, "$name 的尺寸")
+            assertEquals(body.toList(), zf.getInputStream(entry).use { it.readBytes() }.toList(), name)
+        }
+    }
+
+    private fun ByteArray.containsSig(signature: ByteArray): Boolean {
+        for (start in 0..size - signature.size) {
+            if (signature.indices.all { this[start + it] == signature[it] }) return true
+        }
+        return false
+    }
+
+    // zip 全栈小端，测试里拆字段用的几枚小起子
+
+    private fun u16le(b: ByteArray, at: Int) =
+        (b[at].toInt() and 0xFF) or ((b[at + 1].toInt() and 0xFF) shl 8)
+
+    private fun u32le(b: ByteArray, at: Int): Long =
+        ((b[at + 3].toLong() and 0xFF) shl 24) or ((b[at + 2].toLong() and 0xFF) shl 16) or
+            ((b[at + 1].toLong() and 0xFF) shl 8) or (b[at].toLong() and 0xFF)
+
+    private fun u64le(b: ByteArray, at: Int): Long {
+        var value = 0L
+        for (i in 0..7) value = value or ((b[at + i].toLong() and 0xFF) shl (8 * i))
+        return value
+    }
 
     private companion object {
         /** 2026-01-02 03:04:06 本地时间：秒取偶数，正好卡在 DOS 时间的 2 秒精度上。 */
