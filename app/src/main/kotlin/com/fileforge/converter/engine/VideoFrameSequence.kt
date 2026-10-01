@@ -50,7 +50,12 @@ object VideoFrameSequence {
             val format = extractor.getTrackFormat(track)
             val mime = format.getString(MediaFormat.KEY_MIME) ?: error("读不到视频编码格式")
             extractor.selectTrack(track)
-            if (startUs > 0) extractor.seekTo(startUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+            var seekSamplePts = -1L
+            if (startUs > 0) {
+                extractor.seekTo(startUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+                // seek 落点那个采样在容器里的真实时间戳：待会儿用来判输出 PTS 还可不可信
+                seekSamplePts = runCatching { extractor.sampleTime }.getOrDefault(-1L)
+            }
 
             decoder = MediaCodec.createDecoderByType(mime).apply {
                 configure(format, null, null, 0)
@@ -58,6 +63,7 @@ object VideoFrameSequence {
             }
             // 用「相对第一个解出来的采样」的elapsed 计时：部分机型 seek 之后采样时间会重新从 0 数
             var base = -1L
+            var ptsTrustworthy = false
             var nextIndex = 0L
             var inputDone = false
             var outputDone = false
@@ -85,13 +91,22 @@ object VideoFrameSequence {
                     outIndex == MediaCodec.INFO_TRY_AGAIN_LATER && inputDone -> timeout = 20_000L
                     outIndex >= 0 -> {
                         val time = info.presentationTimeUs
-                        if (base < 0) base = time
-                        if (time - base > windowUs + stepUs) {
+                        if (base < 0) {
+                            base = time
+                            // 输出的 PTS 跟容器时间戳对得上，才敢把 startUs 当绝对时刻用；
+                            // 重新从 0 数的那种机型上拿 startUs 过滤会把整段全滤光，一帧不剩
+                            ptsTrustworthy = startUs > 0 && seekSamplePts >= 0 &&
+                                Math.abs(base - seekSamplePts) <= 2_000_000L
+                        }
+                        // seek 是往前落到同步帧上的：还没到 startUs 的画面不要，
+                        // 不然「取第 x 秒」实际拿到的是 x 之前那个关键帧，长 GOP 能差出去好几秒
+                        val beforeStart = ptsTrustworthy && time < startUs
+                        if (!beforeStart && time - base > windowUs + stepUs) {
                             decoder.releaseOutputBuffer(outIndex, false)
                             break
                         }
                         val targetIndex = ((time - base) / stepUs).toInt().coerceAtLeast(0).toLong()
-                        if (targetIndex >= nextIndex && collected.size < frameCount) {
+                        if (!beforeStart && targetIndex >= nextIndex && collected.size < frameCount) {
                             // 源帧率比目标高时，中间那些采样点直接跳过，不重复出图
                             nextIndex = targetIndex + 1
                             decoder.getOutputImage(outIndex)?.use { image ->

@@ -120,6 +120,11 @@ object Tar {
             val code = block[AT_TYPE].toInt().toChar()
             val type = TarType.of(code)
             val size = octal(block, AT_SIZE, 12)
+            // 二进制补码字段可能是负数：负的步长会让下面的推进原地打转甚至倒退，这条以后全部读不得
+            if (size < 0L) {
+                notes += "第 ${order + 1} 个头块的内容长度是负的（大文件的二进制字段落进了符号位？），到这里为止读得出来，后面的不能接着信"
+                break
+            }
             val dataAt = at + BLOCK
             when (type) {
                 TarType.GnuLongName -> longName = String(raw(slices, dataAt, size), Charsets.UTF_8).substringBefore('\u0000')
@@ -225,7 +230,8 @@ object Tar {
             var stop = at
             while (stop < body.size && body[stop].toInt() != ' '.code) stop++
             val declared = String(body, at, stop - at, Charsets.US_ASCII).toLongOrNull() ?: break
-            if (declared <= 0 || at + declared > body.size) break
+            // 长度至少要盖住"数字串+空格+换行"自己：截断的记录硬算长度会算出负数，宁可断在这儿
+            if (declared <= 0 || at + declared > body.size || declared - (stop - at) < 2) break
             val record = String(body, at + stop - at + 1, (declared - (stop - at) - 2).toInt(), Charsets.UTF_8)
             if (record.contains('=')) out[record.substringBefore('=')] = record.substringAfter('=').trimEnd('\n')
             at += declared.toInt()

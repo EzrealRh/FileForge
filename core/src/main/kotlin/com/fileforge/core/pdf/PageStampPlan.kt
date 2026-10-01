@@ -132,6 +132,8 @@ object TextFit {
     ): Float {
         val units = text.sumOf { widthFactor(it).toDouble() }.toFloat()
         if (units <= 0f || maxWidth <= 0f) return minSize
-        return (maxWidth / units).coerceIn(minSize, maxSize)
+        // 上限可能比下限还小（很矮的页面、行数又多）：coerceIn 遇到这种区间会直接抛，
+        // 拿 minSize 兜底 —— 字放不下也比整个操作崩掉强
+        return (maxWidth / units).coerceIn(minSize, maxSize.coerceAtLeast(minSize))
     }
 }

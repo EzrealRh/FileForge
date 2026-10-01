@@ -96,10 +96,16 @@ object Gzip {
             target.write(0)
         }
         val counted = CountingStream(source, crc)
-        // nowrap=true：头与尾由我们自己写，库只管中间那段裸 DEFLATE
-        DeflaterOutputStream(target, Deflater(Deflater.DEFAULT_COMPRESSION, true)).use { sink ->
+        // nowrap=true：头与尾由我们自己写，库只管中间那段裸 DEFLATE。
+        // 这里不能让它顺手关流 —— close() 会把 target 一并关掉，尾部 8 字节就没处写了；
+        // 显式 new 的 Deflater 也不会被 close() 归还，用完得自己 end()。
+        val deflater = Deflater(Deflater.DEFAULT_COMPRESSION, true)
+        try {
+            val sink = DeflaterOutputStream(target, deflater)
             counted.copyTo(sink)
             sink.finish()
+        } finally {
+            deflater.end()
         }
         val size = counted.read
         val trailer = ByteArray(8)

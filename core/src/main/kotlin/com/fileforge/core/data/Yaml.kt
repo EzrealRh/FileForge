@@ -137,10 +137,16 @@ object Yaml {
             r.at++
             val body = row.text.drop(1).trim()
             when {
-                body.isEmpty() -> out += valueBelow(r, row.indent)
+                body.isEmpty() -> {
+                    // 减号后没内容：这一项是 null，除非下一行**更缩一层**（那才是它的内容）。
+                    // 同层再来的减号是下一个兄弟项，不能当这项的内容吞掉 —— `-\n- 第二条` 得是 [null,"第二条"]
+                    val next = r.peek()
+                    out += if (next != null && next.indent > row.indent) parseBlock(r, next.indent) else JsonNull
+                }
                 anchoredBlock(body) -> out += anchoredBelow(r, row.indent, body)
-                ENTRY.matchEntire(body) != null -> {
-                    // "- 键: 值"：冒号那部分是从减号后面那一列开始的一个映射，塞回一行按块读
+                ENTRY.matchEntire(body) != null || SEQUENCE.matches(body) -> {
+                    // "- 键: 值" 是从减号后面那一列起的一个映射，"- - 1" 是嵌套序列：
+                    // 都把正文塞回一行按块读，结构由那一列自己的开头决定
                     val column = row.indent + row.text.length - row.text.drop(1).trimStart().length
                     r.rows.add(r.at, Row(column, body, row.raw, row.number))
                     out += parseBlock(r, column)

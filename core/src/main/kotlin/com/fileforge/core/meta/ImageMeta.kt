@@ -78,8 +78,9 @@ object ImageMeta {
 
     fun container(bytes: ByteArray): Container? = when {
         bytes.size > 2 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xD8.toByte() -> Container.Jpeg
-        bytes.size > 8 && bytes[1] == 'P'.code.toByte() && bytes[2] == 'N'.code.toByte() &&
-            bytes[3] == 'G'.code.toByte() -> Container.Png
+        // 首字节 0x89 也是签名的一半：只看 "PNG" 三个字，任何这三个字开头的文件都会被当成 PNG 拆
+        bytes.size > 8 && bytes[0] == 0x89.toByte() && bytes[1] == 'P'.code.toByte() &&
+            bytes[2] == 'N'.code.toByte() && bytes[3] == 'G'.code.toByte() -> Container.Png
         else -> null
     }
 

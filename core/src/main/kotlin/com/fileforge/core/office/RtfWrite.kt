@@ -160,7 +160,9 @@ object RtfWrite {
         part.rows.forEachIndexed { index, row ->
             body.append("\\trowd")
             if (part.header && index == 0) body.append("\\trhdr")
-            repeat(width) { body.append("\\cellx$CELL_WIDTH") }
+            // \cellxN 是每列的**右边缘**（twips），必须一列比一列大：全写成同一个数
+            // 等于声明 N 个宽度为零的列，Word 里整行被压成一条缝
+            repeat(width) { column -> body.append("\\cellx").append((column + 1) * CELL_WIDTH) }
             for (column in 0 until width) {
                 body.append(" \\intbl ")
                 escapeText(row.getOrElse(column) { "" }, body, tally)

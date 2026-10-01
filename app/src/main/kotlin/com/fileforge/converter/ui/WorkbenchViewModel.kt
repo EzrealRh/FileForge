@@ -260,11 +260,13 @@ class WorkbenchViewModel(app: Application) : AndroidViewModel(app) {
         }
         recyclePreview()
         val doomed = state.items.filter { it.id in ids }
-        doomed.forEach { workspace.remove(it) }
-        _state.update { current ->
-            current.refreshed().copy(pendingDelete = emptySet(), selection = current.selection - ids)
+        viewModelScope.launch(Dispatchers.IO) {
+            doomed.forEach { workspace.remove(it) }
+            _state.update { current ->
+                current.refreshed().copy(pendingDelete = emptySet(), selection = current.selection - ids)
+            }
+            notify("删掉 ${doomed.size} 个")
         }
-        notify("删掉 ${doomed.size} 个")
     }
 
     fun remove(id: Long) {
@@ -272,7 +274,9 @@ class WorkbenchViewModel(app: Application) : AndroidViewModel(app) {
             notify("正在处理，先等这一批跑完再删")
             return
         }
-        _state.value.items.firstOrNull { it.id == id }?.let { workspace.remove(it) }
+        _state.value.items.firstOrNull { it.id == id }?.let { item ->
+            viewModelScope.launch(Dispatchers.IO) { workspace.remove(item) }
+        }
         val staleDetail = _state.value.detailId == id
         if (staleDetail) recyclePreview()
         _state.update { current ->
@@ -388,6 +392,12 @@ class WorkbenchViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun run(operation: Operation) {
+        // 底栏那颗「转换」在忙时会禁用，但详情页的入口（就处理这个文件）不在：
+        // 不拦一下，长任务没跑完时能再开一个，两边一起写工作台互相踩
+        if (_state.value.busy) {
+            notify("正在处理，先等这一批跑完")
+            return
+        }
         val items = _state.value.selected
         if (items.isEmpty()) {
             notify("先选中要处理的文件")
@@ -400,12 +410,20 @@ class WorkbenchViewModel(app: Application) : AndroidViewModel(app) {
                     _state.update { current -> current.copy(running = current.running?.copy(percent = percent, current = label)) }
                 }
             }
-            val crash = result.exceptionOrNull()
+            result.exceptionOrNull()?.let { crash ->
+                // 取消不是失败：往下走会把半批产物当"没产出"丢掉，也不该再发"整批中断"的假通知
+                if (crash is kotlinx.coroutines.CancellationException) throw crash
+            }
             val report = result.getOrNull()
             val produced = report?.outputs.orEmpty()
+            val (placed, publishFailed) = if (produced.isEmpty()) {
+                emptyMap<String, String>() to emptyList<String>()
+            } else {
+                publish(produced)
+            }
             val errors = report?.failures.orEmpty().map { (name, why) -> "$name：$why" } +
-                listOfNotNull(crash?.message?.let { "整批中断：$it" })
-            val placed = if (produced.isEmpty()) emptyMap() else publish(produced)
+                listOfNotNull(crash?.message?.let { "整批中断：$it" }) +
+                publishFailed.map { "没放进手机存储：$it" }
             _state.update { current ->
                 current.refreshed().copy(running = null, selection = produced.map { it.id }.toSet())
             }
@@ -429,29 +447,33 @@ class WorkbenchViewModel(app: Application) : AndroidViewModel(app) {
             notify("工作台里还没有文件")
             return@launch
         }
-        if (publish(source).isNotEmpty()) notify("已存到 ${gallery.locationLabel}，共 ${source.size} 个")
+        val (placed, failed) = publish(source)
+        if (placed.isNotEmpty()) notify("已存到 ${gallery.locationLabel}，共 ${source.size} 个")
+        if (failed.isNotEmpty()) notify("有 ${failed.size} 个没放进去：" + summarize(failed))
     }
 
     /**
      * 复制到 /storage/emulated/0/文件工坊 并记住位置。转换一完成就自动来一次，
      * 省得用户还得记得点"存到手机"；放不进去也不影响工作台里那份继续加工。
+     *
+     * 没放进去的那几个**不在这里报**：自动发布（run）收尾还有一条总结通知，先报一条
+     * 马上就被盖掉，用户根本看不见。交回给调用方，跟结果合并成一条再说。
      */
-    private suspend fun publish(items: List<WorkItem>): Map<String, String> {
+    private suspend fun publish(items: List<WorkItem>): Pair<Map<String, String>, List<String>> {
         if (!gallery.supported) {
             notify("这台系统的存储接口太老，用右上角「导出」选文件夹")
-            return emptyMap()
+            return emptyMap<String, String>() to emptyList<String>()
         }
         val result = withContext(Dispatchers.IO) { runCatching { gallery.save(items) } }
             .getOrElse { error ->
                 notify("放到手机存储失败：${error.message ?: error.javaClass.simpleName}")
-                return emptyMap()
+                return emptyMap<String, String>() to emptyList<String>()
             }
         result.paths.forEach { (name, path) ->
             items.firstOrNull { it.name == name }?.let { item -> workspace.markShared(item, path) }
         }
-        if (result.failures.isNotEmpty()) notify("有 ${result.failures.size} 个没放进去：" + summarize(result.failures))
         offerTopLevelHint(result)
-        return result.paths
+        return result.paths to result.failures
     }
 
     /**

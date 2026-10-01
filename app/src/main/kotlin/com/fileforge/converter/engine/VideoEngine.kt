@@ -264,6 +264,8 @@ class VideoEngine(private val workspace: Workspace, private val images: ImageEng
             val extractor = audioExtractor ?: return
             val buffer = audioBuffer ?: return
             if (!muxerStarted) return
+            // addTrack 现场被拒（判据漏了的机型/封装）：当没有音轨，别让 writeSampleData(-1) 把整件事搞失败
+            if (audioTrack < 0) return
             buffer.clear()
             val size = extractor.readSampleData(buffer, 0)
             if (size < 0) return

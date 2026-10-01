@@ -460,16 +460,26 @@ object ZipWriter {
             sink.write(name)
             val crc = CRC32()
             val counted = CountingSink(sink)
-            val plain = CountingStream(item.open())
-            if (method == ZipMethod.Stored.code) {
-                copyPlain(plain, SinkStream(counted), crc)
-            } else {
-                DeflaterOutputStream(SinkStream(counted), Deflater(Deflater.DEFAULT_COMPRESSION, true)).use {
-                    copyPlain(plain, it, crc)      // true = 裸 deflate，不带 zlib 头，zip 要的就是这个
+            var size = 0L
+            // 条目的供料口用完就关：打包几十份时不关的话，fd 会一路攒到打包结束
+            item.open().use { source ->
+                val plain = CountingStream(source)
+                if (method == ZipMethod.Stored.code) {
+                    copyPlain(plain, SinkStream(counted), crc)
+                } else {
+                    // 显式 new 的 Deflater 不会被 close() 自动 end()，用完得自己还回去
+                    val deflater = Deflater(Deflater.DEFAULT_COMPRESSION, true)
+                    try {
+                        DeflaterOutputStream(SinkStream(counted), deflater).use {
+                            copyPlain(plain, it, crc)      // true = 裸 deflate，不带 zlib 头，zip 要的就是这个
+                        }
+                    } finally {
+                        deflater.end()
+                    }
                 }
+                size = plain.count
             }
             val compressed = counted.count
-            val size = plain.count
             sink.seek(headerAt + 14)
             sink.write(long32(crc.value) + long32(compressed) + long32(size))
             sink.seek(headerAt + 30 + name.size + compressed)

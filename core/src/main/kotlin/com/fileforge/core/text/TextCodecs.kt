@@ -141,11 +141,13 @@ object TextCodecs {
     }
 
     /**
-     * 认编码：BOM 最优先，其次"严格 UTF-8 且真含非 ASCII"，否则只能退回调用方给的猜测。
+     * 认编码：BOM 最优先，其次"严格 UTF-8 且真含非 ASCII"，最后才在多字节 CJK 编码里挑。
      *
-     * 注意**不会**声称认得出 GBK / GB18030 / Big5 —— 它们的字节序列互不排斥，
-     * 纯靠猜必然有猜错的时候，而猜错的产物是乱码还看着像成功。所以猜不出来时
-     * 返回 replaced 很大的结果，让界面去问用户。
+     * GB18030 / Big5 / Shift_JIS 的字节序列互不排斥，光凭"解得干净"认不出方向 —— Latin-1 的
+     * 重音字母接上相邻字母，在 GB18030 眼里常常也是"合法"的双字节，解出来是零星几个假汉字。
+     * 所以多字节的猜测要过一道闸：**解出来的文本得以 CJK 为主**。真的中文/日文文档不会不及格，
+     * 而单字节文本被误读出来的"假汉字"只零星出现，到不了线 —— 到不了线的宁可认输，
+     * 交回按 [fallback] 解的不干净结果，让界面去问用户，也不交出一份看着成功的乱码。
      */
     fun recognize(bytes: ByteArray, fallback: TextEncoding = TextEncoding.Utf8): Decoded {
         detectBom(bytes)?.let { return decode(bytes, it) }
@@ -154,10 +156,27 @@ object TextCodecs {
         for (candidate in listOf(TextEncoding.Gb18030, TextEncoding.Big5, TextEncoding.ShiftJis)) {
             if (!available(candidate)) continue
             val result = decode(bytes, candidate)
-            if (result.clean) return result
+            if (result.clean && cjkShare(result.text) >= CJK_SHARE_LINE) return result
         }
         return decode(bytes, fallback)
     }
+
+    /** CJK 字符（表意文字、假名、谚文、全角字符）在文本里的占比。 */
+    private fun cjkShare(text: String): Float {
+        var cjk = 0
+        text.forEach { c ->
+            when (c.code) {
+                in 0x2E80..0x9FFF,      // 部首/注音/CJK 标点/假名/CJK 统一表意文字
+                in 0xF900..0xFAFF,      // 兼容表意文字
+                in 0xAC00..0xD7AF,      // 谚文音节
+                in 0xFF00..0xFFEF -> cjk++   // 全角字符
+                else -> {}
+            }
+        }
+        return if (text.isEmpty()) 0f else cjk.toFloat() / text.length
+    }
+
+    private const val CJK_SHARE_LINE = 0.5f
 
     /**
      * 编码输出。[bom] 只对 UTF-8/UTF-16 有意义。

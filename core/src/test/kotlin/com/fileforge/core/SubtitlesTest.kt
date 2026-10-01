@@ -74,9 +74,9 @@ class SubtitlesTest {
             [00:40.00]
         """.trimIndent()
         val cues = Subtitles.parse(SubtitleFormat.Lrc, lrc)
-        // [offset:+150] 的语义是加到每个时间戳上；一行两个时间戳就展开成两条
-        assertEquals(listOf(12_150L, 20_650L, 30_150L, 52_150L), cues.map { it.startMs }, "排序与 offset 都要对")
-        // offset 对每一条时间戳生效，20.5 秒也一起后移 150 毫秒
+        // LRC 约定：正 offset 是歌词整体**提前**（+150 = 每条时间戳减 150ms），不是加上去
+        assertEquals(listOf(11_850L, 20_350L, 29_850L, 51_850L), cues.map { it.startMs }, "排序与 offset 都要对")
+        // offset 对每一条时间戳生效，20.5 秒也一起提前 150 毫秒
         assertEquals(4, cues.size, "正文为空的那行不该变成一条字幕")
         assertTrue(cues[1].endMs - cues[1].startMs == Subtitles.LRC_DEFAULT_MS, "LRC 没有结束时间，要补一个")
         assertEquals("副歌同一句", cues[0].lines.single())

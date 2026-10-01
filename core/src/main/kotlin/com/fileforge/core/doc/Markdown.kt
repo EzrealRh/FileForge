@@ -17,6 +17,7 @@ object Markdown {
     private val FOOTNOTE_DEF = Regex("""^ {0,3}\[\^[^\]]+\]:""")
     private val FOOTNOTE_USE = Regex("""\[\^[^\]]+\]""")
     private val FENCE_LINE = Regex("""^---[ \t]*$""")
+    private val YAML_ENTRY = Regex("""^[ \t]*[^\s#][^:]*:(\s|$)""")
 
     /** Markdown → HTML。 */
     fun toHtml(source: String): Rendered = render(source, html = true)
@@ -52,8 +53,11 @@ object Markdown {
         var from = 0
         if (lines.size > 1 && FENCE_LINE.matches(lines[0])) {
             val end = (1 until lines.size).firstOrNull { FENCE_LINE.matches(lines[it]) }
-            if (end != null) {
-                notes += "开头的 YAML 头（第 1 到 ${end + 1} 行）没当正文，照字面留下了"
+            // 认 YAML 头要**双向**取证：光凭首尾两道 --- 就把中间整段吃掉的话，
+            // 一篇以分割线开头、中间又出现过 --- 的普通文档，正文就被静悄悄删了。
+            // 中间至少得有一条"键: 值"模样的行，才当它是元信息
+            if (end != null && (1 until end).any { YAML_ENTRY.containsMatchIn(lines[it]) }) {
+                notes += "开头的 YAML 头（第 1 到 ${end + 1} 行）是元信息，没当正文渲染，整段去掉了"
                 from = end + 1
             }
         }

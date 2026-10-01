@@ -42,12 +42,14 @@ class MediaStorePublisher(private val context: Context) {
     fun save(items: List<WorkItem>): Result {
         val paths = LinkedHashMap<String, String>()
         val failures = ArrayList<String>()
-        var topLevel = false
+        var topLevel = true
         items.forEach { item ->
             runCatching { insert(item) }
                 .onSuccess { path ->
                     paths[item.name] = path
-                    topLevel = path.startsWith(topLevelDir.absolutePath)
+                    // 结论要的是"是不是**全都**落在了顶层"：只记最后一个的话，
+                    // 一半顶层一半 Download 的混批会给出错的答案，提示要么漏了要么误报
+                    topLevel = topLevel && path.startsWith(topLevelDir.absolutePath)
                 }
                 .onFailure { failures += "${item.name}：${it.message}" }
         }
@@ -111,14 +113,18 @@ class MediaStorePublisher(private val context: Context) {
      */
     private fun writeTopLevel(item: WorkItem): String? {
         if (!topLevelGranted) return null
-        return runCatching {
+        val target = runCatching {
             val dir = topLevelDir
             if (!dir.exists() && !dir.mkdirs()) error("建不出 ${dir.absolutePath}")
-            val target = freeTarget(dir, item.name)
+            freeTarget(dir, item.name)
+        }.getOrNull() ?: return null
+        // 写一半失败（盘满、存储被拔）会把半份文件留在用户看得见的目录里冒充成品：
+        // 删掉再交回 null，让 MediaStore 那条路接着试
+        return runCatching {
             item.file.inputStream().use { input -> target.outputStream().use { output -> input.copyTo(output) } }
             MediaScannerConnection.scanFile(context, arrayOf(target.absolutePath), null, null)
             target.absolutePath
-        }.getOrNull()
+        }.onFailure { runCatching { target.delete() } }.getOrNull()
     }
 
     /**

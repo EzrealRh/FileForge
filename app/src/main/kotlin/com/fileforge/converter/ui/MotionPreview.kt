@@ -45,6 +45,9 @@ import java.io.File
 /** 预览只解码这么多总像素就停，免得为一个动图吃几十兆堆。 */
 private const val PREVIEW_PIXEL_BUDGET = 10_000_000
 
+/** 原始文件超过这么大就不进预览解码（预算管的是解出来的帧，不管这一份字节）。 */
+private const val PREVIEW_FILE_LIMIT = 64L * 1024 * 1024
+
 /**
  * 会动的预览：GIF 用自家 `:core` 解码器按帧自己放，动图 WebP 交给系统 `ImageDecoder`，
  * 视频用 MediaPlayer 打到 TextureView 上。不支持动的类型走 [fallback]，也就是原来那张静帧预览图。
@@ -78,6 +81,8 @@ private fun GifPreview(file: File, modifier: Modifier, fallback: @Composable () 
     LaunchedEffect(file) {
         val decoded = withContext(Dispatchers.Default) {
             runCatching {
+                // 先看文件多大再整个读进来：预算管得住解出来的帧，管不住这一份原始字节
+                if (file.length() > PREVIEW_FILE_LIMIT) return@runCatching null
                 val image = GifDecoder.decode(file.readBytes(), pixelBudget = PREVIEW_PIXEL_BUDGET)
                 if (image.frames.isEmpty()) null
                 else GifClip(
@@ -133,16 +138,21 @@ private fun GifPreview(file: File, modifier: Modifier, fallback: @Composable () 
 /** AnimatedImageDrawable 要 API 28，更早的系统退回静帧；只影响动图 WebP 的预览。 */
 @Composable
 private fun AnimatedImagePreview(file: File, modifier: Modifier, fallback: @Composable () -> Unit) {
-    val drawable = remember(file) {
-        if (Build.VERSION.SDK_INT < 28) null
-        else runCatching { ImageDecoder.decodeDrawable(ImageDecoder.createSource(file)) }.getOrNull()
+    var drawable by remember(file) { mutableStateOf<android.graphics.drawable.Drawable?>(null) }
+    // 解码放到组合外面：大动图在主线程上解会把呈现这一格的那一帧整个卡住
+    LaunchedEffect(file) {
+        drawable = if (Build.VERSION.SDK_INT < 28) null
+        else withContext(Dispatchers.Default) {
+            runCatching { ImageDecoder.decodeDrawable(ImageDecoder.createSource(file)) }.getOrNull()
+        }
     }
-    if (drawable == null) {
+    val current = drawable
+    if (current == null) {
         fallback()
         return
     }
-    DisposableEffect(drawable) {
-        val animation = drawable as? AnimatedImageDrawable
+    DisposableEffect(current) {
+        val animation = current as? AnimatedImageDrawable
         animation?.repeatCount = AnimatedImageDrawable.REPEAT_INFINITE
         animation?.start()
         onDispose { animation?.stop() }
@@ -155,7 +165,7 @@ private fun AnimatedImagePreview(file: File, modifier: Modifier, fallback: @Comp
                 scaleType = ImageView.ScaleType.FIT_CENTER
             }
         },
-        update = { view -> view.setImageDrawable(drawable) },
+        update = { view -> view.setImageDrawable(current) },
     )
 }
 

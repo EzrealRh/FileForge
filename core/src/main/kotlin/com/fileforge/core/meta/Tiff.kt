@@ -57,16 +57,19 @@ object Tiff {
             if (entry + 12 > tiff.size) return false
             val tag = u16(tiff, entry, big)
             val type = u16(tiff, entry + 2, big)
-            val number = u32(tiff, entry + 4, big)
-            val size = (typeSize[type] ?: return false).let { it * number }
-            val where = if (size <= 4) entry + 8 else u32(tiff, entry + 8, big)
-            if (where < 0 || where + size > tiff.size) continue
+            // 认不出的类型跳过这一条就行，别把整个 IFD 判死 —— 说好的"读不出来的字段跳过"
+            val unit = typeSize[type] ?: continue
+            // u32 回来的是带符号 Int：个数与偏移都要按无符号补回 Long 再算，负数会绕过下面的越界检查
+            val number = u32(tiff, entry + 4, big).toLong() and 0xFFFF_FFFFL
+            val size = unit.toLong() * number
+            val where = if (size <= 4) entry + 8L else u32(tiff, entry + 8, big).toLong() and 0xFFFF_FFFFL
+            if (where + size > tiff.size || where < 0) continue
             when (tag) {
                 GPS_IFD -> readIfd(tiff, u32(tiff, entry + 8, big), big, into = into, gps = gps, exif = exif)
                 EXIF_IFD -> readIfd(tiff, u32(tiff, entry + 8, big), big, into = into, gps = gps, exif = exif)
                 INTEROP_IFD -> Unit
                 else -> {
-                    val value = decode(tiff, where, type, number, big) ?: continue
+                    val value = decode(tiff, where.toInt(), type, number.toInt(), big) ?: continue
                     val name = names[tag] ?: "标签 0x%04X".format(tag)
                     val shown = if (tag == ORIENTATION) orientationText(value) else value
                     when {
@@ -141,10 +144,11 @@ object Tiff {
         0x011A to "水平分辨率", 0x011B to "分辨率单位", 0x0128 to "归属", 0x0131 to "作者",
         0x0132 to "修改时间", 0x013B to "系统", 0x8298 to "版权", 0x8769 to "Exif 子块",
         0x8825 to "GPS 子块", 0x8827 to "ISO",
-        // Exif 子 IFD
-        0x829A to "曝光时间", 0x920A to "光圈", 0x9201 to "焦距", 0x9202 to "胶片焦距",
+        // Exif 子 IFD。标签名按规范对好号 —— 0x9201/0x9202 是 APEX 快门/光圈，
+        // 0x920A 才是焦距，0xA20E/0xA20F 是焦平面分辨率：以前全错位，用户看到的是错的拍摄参数
+        0x829A to "曝光时间", 0x920A to "焦距", 0x9201 to "快门速度（APEX）", 0x9202 to "光圈（APEX）",
         0x9003 to "拍摄时间", 0x9004 to "数字化时间", 0x9101 to "组件配置",
-        0xA002 to "像素宽", 0xA003 to "像素高", 0xA20E to "闪光灯", 0xA20F to "测光方式",
+        0xA002 to "像素宽", 0xA003 to "像素高", 0xA20E to "焦平面水平分辨率", 0xA20F to "焦平面垂直分辨率",
         0x9286 to "BPS",
         // GPS 子 IFD
         1 to "北纬/南纬", 2 to "纬度", 3 to "东经/西经", 4 to "经度", 5 to "海拔参考",
@@ -163,5 +167,7 @@ object Tiff {
         else (v[3] shl 24) or (v[2] shl 16) or (v[1] shl 8) or v[0]
     }
 
-    private fun i32(b: ByteArray, at: Int, big: Boolean): Long = (u32(b, at, big).toLong())
+    /** 有符号 32 位：EXIF 的 SLONG/SRATIONAL（曝光补偿、快门速度）负数不少见，不补符号就全成大正数。 */
+    private fun i32(b: ByteArray, at: Int, big: Boolean): Long =
+        u32(b, at, big).toLong().let { if (it >= 0x8000_0000L) it - 0x1_0000_0000L else it }
 }

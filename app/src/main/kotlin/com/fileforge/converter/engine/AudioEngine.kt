@@ -253,6 +253,7 @@ class AudioEngine(private val workspace: Workspace) {
         var rate = sourceFormat.integer(MediaFormat.KEY_SAMPLE_RATE) ?: 44_100
         var channels = sourceFormat.integer(MediaFormat.KEY_CHANNEL_COUNT) ?: 2
         var bits = 16
+        var floatPcm = false
         var pcmBytes = 0L
         var blocks = 0
         val raf = RandomAccessFile(output, "rw")
@@ -268,7 +269,10 @@ class AudioEngine(private val workspace: Workspace) {
                     AudioFormat.ENCODING_PCM_8BIT -> 8
                     AudioFormat.ENCODING_PCM_16BIT -> 16
                     AudioFormat.ENCODING_PCM_24BIT_PACKED -> 24
-                    AudioFormat.ENCODING_PCM_FLOAT -> 32
+                    AudioFormat.ENCODING_PCM_FLOAT -> {
+                        floatPcm = true
+                        32
+                    }
                     null -> bits
                     else -> error("这台机器解出来的是非整数位 PCM，写不出可靠的 WAV，改用 M4A")
                 }
@@ -282,7 +286,10 @@ class AudioEngine(private val workspace: Workspace) {
                 blocks++
             })
             raf.seek(0)
-            raf.write(WavHeader.of(pcmBytes, rate, channels, bits))
+            // float 解码输出必须写 IEEE float 的格式标签（3）：照整数 PCM 写的话文件能打开、放出来是噪音
+            raf.write(WavHeader.of(pcmBytes, rate, channels, bits, if (floatPcm) WavHeader.FORMAT_IEEE_FLOAT else WavHeader.FORMAT_PCM))
+            // RIFF 规定奇数长的块后面垫一个字节（不计入长度字段）：8 位单声道常见奇数长
+            if (pcmBytes % 2 == 1L) raf.write(0)
         } finally {
             runCatching { raf.close() }
         }

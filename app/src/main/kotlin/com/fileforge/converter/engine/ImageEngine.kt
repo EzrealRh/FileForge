@@ -141,12 +141,18 @@ class ImageEngine {
         val sizes = operation.sizes.filter { it in 1..Ico.MAX_SIDE }.distinct()
         require(sizes.isNotEmpty()) { "尺寸一个都不合法：要 1~${Ico.MAX_SIDE} 之间的数" }
         val source = decode(items.first().file)
-        val images = sizes.sortedByDescending { it }.map { side ->
-            val square = centerCropSquare(source, side)
-            val pixels = IntArray(side * side)
-            square.getPixels(pixels, 0, side, 0, 0, side, side)   // 安卓的 API 是 (数组, 起点, 步长, 左, 上, 宽, 高)
-            if (square !== source) square.recycle()
-            IcoImage(side, side, pixels)
+        // source 是所有尺寸共用的解码结果，只能在整个循环结束后回收——
+        // 缩第一个尺寸时就把它 recycle 掉，第二个尺寸再拿去缩就会崩
+        val images = try {
+            sizes.sortedByDescending { it }.map { side ->
+                val square = centerCropSquare(source, side)
+                val pixels = IntArray(side * side)
+                square.getPixels(pixels, 0, side, 0, 0, side, side)   // 安卓的 API 是 (数组, 起点, 步长, 左, 上, 宽, 高)
+                if (square !== source) square.recycle()
+                IcoImage(side, side, pixels)
+            }
+        } finally {
+            source.recycle()
         }
         val bytes = Ico.write(images)
         val file = staging("ico").apply { writeBytes(bytes) }
@@ -180,13 +186,12 @@ class ImageEngine {
         }
     }
 
-    /** 缩到短边等于 [side] 之后居中裁出 side×side。 */
+    /** 缩到短边等于 [side] 之后居中裁出 side×side。不回收 [source]：它归调用方管。 */
     private fun centerCropSquare(source: Bitmap, side: Int): Bitmap {
         val shorter = minOf(source.width, source.height)
         val ratio = side.toFloat() / shorter
         val matrix = Matrix().apply { postScale(ratio, ratio) }
         val scaled = Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
-        if (scaled !== source) source.recycle()
         if (scaled.width == side && scaled.height == side) return scaled
         val cropped = Bitmap.createBitmap(scaled, (scaled.width - side) / 2, (scaled.height - side) / 2, side, side)
         scaled.recycle()

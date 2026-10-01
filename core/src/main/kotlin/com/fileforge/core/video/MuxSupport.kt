@@ -29,7 +29,10 @@ object MuxSupport {
     fun keepsAudio(container: VideoFormat, audioMime: String?): Boolean {
         if (audioMime.isNullOrBlank()) return false
         val allowed = if (container == VideoFormat.WebM) WEBM_AUDIO else MP4_AUDIO
-        return allowed.contains(audioMime.trim().lowercase())
+        // MediaExtractor 报的 MIME 可能带着参数（`audio/mp4a-latm; profile=...`）：
+        // 归一化成纯 mime 再比对，不然明明收得下的音轨被误判成收不下
+        val plain = audioMime.trim().lowercase().substringBefore(';').trim()
+        return allowed.contains(plain)
     }
 
     /** 收得下但 muxer 现场拒绝时也要能退回来，所以这里只解释"为什么不带音轨了"。 */

@@ -111,7 +111,13 @@ object Csv {
             row += field.toString()
             records += row
         }
-        val kept = records.filterNot { it.size == 1 && it.single().isEmpty() }
+        // 末尾那个空行不是记录：文本文件习惯以换行收尾。只去**最后**这一条，
+        // 中间出现的空记录是数据本身（RFC 4180 里它就是一条全空字段的记录），删了会错位
+        val kept = if (records.lastOrNull()?.let { it.size == 1 && it.single().isEmpty() } == true) {
+            records.subList(0, records.size - 1)
+        } else {
+            records
+        }
         return CsvDoc(kept, delimiter, ending)
     }
 

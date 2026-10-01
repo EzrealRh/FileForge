@@ -149,7 +149,7 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
             is Operation.UnpackArchive -> items.forEach { item ->
                 collect(item.name) { archives.unpack(item, operation, ::staging) }
             }
-            is Operation.PackTarGz -> collect("${'$'}{items.size} 份文件") {
+            is Operation.PackTarGz -> collect("${items.size} 份文件") {
                 listOf(archives.packTar(items, operation, ::staging))
             }
             is Operation.UntarArchive -> items.forEach { item ->

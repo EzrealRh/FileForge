@@ -213,9 +213,21 @@ object Subtitles {
     private val lrcTime = Regex("""^(\d{1,2}):(\d{1,2})(?:[.:](\d{1,3}))?$""")
 
     private fun parseLrc(source: String): List<Cue> {
+        val lines = normalize(source).split('\n')
+        // [offset:] 对整份生效，先把它的值找出来 —— 不管这行写在文件头还是夹在歌词中间
         var offsetMs = 0L
+        lines.forEach { raw ->
+            val line = raw.trim()
+            if (!line.startsWith("[")) return@forEach
+            lrcTag.findAll(line).forEach { match ->
+                val tag = match.groupValues[1].trim()
+                if (lrcTime.matchEntire(tag) == null && tag.startsWith("offset", ignoreCase = true)) {
+                    lrcOffsetValue(tag)?.let { offsetMs = it }
+                }
+            }
+        }
         val cues = ArrayList<Cue>()
-        normalize(source).split('\n').forEachIndexed { position, raw ->
+        lines.forEachIndexed { position, raw ->
             val line = raw.trim()
             if (!line.startsWith("[")) return@forEachIndexed
             val tags = lrcTag.findAll(line).map { it.groupValues[1].trim() }.toList()
@@ -228,22 +240,21 @@ object Subtitles {
                 start + parseFraction(match.groupValues[3], position + 1)
             }
             val rest = line.substringAfterLast(']').trim()
-            if (times.isEmpty()) {
-                // 不是时间戳就是元数据。只认 [offset:]（它对整份生效），[ti:] [ar:] 这些不动
-                val offset = tags.firstOrNull { it.startsWith("offset", ignoreCase = true) }
-                    ?.substringAfter(':', "")?.trim()?.removePrefix("+")?.toLongOrNull()
-                if (offset != null) offsetMs = offset
-                return@forEachIndexed
-            }
+            if (times.isEmpty()) return@forEachIndexed    // 元数据行：offset 上一轮已扫过，[ti:] [ar:] 这些不动
             if (rest.isEmpty()) return@forEachIndexed     // 纯占位的空行，转成字幕只会多出一批空条目
             times.forEach { start ->
-                val shifted = (start + offsetMs).coerceAtLeast(0L)
+                // LRC 的约定是正 offset 让歌词整体**提前**：从时间戳里减掉，而不是加上
+                val shifted = (start - offsetMs).coerceAtLeast(0L)
                 cues += Cue(shifted, shifted + LRC_DEFAULT_MS, listOf(rest))
             }
         }
         if (cues.isEmpty()) throw Bad(1, "没找到任何 [分:秒.百分之秒] 形式的时间戳，这份不是 LRC")
         return cues.sortedWith(compareBy({ it.startMs }, { it.endMs }))
     }
+
+    /** `[offset:±毫秒]` 的值；写法坏了就当没写，别拿它动整份时间轴。 */
+    private fun lrcOffsetValue(tag: String): Long? =
+        tag.substringAfter(':', "").trim().removePrefix("+").toLongOrNull()
 
     private fun parseFraction(fraction: String, at: Int): Long = when {
         fraction.isEmpty() -> 0L
@@ -295,7 +306,14 @@ object Subtitles {
         val minute = parts[1].toLongOrNull() ?: throw Bad(at, "时间轴「$text」读不出分")
         val split = parts[2].split('.')
         val second = split[0].toLongOrNull() ?: throw Bad(at, "时间轴「$text」读不出秒")
-        return ((hour * 60 + minute) * 60 + second) * 1000 + parseFraction(split.getOrNull(1).orEmpty(), at)
+        return ((hour * 60 + minute) * 60 + second) * 1000 + assFractionMillis(split.getOrNull(1).orEmpty(), text, at)
+    }
+
+    /** ASS 结尾是**百分秒**：`.5` 是百分之五秒（50ms），跟 LRC/SRT 里 `.5`=500ms 不是一回事。 */
+    private fun assFractionMillis(fraction: String, text: String, at: Int): Long = when {
+        fraction.isEmpty() -> 0L
+        fraction.length == 1 -> (fraction.toLongOrNull()?.times(10)) ?: throw Bad(at, "时间轴「$text」的小数不对")
+        else -> (fraction.take(2).toLongOrNull()) ?: throw Bad(at, "时间轴「$text」的小数不对")
     }
 
     /** `\N` `\n` 是换行，`\h` 是不间断空格，`{\...}` 是样式覆盖块 —— 都不该显示出来。 */

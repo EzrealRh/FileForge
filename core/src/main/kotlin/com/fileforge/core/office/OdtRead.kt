@@ -229,8 +229,8 @@ object OdtRead {
             when (localName(child)) {
                 "table-row" -> row(child, ctx, rows)
                 "table-body", "table-footer-rows" ->
-                    // 真文件（LibreOffice 与 pandoc 写的）把正文的行裹在 table:table-body 里：
-                    // 只认裸的 table-row 与 header-rows 的话，一张表除了表头一行都读不出来
+                    // 这两个元素并不在 ODF schema 里，规范的行是直接排在 table 下的；
+                    // 但野文件里可能碰到，读侧保持宽容：认得这种包法，别让表体凭空消失
                     children(child) { inner ->
                         val made = inner as? Element ?: return@children
                         if (localName(made) == "table-row") row(made, ctx, rows)

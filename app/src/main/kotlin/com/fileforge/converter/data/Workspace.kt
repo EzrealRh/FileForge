@@ -90,9 +90,12 @@ class Workspace(context: Context) {
     }.getOrDefault(emptyMap())
 
     private fun saveBook() {
-        val lines = items.values.mapNotNull { item ->
-            val batch = batches[item.groupId] ?: return@mapNotNull null
-            listOf(batch.id.toString(), item.addedAt.toString(), batch.title, item.name).joinToString("\t")
+        // 遍历要在同一把锁里：登记那头在写这个 map，裸着迭代会撞 ConcurrentModificationException
+        val lines = synchronized(items) {
+            items.values.mapNotNull { item ->
+                val batch = batches[item.groupId] ?: return@mapNotNull null
+                listOf(batch.id.toString(), item.addedAt.toString(), batch.title, item.name).joinToString("\t")
+            }
         }
         runCatching { batchBook.writeText(lines.joinToString("\n")) }
     }
@@ -125,7 +128,10 @@ class Workspace(context: Context) {
                     requireNotNull(input) { "打不开这个文件" }
                     tmp.outputStream().use { input.copyTo(it) }
                 }
-                staged += (if (display.contains('.')) display else "$display.bin") to tmp
+                // 供应方报的名字不经消毒就拿来拼路径的话，名字里一个 '/' 就能把文件
+                // 写到工作台外面去；`\t` `\n` 还会弄坏 tab 分隔的批次账本
+                val name = OutputNaming.sanitize(display)
+                staged += (if (name.contains('.')) name else "$name.bin") to tmp
             }
         }
         require(staged.isNotEmpty()) { "一个文件都没拿进来" }
@@ -139,26 +145,30 @@ class Workspace(context: Context) {
      * [groupId] 给 0 表示另起一批（转换产物要传来源那一批进来，见 [BatchLineage.inherit]）。
      */
     fun adopt(source: File, name: String, fromOperation: String?, groupId: Long = BatchLineage.NONE): WorkItem {
-        // 重名必须避让：POSIX rename 会静默覆盖，两个条目指向同一个文件就全乱了
-        val finalName = OutputNaming.unique(name, namesInUse())
-        val target = File(root, finalName)
-        if (!source.renameTo(target)) {
-            source.copyTo(target, overwrite = true)
-            source.delete()
+        // 重名必须避让：POSIX rename 会静默覆盖，两个条目指向同一个文件就全乱了。
+        // 取名→挪文件→登记要在一把锁里完成 —— 转换没跑完时分享/导入也能进来，
+        // 两路各自"查重→改名"会撞到同一个名字，后者把前者悄悄覆盖掉
+        synchronized(items) {
+            val finalName = OutputNaming.unique(name, namesInUse())
+            val target = File(root, finalName)
+            if (!source.renameTo(target)) {
+                source.copyTo(target, overwrite = true)
+                source.delete()
+            }
+            val item = WorkItem(
+                id = ids.incrementAndGet(),
+                name = finalName,
+                file = target,
+                kind = sniff(target),
+                size = target.length(),
+                addedAt = System.currentTimeMillis(),
+                fromOperation = fromOperation,
+                groupId = if (groupId == BatchLineage.NONE) newBatch(name) else groupId,
+            )
+            items[item.id] = item
+            saveBook()
+            return item
         }
-        val item = WorkItem(
-            id = ids.incrementAndGet(),
-            name = finalName,
-            file = target,
-            kind = sniff(target),
-            size = target.length(),
-            addedAt = System.currentTimeMillis(),
-            fromOperation = fromOperation,
-            groupId = if (groupId == BatchLineage.NONE) newBatch(name) else groupId,
-        )
-        synchronized(items) { items[item.id] = item }
-        saveBook()
-        return item
     }
 
     /** 给引擎一个还没登记的临时落盘位置，写完再由 [adopt] 收进工作台。 */

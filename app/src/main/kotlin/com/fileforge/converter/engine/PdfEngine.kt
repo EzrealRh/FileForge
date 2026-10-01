@@ -263,7 +263,9 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
             }
             stream.transform(
                 Matrix().apply {
-                    translate(frame.translateX, frame.translateY)
+                    // 上面的视觉坐标是相对裁剪框的：裁剪框原点不在 (0,0) 的页（扫描、裁边过的 PDF 常见）
+                    // 不把原点补回来，整块水印就整体偏出可见区域
+                    translate(box.lowerLeftX + frame.translateX, box.lowerLeftY + frame.translateY)
                     rotate(Math.toRadians(frame.rotateDegrees.toDouble()))
                 },
             )

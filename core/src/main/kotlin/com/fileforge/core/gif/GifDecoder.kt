@@ -66,6 +66,8 @@ object GifDecoder {
         var loopCount = 1
         var truncated = false
         val canvasPixels = width.toLong() * height.toLong()
+        // 画布本身就超预算的话连一帧都装不下，别把 256MB 的数组开出来再谈预算
+        if (canvasPixels > pixelBudget) throw GifException("画布 ${width}x$height 有 $canvasPixels 像素，超过 $pixelBudget 的处理预算")
         var delayCs = 0
         var disposal = 0
         var transparentIndex = -1
@@ -81,6 +83,8 @@ object GifDecoder {
                     when (val label = bytes[p + 1].toInt() and 0xFF) {
                         0xF9 -> {
                             val size = bytes[p + 2].toInt() and 0xFF
+                            // 定长部分是 4 字节（标志、延时、透明索引），短于它说明块坏了，硬读会越界
+                            if (size < 4) throw GifException("图形控制块长度异常 $size")
                             if (p + 3 + size > bytes.size) throw GifException("图形控制块被截断")
                             val flags = bytes[p + 3].toInt() and 0xFF
                             delayCs = u16(bytes, p + 4)
@@ -139,6 +143,9 @@ object GifDecoder {
                         if (index !in table.indices) throw GifException("索引 $index 超出调色板 ${table.size} 项")
                         argb[i] = if (index == transparentIndex) 0 else 0xFF000000.toInt() or table[index]
                     }
+                    // disposal=3 的约定是"这帧画完、下场把它擦掉、恢复到画这帧**之前**的样子"，
+                    // 快照必须赶在合成前面拍——晚了拍到的就是这帧自己，恢复等于没恢复
+                    val previous = if (disposal == 3) canvas.copyOf() else null
                     composite(canvas, width, height, left, top, frameWidth, frameHeight, argb, flags and 0x40 != 0)
                     if ((frames.size + 1).toLong() * canvasPixels > pixelBudget) {
                         truncated = true
@@ -146,7 +153,6 @@ object GifDecoder {
                         break
                     }
                     frames += GifFrame(canvas.copyOf(), delayCs)
-                    val previous = if (disposal == 3) canvas.copyOf() else null
                     when (disposal) {
                         2 -> erase(canvas, width, height, left, top, frameWidth, frameHeight, backgroundPixel(globalTable, background, transparentIndex))
                         3 -> previous?.copyInto(canvas)
@@ -373,10 +379,8 @@ internal object Lzw {
                 bits += 8
             }
             if (bits < count) {
-                val value = buffer and ((1 shl bits) - 1)
-                buffer = 0
-                bits = 0
-                return value
+                // 剩的位不够凑一个完整码字：数据被截断了。半截码喂给状态机只会产出乱索引，按没有码处理
+                return -1
             }
             val value = buffer and ((1 shl count) - 1)
             buffer = buffer shr count

@@ -51,15 +51,20 @@ object DocxRead {
         val links = externalLinks(load(DOCX_RELS))
         val parts = ArrayList<DocPart>()
         val body = childrenOf(OoxmlXml.root(document), "body").firstOrNull() ?: OoxmlXml.root(document)
-        children(body) { node ->
-            val element = node as? Element ?: return@children
-            when (localName(element)) {
-                "p" -> paragraph(element, styles, numbering, links, tally)?.let { parts += it }
-                "tbl" -> table(element, styles, numbering, links, tally)?.let { parts += it }
-                "sectPr" -> Unit                                     // 页面尺寸与分节：文字转换用不上
-                else -> Unit
+        fun walkBlocks(container: Element) {
+            children(container) { node ->
+                val element = node as? Element ?: return@children
+                when (localName(element)) {
+                    "p" -> paragraph(element, styles, numbering, links, tally)?.let { parts += it }
+                    "tbl" -> table(element, styles, numbering, links, tally)?.let { parts += it }
+                    // 内容控件（sdt）：模板、封面、目录这些地方爱把正文裹在里面，照读
+                    "sdt" -> childrenOf(element, "sdtContent").forEach { walkBlocks(it) }
+                    "sectPr" -> Unit                                 // 页面尺寸与分节：文字转换用不上
+                    else -> Unit
+                }
             }
         }
+        walkBlocks(body)
         val losses = tally.losses()
         return DocxBody(Doc(parts, losses), losses)
     }
@@ -196,7 +201,8 @@ object DocxRead {
                 bullet = true
                 tally.bump("numUnknown")
             } else {
-                bullet = !formats.getOrElse(indent) { formats.last() }
+                // abstractNum 一个 lvl 都没有时表是空的：照"缺 numFmt 当 bullet"的规矩走，别抛异常
+                bullet = !formats.getOrElse(indent) { formats.lastOrNull() ?: false }
             }
         }
         val runs = inlineRuns(element, null, links, tally)
@@ -255,6 +261,12 @@ object DocxRead {
                 }
                 "ins" -> out += inlineRuns(child, inherited, links, tally)
                 "del" -> tally.bump("del")
+                // 简单域（fldSimple）里躺着上次算好的字段结果，内容控件与 smartTag 里也可能
+                // 直接是正文：这些都是"透明的壳"，穿过去接着读，别把里面的字整段丢掉
+                "fldSimple", "smartTag" -> out += inlineRuns(child, inherited, links, tally)
+                "sdt" -> childrenOf(child, "sdtContent").forEach { content ->
+                    out += inlineRuns(content, inherited, links, tally)
+                }
                 else -> Unit
             }
         }

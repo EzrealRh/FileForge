@@ -15,6 +15,7 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
 /**
@@ -74,6 +75,9 @@ class UpdateRepository(context: Context) {
                     target.outputStream().use { output ->
                         val buffer = ByteArray(32 * 1024)
                         while (true) {
+                            // 读是阻塞调用，取消不会自己打断它：每一圈先报个到，
+                            // 不然离开更新页之后整份 APK 还在后台下个没完
+                            coroutineContext.ensureActive()
                             val read = input.read(buffer)
                             if (read < 0) break
                             output.write(buffer, 0, read)

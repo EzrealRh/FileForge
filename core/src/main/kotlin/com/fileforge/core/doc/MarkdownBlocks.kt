@@ -34,7 +34,10 @@ internal class Table(val aligns: List<Align>, val header: List<String>, val rows
 internal object MarkdownBlocks {
 
     private val FENCE = Regex("""^( {0,3})(`{3,}|~{3,})[ \t]*(.*)$""")
-    private val ATX = Regex("""^ {0,3}(#{1,6})(.*?)\s*$""")
+    // ATX 标题 # 后必须有空格（或整行只有 #）：`#tag`、`#1 排行榜` 是正文，不是标题
+    private val ATX = Regex("""^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*$""")
+    /** 可选的收尾 `##`：规范要求它与正文之间隔一个空格，`# tag#` 里那个 # 是正文。 */
+    private val ATX_CLOSE = Regex("""[ \t]+#+$""")
     private val HR = Regex("""^ {0,3}([-*_])[ \t]*(\1[ \t]*){2,}$""")
     private val QUOTE = Regex("""^ {0,3}>[ \t]?(.*)$""")
     private val LIST = Regex("""^( *)([-*+]|\d{1,9}[.)])([ \t]+)(.*)$""")
@@ -67,7 +70,7 @@ internal object MarkdownBlocks {
                 HR.matches(line) -> { blocks += Hr(); index++ }
                 ATX.matches(line) -> {
                     val found = ATX.find(line)!!.groupValues
-                    blocks += Head(found[1].length, found[2].trim().trimEnd('#').trimEnd())
+                    blocks += Head(found[1].length, found[2].trim().replace(ATX_CLOSE, ""))
                     index++
                 }
                 QUOTE.matches(line) -> {

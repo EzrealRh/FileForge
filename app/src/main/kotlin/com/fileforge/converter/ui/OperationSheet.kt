@@ -373,8 +373,6 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
                 IntSlider("不透明度", watermarkOpacity, 3f..100f, { "%.0f%%".format(it) }) { watermarkOpacity = it }
                 IntSlider("深浅", watermarkGray, 0f..90f, { if (it < 34) "深" else if (it < 67) "中" else "浅" }) { watermarkGray = it }
                 IntSlider("倾斜", watermarkTilt, -90f..90f, { "%.0f°".format(it) }, step = 5f) { watermarkTilt = it }
-                IntSlider("颜色深浅", watermarkGray, 0f..95f, { "%.0f".format(it) }, step = 5f) { watermarkGray = it }
-                IntSlider("倾斜角度", watermarkTilt, 0f..90f, { "%.0f°".format(it) }, step = 5f) { watermarkTilt = it }
                 PageSpecField("留空=整份都盖；也可只盖几页，例：1,5-8", "没点到的页原样带过去")
                 Summary("1x1 就是页面正中一块；行列调大就平铺，字会自动按格子宽度缩放")
             }

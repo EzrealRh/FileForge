@@ -12,6 +12,10 @@ object WavHeader {
     /** 固定头长度；PCM 数据从这一 byte 之后开始。 */
     const val SIZE = 44
 
+    /** WAVE 格式标签：1 = 无压缩整数 PCM，3 = IEEE float。 */
+    const val FORMAT_PCM = 1
+    const val FORMAT_IEEE_FLOAT = 3
+
     /** 安卓 MediaCodec 解码 PCM 出来恒为 16 位小端，所以引擎只用这一条。 */
     fun pcm16(pcmBytes: Long, sampleRate: Int, channels: Int): ByteArray =
         of(pcmBytes, sampleRate, channels, 16)
@@ -20,11 +24,13 @@ object WavHeader {
      * `pcmBytes` 必须是 `blockAlign` 的整数倍（半帧都不能有），否则不同解码器会各按各的
      * 理解截断 —— 调用方按解码器给的长度累加，本来就不会出现半帧。
      */
-    fun of(pcmBytes: Long, sampleRate: Int, channels: Int, bitsPerSample: Int): ByteArray {
+    fun of(pcmBytes: Long, sampleRate: Int, channels: Int, bitsPerSample: Int, formatTag: Int = FORMAT_PCM): ByteArray {
         require(sampleRate > 0) { "采样率必须为正，拿到 $sampleRate" }
         require(channels in 1..8) { "声道数要在 1~8，拿到 $channels" }
         require(bitsPerSample % 8 == 0) { "位深得是 8 的整数倍，拿到 $bitsPerSample" }
         require(pcmBytes >= 0) { "PCM 长度不能为负，拿到 $pcmBytes" }
+        // 长度字段是 32 位的：超了会被静默截断成一份头尾对不上的文件，不如直接说不行
+        require(pcmBytes <= 0xFFFFFFF0L - 36) { "这份 PCM 有 ${pcmBytes / (1L shl 20)} MiB，WAV 的 32 位长度字段装不下" }
 
         val blockAlign = channels * bitsPerSample / 8
         val byteRate = sampleRate.toLong() * blockAlign
@@ -35,7 +41,7 @@ object WavHeader {
         ascii(out, 8, "WAVE")
         ascii(out, 12, "fmt ")
         u32(out, 16, 16)                    // fmt 块体长度：PCM 固定 16
-        u16(out, 20, 1)                     // 1 = 无压缩 PCM
+        u16(out, 20, formatTag)             // 1 = 整数 PCM；float 得写 3，不然能打开、放出来是噪音
         u16(out, 22, channels)
         u32(out, 24, sampleRate.toLong())
         u32(out, 28, byteRate)
@@ -47,9 +53,9 @@ object WavHeader {
     }
 
     /** 写完之后回填长度用的：把头重算一遍盖回文件开头。 */
-    fun rewrite(target: ByteArray, pcmBytes: Long, sampleRate: Int, channels: Int, bitsPerSample: Int) {
+    fun rewrite(target: ByteArray, pcmBytes: Long, sampleRate: Int, channels: Int, bitsPerSample: Int, formatTag: Int = FORMAT_PCM) {
         require(target.size >= SIZE) { "缓冲区放不下 44 字节头" }
-        of(pcmBytes, sampleRate, channels, bitsPerSample).copyInto(target, 0, 0, SIZE)
+        of(pcmBytes, sampleRate, channels, bitsPerSample, formatTag).copyInto(target, 0, 0, SIZE)
     }
 
     private fun ascii(to: ByteArray, at: Int, text: String) =

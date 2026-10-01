@@ -86,6 +86,7 @@ object Xlsx {
         val rows = ArrayList<List<String>>()
         val issues = Issues()
         var clipped = 0
+        var broken = 0
         OoxmlStructure.childrenOf(data, "row").forEach { row ->
             val at = row.getAttribute("r").toIntOrNull() ?: (rows.size + 1)
             require(at in 1..MAX_ROWS) { "第 $at 行超出 Excel 的行数上限，这份文件坏了" }
@@ -94,10 +95,12 @@ object Xlsx {
             OoxmlStructure.childrenOf(row, "c").forEach { cell ->
                 val ref = cell.getAttribute("r")
                 val column = if (ref.isNotBlank()) columnOf(ref) else cells.size
-                if (column >= MAX_COLUMNS) {
-                    clipped++
-                } else {
-                    cells += column to cellText(cell, strings, dateStyleIndexes, epoch1904, issues)
+                when {
+                    // 引用里没有列字母（r="12" 这种坏引用）给不出列号：丢掉这一格，
+                    // 不能让 values[-1] 把整次转换掀翻
+                    column < 0 -> broken++
+                    column >= MAX_COLUMNS -> clipped++
+                    else -> cells += column to cellText(cell, strings, dateStyleIndexes, epoch1904, issues)
                 }
             }
             val values = MutableList((cells.maxOfOrNull { it.first } ?: -1) + 1) { "" }
@@ -107,6 +110,7 @@ object Xlsx {
         if (issues.noResult > 0) notes += "${issues.noResult} 格是公式但没有算过的结果，转出来是空格"
         if (issues.badString > 0) notes += "${issues.badString} 格指向的共享文字在表里找不到，那些格按空处理"
         if (clipped > 0) notes += "$clipped 格的列号超出表格宽度上限，那些格丢掉了"
+        if (broken > 0) notes += "$broken 格的引用写得不完整（没有列字母），那些格丢掉了"
 
         var used = rows.size
         while (used > 0 && rows[used - 1].all { it.isEmpty() }) used--
@@ -221,9 +225,22 @@ object Xlsx {
         return bare.any { it in "yYmMdDhHsS" }
     }
 
-    /** 这棵子树里所有 `t` 叶子的文字（一个格子的富文本会有好几段）。 */
+    /**
+     * 这棵子树里所有 `t` 叶子的文字（一个格子的富文本会有好几段）。
+     * 注音（`rPh`）里的是读音提示，不是内容：日文 Excel 写的共享文字里它排在正文前面，
+     * 不过滤的话格子值就成了"ヨミ漢字"。
+     */
     private fun runText(node: Element): String =
-        OoxmlStructure.findAll(node, "t").joinToString("") { it.textContent }
+        OoxmlStructure.findAll(node, "t")
+            .filterNot { t ->
+                var at: org.w3c.dom.Node? = t.parentNode
+                while (at != null && at !== node) {
+                    if (at is Element && OoxmlStructure.localName(at) == "rPh") return@filterNot true
+                    at = at.parentNode
+                }
+                false
+            }
+            .joinToString("") { it.textContent }
 
     private fun onFlag(value: String): Boolean = value == "1" || value.equals("true", ignoreCase = true)
 

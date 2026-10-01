@@ -120,7 +120,8 @@ class OdtWriteTest {
         val without = part(bytes(Doc(listOf(DocTable(false, listOf(listOf("甲", "乙"), listOf("1", "2")))), emptyList())).bytes, "content.xml")
         assertTrue("table:table-header-rows" in withHeader, withHeader)
         assertFalse("table:table-header-rows" in without, "没表头就不该有那一层")
-        assertTrue("table:table-body" in without, without)
+        // table:table-body 不在 ODF schema 里，写出这个元素就是非法文件，正文行要直接排在 table 下面
+        assertFalse("table:table-body" in without, without)
     }
 
     @Test

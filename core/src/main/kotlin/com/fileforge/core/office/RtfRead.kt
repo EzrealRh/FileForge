@@ -207,10 +207,14 @@ private class RtfScan(
             return
         }
         val node = stack.last()
-        when (node.mode) {
-            BODY -> controlWord(made.first, made.second, node)
-            CONTROL -> definition(node.context, made.first, made.second)
-            GATHER -> markerWord(made.first, node)
+        when {
+            // \bin 在**任何**模式下都得先跳字节：二进制数据不是 RTF 记号，
+            // 跳过的块里不认它的话，那些字节就被当成 RTF 文本走进状态机，
+            // 里头一个 { } 就能把组配对搅乱，甚至把后面的正文一并吞掉
+            made.first == "bin" -> skipBinary(made.second ?: 0)
+            node.mode == BODY -> controlWord(made.first, made.second, node)
+            node.mode == CONTROL -> definition(node.context, made.first, made.second)
+            node.mode == GATHER -> markerWord(made.first, node)
             else -> Unit                     // 域指令只取字面；跳过与丢弃的块什么都不做
         }
     }

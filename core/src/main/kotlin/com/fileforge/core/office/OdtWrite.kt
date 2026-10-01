@@ -103,7 +103,8 @@ object OdtWrite {
     private fun manifest(withMeta: Boolean): String {
         val out = StringBuilder(DECL)
             .append("<manifest:manifest xmlns:manifest=\"").append(MANIFEST).append("\">")
-            .append(entry("", MIME))
+            // 根条目的 full-path 规范写法是 "/"（OdsWrite 也是这么写的），空串过不了严格校验
+            .append(entry("/", MIME))
         if (withMeta) out.append(entry("meta.xml", "text/xml"))
         out.append(entry("styles.xml", "text/xml")).append(entry("content.xml", "text/xml"))
         return out.append("</manifest:manifest>").toString()
@@ -315,7 +316,9 @@ object OdtWrite {
 
     /**
      * 一张表：列按 `table:table-column` 一条一条声明（不用"重复几根"的压缩写法），
-     * 有表头时首行躺在 `table:table-header-rows` 里，其余行在 `table:table-body` 里 —— 读的那侧就按这个判表头。
+     * 有表头时首行躺在 `table:table-header-rows` 里，其余行**直接**排在 `table:table` 下面 ——
+     * ODF 的 schema 里没有 `table:table-body` 这个元素，写出去是非法文件，
+     * 严格的阅读器会连表体一起丢（读的那侧倒是宽容，认得这种包法）。
      */
     private fun table(part: DocTable, out: StringBuilder, tally: OdtWriteTally) {
         val width = part.rows.maxOfOrNull { it.size } ?: 0
@@ -329,9 +332,8 @@ object OdtWrite {
             row(part.rows.first(), width, out)
             out.append("</table:table-header-rows>")
         }
-        out.append("<table:table-body>")
         part.rows.drop(headerRows).forEach { row(it, width, out) }
-        out.append("</table:table-body></table:table>")
+        out.append("</table:table>")
     }
 
     private fun row(values: List<String>, width: Int, out: StringBuilder) {

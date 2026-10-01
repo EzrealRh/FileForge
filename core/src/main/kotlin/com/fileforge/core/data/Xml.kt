@@ -7,7 +7,6 @@ import com.fileforge.core.json.JsonNumber
 import com.fileforge.core.json.JsonObject
 import com.fileforge.core.json.JsonRender
 import com.fileforge.core.json.JsonString
-import java.io.ByteArrayInputStream
 import javax.xml.parsers.DocumentBuilderFactory
 import org.w3c.dom.Comment
 import org.w3c.dom.Element
@@ -57,7 +56,9 @@ object Xml {
         //     "设不上"不能当成"挡住了"。DTD 只允许出现在序文里，所以扫一遍源文本就够。
         rejectDoctype(text)
         val document = try {
-            factory.newDocumentBuilder().parse(InputSource(ByteArrayInputStream(text.toByteArray())))
+            // 交给解析器的是**字符流**：text 本身已经是解对了的 String，再按字节交回去
+            // 会用默认字符集重编一遍，声明里写着 GB2312 之类的文档就被读成乱码
+            factory.newDocumentBuilder().parse(InputSource(text.reader()))
         } catch (bad: Exception) {
             val reason = bad.message?.takeIf { it.isNotBlank() } ?: bad.javaClass.simpleName
             throw XmlException("这不是合法 XML：$reason")
@@ -197,7 +198,9 @@ object Xml {
             value is JsonObject -> {
                 val members = value.members
                 val attributes = members.filter { it.key.startsWith(ATTRIBUTE_PREFIX) }
-                val text = members[TEXT]?.stringValue
+                // #text 不一定是字符串（数字、布尔也会挂在这个键上）：一律取成文字，
+                // 不然这个值既不进正文也不进孩子，转完就静悄悄没了
+                val text = members[TEXT]?.let { it.text() }
                 val children = members.filter { !it.key.startsWith(ATTRIBUTE_PREFIX) && it.key != TEXT }
                 if (attributes.isEmpty() && children.isEmpty() && text != null) {
                     out.append(pad).append('<').append(name).append('>').append(escapeText(text))

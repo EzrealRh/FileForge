@@ -130,7 +130,8 @@ object TextLayoutPlanner {
             }
             // 断在词边界时那个空格归上一步吃掉：留着它，行尾就挂着一个看不见的空格，
             // 而换行本身就是要用它，不该再出现在纸面上
-            val line = paragraph.substring(start, last).trimEnd()
+            val raw = paragraph.substring(start, last)
+            val line = raw.trimEnd()
             // 收尾标点不许留在行首：把它从上一行末尾带到这一行开头之前，先回看一行
             if (out.isNotEmpty()) {
                 val previous = out.last()
@@ -143,8 +144,11 @@ object TextLayoutPlanner {
             }
             val trailing = trailingBadEnd(line, paragraph, last)
             if (trailing > 0 && line.length > trailing) {
-                out += line.substring(0, line.length - trailing)
-                start = last - trailing
+                // 退回去的字符数要按**没去空白前**的 raw 算：trailing 是在去空白后的 line 上数的，
+                // 拿它直接减 last 会把括号和空白一起跳过 —— 那个字符就哪一行都不在了
+                val cut = raw.length - line.length + trailing
+                out += raw.substring(0, raw.length - cut)
+                start = last - cut
                 indent = 0f
                 continue
             }

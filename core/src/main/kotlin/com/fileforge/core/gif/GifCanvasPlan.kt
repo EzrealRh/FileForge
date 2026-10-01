@@ -30,8 +30,10 @@ object GifCanvasPlan {
         val pixels = width.toLong() * height * widths.size
         if (pixels > pixelBudget) scale = min(scale, sqrt(pixelBudget.toDouble() / pixels))
 
-        return (width * scale).roundToInt().coerceAtLeast(minEdge) to
-            (height * scale).roundToInt().coerceAtLeast(minEdge)
+        // minEdge 是给"缩得太狠"兜底的最小画布；源图本身就比它小的，保持原尺寸，
+        // 不能反过来放大（这里说好只缩不放，放大会把 16×8 的源硬扯成 32×32 的画布）
+        return (width * scale).roundToInt().coerceAtLeast(minEdge).coerceAtMost(width) to
+            (height * scale).roundToInt().coerceAtLeast(minEdge).coerceAtMost(height)
     }
 
     /** 单帧尺寸 x 帧数是否还在内存上限内；超了调用方要如实报错，别硬解。 */

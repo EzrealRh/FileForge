@@ -252,23 +252,37 @@ object Epub {
         return out.joinToString("/")
     }
 
+    /**
+     * 路径段的百分号解码。字节序列按 **UTF-8** 解（zip 侧的条目名也是这么解的，两边才对得上，
+     * `first%20part` 与 `第一章` 这类名字才找得到文件）；`+` 是普通字符不是空格 ——
+     * 那是查询串的规矩，路径里的 `c++-basics.xhtml` 不该被改写。
+     */
     private fun urlDecode(value: String): String {
-        if (!value.contains('%') && !value.contains('+')) return value
+        if (!value.contains('%')) return value
+        val pending = ArrayList<Byte>(value.length)
         val out = StringBuilder()
+        fun flush() {
+            if (pending.isNotEmpty()) {
+                out.append(String(pending.toByteArray(), Charsets.UTF_8))
+                pending.clear()
+            }
+        }
         var i = 0
         while (i < value.length) {
             val ch = value[i]
             if (ch == '%' && i + 2 < value.length) {
                 val code = value.substring(i + 1, i + 3).toIntOrNull(16)
                 if (code != null) {
-                    out.append(code.toInt().toChar())      // 路径里的非 ASCII 少，先按单字节解
+                    pending.add(code.toByte())
                     i += 3
                     continue
                 }
             }
-            out.append(if (ch == '+') " " else ch)
+            flush()
+            out.append(ch)
             i++
         }
+        flush()
         return out.toString()
     }
 

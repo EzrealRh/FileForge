@@ -81,7 +81,13 @@ class MetaReader {
 
     private fun pdfFirstPage(file: File): android.graphics.Bitmap? {
         val descriptor = android.os.ParcelFileDescriptor.open(file, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
-        val renderer = android.graphics.pdf.PdfRenderer(descriptor)
+        // PdfRenderer 的构造函数本身就会解析文件头：坏了的话它抛异常，但已打开的 fd 得有人关
+        val renderer = try {
+            android.graphics.pdf.PdfRenderer(descriptor)
+        } catch (error: Throwable) {
+            runCatching { descriptor.close() }
+            throw error
+        }
         return try {
             if (renderer.pageCount == 0) return null
             renderer.openPage(0).use { page ->

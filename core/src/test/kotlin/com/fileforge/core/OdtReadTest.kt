@@ -180,8 +180,8 @@ class OdtReadTest {
 
     @Test
     fun `正文行裹在 table-body 里也读得出`() {
-        // LibreOffice 与 pandoc 写的 .odt 都把正文行裹进 table:table-body（表头那行在 header-rows 里）：
-        // 只认裸的 table-row 与 header-rows 的话，真文件里一张表除了表头一行都读不出来
+        // table:table-body 并不在 ODF schema 里（我们写侧也不再产出它），
+        // 但既然野文件里可能碰到，读的那侧就保持宽容：认得这种包法，别让表体凭空消失
         val made = parts(
             "<table:table table:name=\"T1\">" +
                 "<table:table-header-rows><table:table-row>" +

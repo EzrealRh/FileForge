@@ -78,7 +78,8 @@ class ArchiveEngine {
                 val output = names[index]
                 val file = staging(OutputNaming.extension(output, "bin"))
                 try {
-                    java.io.FileOutputStream(file).use { target -> writeEntry(entry, slices, target) }
+                    // 体积闸套在搬运途中：目录里报的数可能是谎报的，等校验和核出来时早就写满了
+                    java.io.FileOutputStream(file).use { target -> writeEntry(entry, slices, LimitedStream(target)) }
                     EngineOutput(output, file, note)
                 } catch (error: Exception) {
                     file.delete()
@@ -199,7 +200,8 @@ class ArchiveEngine {
                 val output = names[index]
                 val file = staging(OutputNaming.extension(output, "bin"))
                 try {
-                    java.io.FileOutputStream(file).use { target -> writeEntry(entry, slices, target) }
+                    // 体积闸套在搬运途中：目录里报的数可能是谎报的，等校验和核出来时早就写满了
+                    java.io.FileOutputStream(file).use { target -> writeEntry(entry, slices, LimitedStream(target)) }
                     EngineOutput(output, file, note)
                 } catch (error: Exception) {
                     file.delete()
