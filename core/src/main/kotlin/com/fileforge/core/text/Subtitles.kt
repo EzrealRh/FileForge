@@ -309,11 +309,11 @@ object Subtitles {
         return ((hour * 60 + minute) * 60 + second) * 1000 + assFractionMillis(split.getOrNull(1).orEmpty(), text, at)
     }
 
-    /** ASS 结尾是**百分秒**：`.5` 是百分之五秒（50ms），跟 LRC/SRT 里 `.5`=500ms 不是一回事。 */
-    private fun assFractionMillis(fraction: String, text: String, at: Int): Long = when {
-        fraction.isEmpty() -> 0L
-        fraction.length == 1 -> (fraction.toLongOrNull()?.times(10)) ?: throw Bad(at, "时间轴「$text」的小数不对")
-        else -> (fraction.take(2).toLongOrNull()) ?: throw Bad(at, "时间轴「$text」的小数不对")
+    /** ASS 结尾是**百分秒**（1/100 秒，乘 10 才是毫秒）：`.5` 是 50ms、`.50` 是 500ms，跟 LRC/SRT 的 `.5`=半秒不是一回事。 */
+    private fun assFractionMillis(fraction: String, text: String, at: Int): Long {
+        if (fraction.isEmpty()) return 0L
+        val value = fraction.take(2).toLongOrNull() ?: throw Bad(at, "时间轴「$text」的小数不对")
+        return value * 10
     }
 
     /** `\N` `\n` 是换行，`\h` 是不间断空格，`{\...}` 是样式覆盖块 —— 都不该显示出来。 */

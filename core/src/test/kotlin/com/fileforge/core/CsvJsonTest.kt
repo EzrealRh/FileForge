@@ -107,7 +107,13 @@ class CsvJsonTest {
             )
         }
         assertTrue("\n" in doc.records[2][1], "引号里的换行属于内容")
-        assertEquals(LineEnding.CrLf, doc.ending, "原文件是 CRLF，产物也要跟着 CRLF")
+        // CRLF 的判定不能依赖 fixture 的检出形态（autocrlf 会把仓里的 LF 换成 CRLF）：
+        // 在内存里把同一份内容摆成 CRLF 再读，判定要跟原样一致。
+        // 引号里的换行本来就跟着原文走（CRLF 文件里就是 CRLF），比对时归一掉
+        val crlf = Csv.parse(resourceText("tricky.csv").replace("\r\n", "\n").replace("\n", "\r\n"))
+        fun List<List<String>>.normalized() = map { row -> row.map { cell -> cell.replace("\r\n", "\n") } }
+        assertEquals(doc.records.normalized(), crlf.records.normalized(), "换行符改写不该动到内容")
+        assertEquals(LineEnding.CrLf, crlf.ending, "原文件是 CRLF，产物也要跟着 CRLF")
     }
 
     @Test

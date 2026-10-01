@@ -410,10 +410,9 @@ class WorkbenchViewModel(app: Application) : AndroidViewModel(app) {
                     _state.update { current -> current.copy(running = current.running?.copy(percent = percent, current = label)) }
                 }
             }
-            result.exceptionOrNull()?.let { crash ->
-                // 取消不是失败：往下走会把半批产物当"没产出"丢掉，也不该再发"整批中断"的假通知
-                if (crash is kotlinx.coroutines.CancellationException) throw crash
-            }
+            // 取消不是失败：往下走会把半批产物当"没产出"丢掉，也不该再发"整批中断"的假通知
+            val crash = result.exceptionOrNull()
+            if (crash is kotlinx.coroutines.CancellationException) throw crash
             val report = result.getOrNull()
             val produced = report?.outputs.orEmpty()
             val (placed, publishFailed) = if (produced.isEmpty()) {
