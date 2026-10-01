@@ -324,4 +324,23 @@ class MarkdownTest {
     fun `列表在纯文本里保留记号与缩进`() {
         assertEquals("- 甲\n  - 乙\n", plain("- 甲\n  - 乙\n"))
     }
+
+    @Test
+    fun `不是从 1 起头的有序列表不打断段落`() {
+        // 散文里常见"那年是 1985 年…\n3. 那年之后…"这种写法：第二行是正文，不是列表
+        val source = "那年是 1985 年，一切都变了。\n3. 那年之后，再没人提起。\n又过了一年。"
+        val made = html(source)
+        assertEquals(1, Regex("<p>").findAll(made).count(), made)
+        assertTrue("<ol>" !in made, made)
+        // 从 1 起头的可以打断段落，这是 CommonMark 的规矩；空行之后的几号都能开列表
+        assertTrue("<ol>" in html("正文一行\n1. 起头的列表\n"))
+        assertTrue("<ol start=\"3\">" in html("正文一行。\n\n3. 空行之后的列表\n"))
+    }
+
+    @Test
+    fun `链接标签里的转义中括号不算闭合`() {
+        val made = html("[a\\]b](https://example.com)后文")
+        assertTrue("<a href=\"https://example.com\">" in made, made)
+        assertTrue(">a]b</a>后文" in made, made)
+    }
 }
