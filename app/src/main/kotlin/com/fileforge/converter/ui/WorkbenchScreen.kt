@@ -32,6 +32,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -160,7 +161,19 @@ fun WorkbenchScreen(
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
             if (state.items.isEmpty()) {
-                EmptyState(onPickPdf, onPickFromGallery, onAddFiles)
+                if (state.loaded) {
+                    EmptyState(onPickPdf, onPickFromGallery, onAddFiles, viewModel::openUpdateSheet)
+                } else {
+                    // 后台装载还没完成：这时候的"空"是假的，别把空态页闪出来
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 24.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                        Text("正在读取工作台…", style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
             } else {
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 16.dp),
@@ -375,7 +388,12 @@ fun WorkbenchScreen(
 }
 
 @Composable
-private fun EmptyState(onPickPdf: () -> Unit, onPickFromGallery: () -> Unit, onAddFiles: () -> Unit) {
+private fun EmptyState(
+    onPickPdf: () -> Unit,
+    onPickFromGallery: () -> Unit,
+    onAddFiles: () -> Unit,
+    onCheckUpdate: () -> Unit,
+) {
     Card(
         modifier = Modifier.fillMaxWidth().padding(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
@@ -409,6 +427,10 @@ private fun EmptyState(onPickPdf: () -> Unit, onPickFromGallery: () -> Unit, onA
             Spacer(Modifier.height(8.dp))
             TextButton(onClick = onAddFiles, modifier = Modifier.fillMaxWidth()) {
                 Text("从文件管理器选其他类型（GIF、视频、HEIC…）")
+            }
+            // 检查更新原本躺在筛选条那行里：工作台一空它就跟着消失，这里补一个常驻入口
+            TextButton(onClick = onCheckUpdate, modifier = Modifier.fillMaxWidth()) {
+                Text("检查更新")
             }
         }
     }

@@ -94,6 +94,8 @@ data class WorkbenchState(
     val updateToken: String = "",
     /** 成品只能落在 Download 时的一次性提示。 */
     val topLevelHint: Boolean = false,
+    /** 工作台的磁盘装载是否完成：装载前的"空"不是真的空，界面据此区分空态与加载中。 */
+    val loaded: Boolean = false,
 ) {
     val selected: List<WorkItem> get() = items.filter { it.id in selection }
     val visible: List<WorkItem> get() = items.filter { filter.matches(it.kind) }
@@ -131,7 +133,7 @@ class WorkbenchViewModel(app: Application) : AndroidViewModel(app) {
         // 装载完再把列表交回状态流。以前这整段（连清 staging）都跑在主线程构造里
         viewModelScope.launch(Dispatchers.IO) {
             workspace.prewarm()
-            _state.update { it.refreshed() }
+            _state.update { it.refreshed().copy(loaded = true) }
         }
     }
 
