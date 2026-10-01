@@ -334,22 +334,6 @@ fun WorkbenchScreen(
         )
     }
 
-    if (state.topLevelHint) {
-        AlertDialog(
-            onDismissRequest = viewModel::dismissTopLevelHint,
-            title = { Text("成品在 Download 里，不是一层目录") },
-            text = {
-                Text(
-                    "系统不让普通应用直接建 /storage/emulated/0/文件工坊，所以这批成品落到了 " +
-                        "Download/文件工坊。想让它像其他 App 一样在存储根目录出现，" +
-                        "去系统设置里给本应用开「所有文件访问权限」；不开也能正常用，只是位置深一层。",
-                )
-            },
-            confirmButton = { TextButton(onClick = viewModel::grantTopLevelAccess) { Text("去开启") } },
-            dismissButton = { TextButton(onClick = viewModel::dismissTopLevelHint) { Text("先不用") } },
-        )
-    }
-
     if (state.mediaPickerOpen) {
         MediaPickerSheet(
             state = state.media,

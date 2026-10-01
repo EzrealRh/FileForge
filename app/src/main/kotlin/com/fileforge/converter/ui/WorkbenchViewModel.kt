@@ -1,6 +1,7 @@
 package com.fileforge.converter.ui
 
 import android.app.Application
+import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
@@ -92,8 +93,6 @@ data class WorkbenchState(
     val updateSheetOpen: Boolean = false,
     val update: UpdateUi = UpdateUi.Idle,
     val updateToken: String = "",
-    /** 成品只能落在 Download 时的一次性提示。 */
-    val topLevelHint: Boolean = false,
     /** 工作台的磁盘装载是否完成：装载前的"空"不是真的空，界面据此区分空态与加载中。 */
     val loaded: Boolean = false,
 ) {
@@ -123,7 +122,6 @@ class WorkbenchViewModel(app: Application) : AndroidViewModel(app) {
     private val mediaLibrary = MediaLibrary(app)
     private val updates = UpdateRepository(app)
     private var noticeSeq = 0
-    private var topLevelHintShown = false
 
     private val _state = MutableStateFlow(WorkbenchState())
     val state = _state.asStateFlow()
@@ -423,11 +421,13 @@ class WorkbenchViewModel(app: Application) : AndroidViewModel(app) {
             if (crash is kotlinx.coroutines.CancellationException) throw crash
             val report = result.getOrNull()
             val produced = report?.outputs.orEmpty()
-            val (placed, publishFailed) = if (produced.isEmpty()) {
-                emptyMap<String, String>() to emptyList<String>()
+            val outcome = if (produced.isEmpty()) {
+                PublishOutcome(emptyMap(), emptyList(), null)
             } else {
                 publish(produced)
             }
+            val placed = outcome.paths
+            val publishFailed = outcome.failures
             val errors = report?.failures.orEmpty().map { (name, why) -> "$name：$why" } +
                 listOfNotNull(crash?.message?.let { "整批中断：$it" }) +
                 publishFailed.map { "没放进手机存储：$it" }
@@ -442,7 +442,7 @@ class WorkbenchViewModel(app: Application) : AndroidViewModel(app) {
                     produced.isNotEmpty() -> "完成 ${produced.size} 个，失败 ${errors.size} 个：" + summarize(errors)
                     errors.isEmpty() -> "没产出结果文件"
                     else -> "没做成：" + summarize(errors)
-                },
+                } + (outcome.hint?.let { "；$it" } ?: ""),
             )
         }
     }
@@ -454,9 +454,13 @@ class WorkbenchViewModel(app: Application) : AndroidViewModel(app) {
             notify("工作台里还没有文件")
             return@launch
         }
-        val (placed, failed) = publish(source)
-        if (placed.isNotEmpty()) notify("已存到 ${gallery.locationLabel}，共 ${source.size} 个")
-        if (failed.isNotEmpty()) notify("有 ${failed.size} 个没放进去：" + summarize(failed))
+        val outcome = publish(source)
+        if (outcome.paths.isNotEmpty()) {
+            // 报**实际**落点：没开顶层权限时成品在 Download/文件工坊，别说成顶层目录误导人
+            val where = outcome.paths.values.firstOrNull()?.substringBeforeLast('/') ?: gallery.locationLabel
+            notify("已存到 $where，共 ${source.size} 个" + (outcome.hint?.let { "；$it" } ?: ""))
+        }
+        if (outcome.failures.isNotEmpty()) notify("有 ${outcome.failures.size} 个没放进去：" + summarize(outcome.failures))
     }
 
     /**
@@ -466,44 +470,44 @@ class WorkbenchViewModel(app: Application) : AndroidViewModel(app) {
      * 没放进去的那几个**不在这里报**：自动发布（run）收尾还有一条总结通知，先报一条
      * 马上就被盖掉，用户根本看不见。交回给调用方，跟结果合并成一条再说。
      */
-    private suspend fun publish(items: List<WorkItem>): Pair<Map<String, String>, List<String>> {
+    private suspend fun publish(items: List<WorkItem>): PublishOutcome {
         if (!gallery.supported) {
             notify("这台系统的存储接口太老，用右上角「导出」选文件夹")
-            return emptyMap<String, String>() to emptyList<String>()
+            return PublishOutcome(emptyMap(), emptyList(), null)
         }
         val result = withContext(Dispatchers.IO) { runCatching { gallery.save(items) } }
             .getOrElse { error ->
                 notify("放到手机存储失败：${error.message ?: error.javaClass.simpleName}")
-                return emptyMap<String, String>() to emptyList<String>()
+                return PublishOutcome(emptyMap(), emptyList(), null)
             }
         result.paths.forEach { (name, path) ->
             items.firstOrNull { it.name == name }?.let { item -> workspace.markShared(item, path) }
         }
-        offerTopLevelHint(result)
-        return result.paths to result.failures
+        val hint = offerTopLevelHint(result)
+        return PublishOutcome(result.paths, result.failures, hint)
     }
+
+    /** 一次发布的结果：落点、没放进去的（调用方并进通知说）、以及要不要带一句顶层目录的说明。 */
+    private class PublishOutcome(
+        val paths: Map<String, String>,
+        val failures: List<String>,
+        val hint: String?,
+    )
 
     /**
-     * 成品落到 Download 而不是顶层时提一句去哪开权限 —— 一次会话只提一次，
-     * 别每次转换都弹窗。
+     * 成品落到 Download 而不是顶层目录时，说明一句"怎么去顶层"。
+     *
+     * 只作为**通知里的一句话**存在，不再弹模态对话框：那个弹窗每个会话都来一次，
+     * 看着像在索要"所有文件访问权限"，其实不开也一切可用。一台设备只提一次（记进偏好）；
+     * 已经开了权限、或这批本来就落在顶层的，什么都不说。
      */
-    private fun offerTopLevelHint(result: MediaStorePublisher.Result) {
-        if (result.topLevel || result.paths.isEmpty() || topLevelHintShown) return
-        // 只有"能开权限但没开"才值得提；老系统或已经开了还落回 Download 的，提了也解决不了
-        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.R || gallery.topLevelGranted) return
-        topLevelHintShown = true
-        _state.update { it.copy(topLevelHint = true) }
-    }
-
-    fun dismissTopLevelHint() {
-        _state.update { it.copy(topLevelHint = false) }
-    }
-
-    /** 跳到系统「所有文件访问权限」页，开完就能直接建 /storage/emulated/0/文件工坊。 */
-    fun grantTopLevelAccess() {
-        _state.update { it.copy(topLevelHint = false) }
-        runCatching { getApplication<Application>().startActivity(gallery.topLevelPermissionIntent()) }
-            .onFailure { notify("这台系统没给这个入口，用「导出」自己选文件夹也一样") }
+    private fun offerTopLevelHint(result: MediaStorePublisher.Result): String? {
+        if (result.topLevel || result.paths.isEmpty()) return null
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.R || gallery.topLevelGranted) return null
+        val prefs = getApplication<Application>().getSharedPreferences("fileforge_ui", Context.MODE_PRIVATE)
+        if (prefs.getBoolean("topLevelHintShown", false)) return null
+        prefs.edit().putBoolean("topLevelHintShown", true).apply()
+        return "想去存储根目录的「文件工坊」，可在系统设置里给本应用开「所有文件访问权限」（不开不影响使用）"
     }
 
     /**
