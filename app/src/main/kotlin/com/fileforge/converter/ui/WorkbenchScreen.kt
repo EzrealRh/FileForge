@@ -43,6 +43,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -78,6 +79,9 @@ fun WorkbenchScreen(
     val state by viewModel.state.collectAsState()
     val snackbar = remember { SnackbarHostState() }
     var overflowOpen by remember { mutableStateOf(false) }
+    var renamePrefix by remember { mutableStateOf("") }
+    var renameStart by remember { mutableStateOf("1") }
+    var renameDigits by remember { mutableStateOf("3") }
 
     // 用序号当 key，否则连着两条同文案的提示会被吞掉
     LaunchedEffect(state.notice?.seq) {
@@ -103,12 +107,8 @@ fun WorkbenchScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = onSaveToPhone, enabled = state.items.isNotEmpty()) {
-                        Icon(Icons.Outlined.PhotoAlbum, contentDescription = "存到手机 Download/文件工坊")
-                    }
-                    IconButton(onClick = onExport, enabled = state.items.isNotEmpty()) {
-                        Icon(Icons.Outlined.FolderOpen, contentDescription = "导出到文件夹")
-                    }
+                    // 分享与删除跟着选中走，最常用，留在明面上；
+                    // 存到手机 / 导出 / 检查更新这类低频动作收进 ⋮ 菜单，顶栏不再摆满
                     IconButton(
                         onClick = { viewModel.share(state.selected) },
                         enabled = state.selected.isNotEmpty(),
@@ -128,12 +128,31 @@ fun WorkbenchScreen(
                             contentDescription = if (state.selection.isEmpty()) "清空工作台" else "删除选中的 ${state.selection.size} 个",
                         )
                     }
-                    // 「检查更新」在顶栏的更多菜单里常驻：它原来躺在筛选条里，
-                    // 而筛选条横向滚、它又排在最后，屏幕一窄就像没有这个功能
                     IconButton(onClick = { overflowOpen = true }) {
                         Icon(Icons.Outlined.MoreVert, contentDescription = "更多")
                     }
                     DropdownMenu(expanded = overflowOpen, onDismissRequest = { overflowOpen = false }) {
+                        DropdownMenuItem(
+                            text = { Text("存到手机") },
+                            onClick = {
+                                overflowOpen = false
+                                onSaveToPhone()
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("导出到文件夹") },
+                            onClick = {
+                                overflowOpen = false
+                                onExport()
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("批量重命名") },
+                            onClick = {
+                                overflowOpen = false
+                                viewModel.openRename()
+                            },
+                        )
                         DropdownMenuItem(
                             text = { Text("检查更新") },
                             onClick = {
@@ -183,10 +202,10 @@ fun WorkbenchScreen(
         Column(Modifier.padding(padding).fillMaxSize()) {
             if (state.items.isEmpty()) {
                 if (state.loaded) {
-                    EmptyState(onPickPdf, onPickFromGallery, onAddFiles, viewModel::openUpdateSheet)
+                    EmptyState(onPickPdf, onPickFromGallery, onAddFiles)
                 } else {
                     // 后台装载还没完成：这时候的"空"是假的，别把空态页闪出来。
-                    // 添加与检查更新在装载期间也保持可用，别让入口跟着列表一起消失
+                    // 添加在装载期间也保持可用，别让入口跟着列表一起消失
                     Row(
                         Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 24.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -202,7 +221,6 @@ fun WorkbenchScreen(
                         Button(onClick = onAddFiles, enabled = !state.busy, modifier = Modifier.weight(1f)) {
                             Text("添加文件")
                         }
-                        AssistChip(onClick = viewModel::openUpdateSheet, label = { Text("检查更新") })
                     }
                 }
             } else {
@@ -359,6 +377,59 @@ fun WorkbenchScreen(
         )
     }
 
+    if (state.renameOpen) {
+        AlertDialog(
+            onDismissRequest = viewModel::dismissRename,
+            title = { Text("批量重命名") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "把选中的 ${state.selection.size} 个按「前缀 + 序号」改名，扩展名保持不变。",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    OutlinedTextField(
+                        value = renamePrefix,
+                        onValueChange = { renamePrefix = it },
+                        label = { Text("前缀") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = renameStart,
+                        onValueChange = { renameStart = it.filter { c -> c.isDigit() } },
+                        label = { Text("起始序号") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = renameDigits,
+                        onValueChange = { renameDigits = it.filter { c -> c.isDigit() }.take(2) },
+                        label = { Text("序号补零到几位") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        "例：${renamePrefix}001",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.confirmRename(
+                            renamePrefix,
+                            renameStart.toIntOrNull() ?: 1,
+                            renameDigits.toIntOrNull() ?: 3,
+                        )
+                    }
+                ) { Text("改名") }
+            },
+            dismissButton = { TextButton(onClick = viewModel::dismissRename) { Text("取消") } },
+        )
+    }
+
     if (state.mediaPickerOpen) {
         MediaPickerSheet(
             state = state.media,
@@ -397,12 +468,7 @@ fun WorkbenchScreen(
 }
 
 @Composable
-private fun EmptyState(
-    onPickPdf: () -> Unit,
-    onPickFromGallery: () -> Unit,
-    onAddFiles: () -> Unit,
-    onCheckUpdate: () -> Unit,
-) {
+private fun EmptyState(onPickPdf: () -> Unit, onPickFromGallery: () -> Unit, onAddFiles: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth().padding(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
@@ -436,10 +502,6 @@ private fun EmptyState(
             Spacer(Modifier.height(8.dp))
             TextButton(onClick = onAddFiles, modifier = Modifier.fillMaxWidth()) {
                 Text("从文件管理器选其他类型（GIF、视频、HEIC…）")
-            }
-            // 检查更新原本躺在筛选条那行里：工作台一空它就跟着消失，这里补一个常驻入口
-            TextButton(onClick = onCheckUpdate, modifier = Modifier.fillMaxWidth()) {
-                Text("检查更新")
             }
         }
     }

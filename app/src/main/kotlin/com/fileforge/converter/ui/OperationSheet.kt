@@ -217,6 +217,8 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
     var bitrate by mutableStateOf(2500f)
     var startSecondText by mutableStateOf("")
     var durationSecondText by mutableStateOf("")
+    var trimStartText by mutableStateOf("")
+    var trimEndText by mutableStateOf("")
     var pdfLevel by mutableStateOf(1f)
     var pdfByTarget by mutableStateOf(false)
     var parts by mutableStateOf(2f)
@@ -329,6 +331,11 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
                 NumberField("从第几秒开始（空=0）", startSecondText) { startSecondText = it }
                 NumberField("取多少秒（空=全部）", durationSecondText) { durationSecondText = it }
                 Summary("帧数或尺寸超出内存上限时会自动往下收，结果里会写明")
+            }
+            OperationKind.VideoTrim -> {
+                NumberField("从第几秒开始（含，关键帧对齐）", trimStartText) { trimStartText = it }
+                NumberField("到第几秒结束（留空=到片尾）", trimEndText) { trimEndText = it }
+                Summary("画面按关键帧对齐原样搬运，不重编码，几秒出片；音轨同窗截取，封装跟源走")
             }
             OperationKind.GifToImages -> {
                 Segmented("导出哪些帧", listOf("全部帧", "只要首帧"), if (firstFrameOnly) 1 else 0) { firstFrameOnly = it == 1 }
@@ -936,6 +943,12 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
         if (kind == OperationKind.MergePdfs && items.size < 2) return "合并 PDF 至少选两个文件"
         if (kind == OperationKind.PdfWatermark && watermarkText.isBlank()) return "先写要盖的水印文字"
         if (kind == OperationKind.ImageWatermark && imageWatermarkText.isBlank()) return "先写要盖的水印文字"
+        if (kind == OperationKind.VideoTrim) {
+            val start = trimStartText.toFloatOrNull() ?: 0f
+            val end = trimEndText.toFloatOrNull() ?: 0f
+            if (start < 0f) return "开始时间不能是负数"
+            if (end != 0f && end <= start) return "结束时间要比开始时间晚（留空表示到片尾）"
+        }
         if (kind == OperationKind.JsonToXml && xmlRoot.isNotBlank() && !Xml.isElementName(xmlRoot.trim())) {
             return "根元素名「${xmlRoot.trim()}」不能当 XML 标签用"
         }
@@ -999,6 +1012,10 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
                 gifFps.roundToInt(), maxEdge.roundToInt(),
                 startSecondText.toFloatOrNull()?.toDouble() ?: 0.0,
                 durationSecondText.toFloatOrNull()?.toDouble() ?: 0.0,
+            )
+            OperationKind.VideoTrim -> Operation.VideoTrim(
+                trimStartText.toFloatOrNull()?.toDouble() ?: 0.0,
+                trimEndText.toFloatOrNull()?.toDouble() ?: 0.0,
             )
             OperationKind.CompressVideo -> Operation.CompressVideo(
                 videoFormat, bitrate.roundToInt(), 0, 96,

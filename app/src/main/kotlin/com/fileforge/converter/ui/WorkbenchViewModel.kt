@@ -95,6 +95,8 @@ data class WorkbenchState(
     val updateToken: String = "",
     /** 工作台的磁盘装载是否完成：装载前的"空"不是真的空，界面据此区分空态与加载中。 */
     val loaded: Boolean = false,
+    /** 批量重命名对话框开着吗；要改的是选中的那批。 */
+    val renameOpen: Boolean = false,
 ) {
     val selected: List<WorkItem> get() = items.filter { it.id in selection }
     val visible: List<WorkItem> get() = items.filter { filter.matches(it.kind) }
@@ -254,6 +256,47 @@ class WorkbenchViewModel(app: Application) : AndroidViewModel(app) {
 
     fun dismissDelete() {
         _state.update { it.copy(pendingDelete = emptySet()) }
+    }
+
+    fun openRename() {
+        _state.update { it.copy(renameOpen = true) }
+    }
+
+    fun dismissRename() {
+        _state.update { it.copy(renameOpen = false) }
+    }
+
+    /**
+     * 批量重命名：选中的（新→旧顺序）按「前缀 + 补零序号」改名，扩展名原样保留。
+     * 名字冲突由 Workspace 的避让规则兜底（自动编号），不会互相覆盖。
+     */
+    fun confirmRename(prefix: String, startNumber: Int, digits: Int) {
+        _state.update { it.copy(renameOpen = false) }
+        val targets = _state.value.selected
+        if (targets.isEmpty()) {
+            notify("先选中要重命名的文件")
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            var number = startNumber.coerceAtLeast(0)
+            var failed = 0
+            targets.forEach { item ->
+                runCatching {
+                    val ext = item.name.substringAfterLast('.', "")
+                    val padded = number.toString().padStart(digits.coerceIn(1, 6), '0')
+                    workspace.rename(item, prefix + padded + if (ext.isBlank()) "" else ".$ext")
+                    number++
+                }.onFailure { failed++ }
+            }
+            _state.update { it.refreshed() }
+            notify(
+                when {
+                    failed == 0 -> "改好 ${targets.size} 个名字"
+                    failed == targets.size -> "一个都没改成，文件可能被占用"
+                    else -> "改好 ${targets.size - failed} 个，$failed 个没改成"
+                },
+            )
+        }
     }
 
     fun confirmDelete() {

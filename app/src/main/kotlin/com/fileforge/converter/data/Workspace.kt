@@ -233,6 +233,25 @@ class Workspace(context: Context) {
         saveBook()
     }
 
+    /**
+     * 工作台内改名：重名自动避让（编号兜底），改完登记并落账本。
+     * [newName] 调用方拼好（比如「前缀+序号」），这里负责消毒与避让。
+     */
+    fun rename(item: WorkItem, newName: String): WorkItem {
+        ensureLoaded()
+        synchronized(items) {
+            val taken = items.values.filter { it.id != item.id }.map { it.name }.toSet()
+            val finalName = OutputNaming.unique(newName, taken)
+            val target = File(root, finalName)
+            if (item.file.absolutePath != target.absolutePath && !item.file.renameTo(target)) {
+                error("「${item.name}」改不成「$finalName」")
+            }
+            val updated = item.copy(name = finalName, file = target)
+            items[item.id] = updated
+            return updated
+        }.also { saveBook() }
+    }
+
     /** 失败或中断留下的临时文件，启动时清一次就够，不用每次操作都扫。 */
     fun purgeStaging() {
         staging.listFiles()?.forEach { it.delete() }

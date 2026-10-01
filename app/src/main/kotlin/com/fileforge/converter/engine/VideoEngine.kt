@@ -8,6 +8,7 @@ import android.media.MediaMetadataRetriever
 import android.media.MediaMuxer
 import android.os.Build
 import android.view.Surface
+import com.fileforge.core.model.FileKind
 import com.fileforge.core.naming.OutputNaming
 import com.fileforge.core.ops.Operation
 import com.fileforge.core.ops.VideoFormat
@@ -16,6 +17,7 @@ import com.fileforge.core.video.MuxSupport
 import com.fileforge.core.video.VideoBitratePlan
 import com.fileforge.converter.data.WorkItem
 import com.fileforge.converter.data.Workspace
+import java.io.File
 import java.nio.ByteBuffer
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -339,6 +341,91 @@ class VideoEngine(private val workspace: Workspace, private val images: ImageEng
         (0 until trackCount).firstOrNull { index ->
             getTrackFormat(index).string(MediaFormat.KEY_MIME)?.startsWith(prefix) == true
         } ?: -1
+
+    /**
+     * 视频截取片段：起止之间的采样**原样**搬进新容器，不重编码 —— 几秒出片、画质无损。
+     * 画面从 start 往前最近的关键帧起（关键帧对齐是硬要求），音轨同窗截取；
+     * 封装跟源走（MP4→MP4、WebM→WebM），时间戳整体前移让片段从 0 开始。
+     */
+    fun trim(item: WorkItem, operation: Operation.VideoTrim, staging: (String) -> File): EngineOutput {
+        val startUs = (operation.startSecond.coerceAtLeast(0.0) * 1_000_000).toLong()
+        val endUs = if (operation.endSecond <= 0.0) Long.MAX_VALUE else (operation.endSecond * 1_000_000).toLong()
+        require(endUs > startUs) { "结束时间要比开始时间晚" }
+
+        val extractor = MediaExtractor()
+        var muxer: MediaMuxer? = null
+        val webm = item.kind == FileKind.WebM
+        val output = staging(if (webm) "webm" else "mp4")
+        try {
+            extractor.setDataSource(item.file.absolutePath)
+            var videoTrack = -1
+            var audioTrack = -1
+            for (index in 0 until extractor.trackCount) {
+                val format = extractor.getTrackFormat(index)
+                val mime = format.string(MediaFormat.KEY_MIME) ?: continue
+                when {
+                    mime.startsWith("video/") && videoTrack < 0 -> videoTrack = index
+                    mime.startsWith("audio/") && audioTrack < 0 -> audioTrack = index
+                }
+            }
+            require(videoTrack >= 0) { "这个文件里没有画面" }
+            val videoFormat = extractor.getTrackFormat(videoTrack)
+            val audioMime = if (audioTrack >= 0) extractor.getTrackFormat(audioTrack).string(MediaFormat.KEY_MIME) else null
+            // 音轨能不能搬进目标封装，与转码共用同一套判据；装不下就只出画面并说明
+            val keepAudio = audioTrack >= 0 && MuxSupport.keepsAudio(if (webm) VideoFormat.WebM else VideoFormat.Mp4, audioMime)
+
+            val mux = MediaMuxer(
+                output.absolutePath,
+                if (webm) MediaMuxer.OutputFormat.MUXER_OUTPUT_WEBM else MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4,
+            )
+            muxer = mux
+            rotationOf(item).takeIf { it != 0 }?.let { mux.setOrientationHint(it) }
+            val sinkVideo = mux.addTrack(videoFormat)
+            val sinkAudio = if (keepAudio) mux.addTrack(extractor.getTrackFormat(audioTrack)) else -1
+            mux.start()
+
+            val info = MediaCodec.BufferInfo()
+            val buffer = ByteBuffer.allocateDirect(16 * 1024 * 1024)
+
+            fun copyTrack(track: Int, sink: Int): Int {
+                extractor.unselectTrack(track)
+                extractor.selectTrack(track)
+                if (startUs > 0) extractor.seekTo(startUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+                var count = 0
+                while (true) {
+                    val size = extractor.sampleSize
+                    val pts = extractor.sampleTime
+                    if (extractor.readSampleData(buffer, 0) < 0) break
+                    if (pts > endUs) break
+                    info.set(0, size.toInt(), (pts - startUs).coerceAtLeast(0L), extractor.sampleFlags)
+                    mux.writeSampleData(sink, buffer, info)
+                    count++
+                    extractor.advance()
+                }
+                return count
+            }
+
+            val videoWritten = copyTrack(videoTrack, sinkVideo)
+            if (videoWritten == 0) {
+                throw IllegalStateException("开始时间超出了视频长度，这一段没有画面")
+            }
+            if (keepAudio) copyTrack(audioTrack, sinkAudio)
+            mux.stop()
+
+            return EngineOutput(
+                OutputNaming.tagged(item.name, "截取", if (webm) "webm" else "mp4"),
+                output,
+                "${operation.startSecond} 秒到 " + (if (operation.endSecond <= 0.0) "片尾" else "${operation.endSecond} 秒") +
+                    " · 原样搬运不重编码" + if (keepAudio) "" else " · 音轨没带上",
+            )
+        } catch (error: Exception) {
+            runCatching { output.delete() }
+            throw IllegalStateException("截不了这份视频：${error.message ?: error.javaClass.simpleName}", error)
+        } finally {
+            runCatching { muxer?.release() }
+            runCatching { extractor.release() }
+        }
+    }
 
     private fun MediaFormat.string(key: String): String? = runCatching { getString(key) }.getOrNull()
     private fun MediaFormat.integer(key: String): Int? = runCatching { getInteger(key) }.getOrNull()

@@ -143,6 +143,14 @@ sealed interface Operation {
         override val label get() = if (targetBytes != null) "压到 ${targetLabel(targetBytes)} 以内" else "压缩视频"
     }
 
+    /** 视频截取片段：起止之间的采样**原样搬运**不重编码；endSecond ≤ 0 表示到片尾。 */
+    data class VideoTrim(
+        val startSecond: Double,
+        val endSecond: Double = 0.0,
+    ) : Operation {
+        override val label get() = "截取片段"
+    }
+
     /**
      * 给 PDF 加打开密码和权限限制。所有者密码留空时按打开密码填同一个
      * （留空会让库随机造一个，用户以后自己解不开）。

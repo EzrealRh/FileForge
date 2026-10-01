@@ -129,6 +129,9 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
                     listOf(video.compress(item, operation) { percent, -> onProgress(percent, item.name) })
                 }
             }
+            is Operation.VideoTrim -> items.forEach { item ->
+                collect(item.name) { listOf(video.trim(item, operation, ::staging)) }
+            }
             is Operation.VideoToImage -> items.forEach { item ->
                 collect(item.name) { listOf(video.still(item, operation)) }
             }
