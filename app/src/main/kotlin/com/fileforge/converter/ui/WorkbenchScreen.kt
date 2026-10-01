@@ -28,6 +28,7 @@ import androidx.compose.material.icons.outlined.RuleFolder
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -164,7 +165,8 @@ fun WorkbenchScreen(
                 if (state.loaded) {
                     EmptyState(onPickPdf, onPickFromGallery, onAddFiles, viewModel::openUpdateSheet)
                 } else {
-                    // 后台装载还没完成：这时候的"空"是假的，别把空态页闪出来
+                    // 后台装载还没完成：这时候的"空"是假的，别把空态页闪出来。
+                    // 添加与检查更新在装载期间也保持可用，别让入口跟着列表一起消失
                     Row(
                         Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 24.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -172,6 +174,15 @@ fun WorkbenchScreen(
                     ) {
                         CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                         Text("正在读取工作台…", style = MaterialTheme.typography.bodyMedium)
+                    }
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Button(onClick = onAddFiles, enabled = !state.busy, modifier = Modifier.weight(1f)) {
+                            Text("添加文件")
+                        }
+                        AssistChip(onClick = viewModel::openUpdateSheet, label = { Text("检查更新") })
                     }
                 }
             } else {
@@ -212,15 +223,17 @@ fun WorkbenchScreen(
                         )
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = onPickPdf, enabled = !state.busy) {
-                            Icon(Icons.Outlined.PictureAsPdf, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("加 PDF", maxLines = 1)
-                        }
-                        FilledTonalButton(onClick = onPickFromGallery, enabled = !state.busy) {
+                        // 主入口是通用添加：应用认五十来种格式，别的类型不该藏在相册选择器里
+                        Button(onClick = onAddFiles, enabled = !state.busy) {
                             Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(4.dp))
+                            Text("添加文件", maxLines = 1)
+                        }
+                        FilledTonalButton(onClick = onPickFromGallery, enabled = !state.busy) {
                             Text("相册", maxLines = 1)
+                        }
+                        FilledTonalButton(onClick = onPickPdf, enabled = !state.busy) {
+                            Text("PDF", maxLines = 1)
                         }
                     }
                 }
