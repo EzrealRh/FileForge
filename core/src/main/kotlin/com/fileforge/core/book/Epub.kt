@@ -29,6 +29,10 @@ class EpubBook(
  */
 object Epub {
 
+    /** 章节头部的编码声明：XHTML 的 XML 声明与 HTML 的 meta charset 各认一份。 */
+    private val XML_ENCODING = Regex("""<\?xml[^>]*?encoding\s*=\s*["']([A-Za-z0-9_-]+)["']""")
+    private val META_CHARSET = Regex("""charset\s*=\s*["']?([A-Za-z0-9_.-]+)""")
+
     private val DOCUMENT_TYPES = setOf("application/xhtml+xml", "text/html", "application/xml")
 
     /** 测试与调用方的便捷入口：整包都在手上时。 */
@@ -287,10 +291,12 @@ object Epub {
     }
 
     /**
-     * 内容文档可以是 UTF-8 或 UTF-16（BOM 说了算；没带 BOM 时 XML 声明里的 encoding 说了算）。
+     * 内容文档的编码三层判：BOM → UTF-16 形状（有的工具写 UTF-16 不带 BOM）→ 声明的编码
+     * （XHTML 是 `<?xml encoding=…?>`，HTML 章节是 `<meta charset=…>`）。
      *
-     * 按错的编码读会整章变乱码，所以这里除了 BOM 还看 UTF-16 那个"每隔一字节是 0"的形状 ——
-     * 有些生产工具写 UTF-16 不带 BOM。
+     * 中文电子书大量用 GBK/GB18030 写章节：没有第三层的话，那些章节会按 UTF-8 硬解成乱码。
+     * 按声明解出来**必须一个替换符都没有**才敢用（猜错的编码解出来是能打开的乱码），
+     * 解完重编成 UTF-8 时把声明里的编码名一并改成 utf-8，否则下游解析器按旧声明又读歪一次。
      */
     private fun decode(bytes: ByteArray): ByteArray {
         if (bytes.size < 4) return bytes
@@ -298,14 +304,33 @@ object Epub {
         val b1 = bytes[1].toInt() and 0xFF
         val b2 = bytes[2].toInt() and 0xFF
         val b3 = bytes[3].toInt() and 0xFF
-        val charset = when {
+        val utf16 = when {
             b0 == 0xFF && b1 == 0xFE -> Charsets.UTF_16LE
             b0 == 0xFE && b1 == 0xFF -> Charsets.UTF_16BE
             b1 == 0 && b3 == 0 && b0 != 0 && b2 != 0 -> Charsets.UTF_16LE
             b0 == 0 && b2 == 0 && b1 != 0 && b3 != 0 -> Charsets.UTF_16BE
-            else -> return bytes
+            else -> null
         }
-        return String(bytes, charset).toByteArray(Charsets.UTF_8)
+        if (utf16 != null) return String(bytes, utf16).toByteArray(Charsets.UTF_8)
+
+        val head = String(bytes, 0, minOf(bytes.size, 4096), Charsets.ISO_8859_1)
+        val declared = (XML_ENCODING.find(head) ?: META_CHARSET.find(head))?.groupValues?.get(1)?.lowercase()
+            ?: return bytes
+        if (declared == "utf-8" || declared == "utf8") return bytes
+        val target = runCatching { java.nio.charset.Charset.forName(declared) }.getOrNull() ?: return bytes
+        val text = runCatching {
+            java.nio.ByteBuffer.wrap(bytes).let { buffer ->
+                target.newDecoder()
+                    .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                    .decode(buffer).toString()
+            }
+        }.getOrNull() ?: return bytes          // 声明与实际字节对不上：不硬猜，交给 UTF-8 走替换计数那条路
+        if (text.contains('\uFFFD')) return bytes
+        val fixed = text
+            .replace(Regex("""(<\?xml[^>]*?encoding\s*=\s*["'])[^"']+(["'])"""), "$1UTF-8$2")
+            .replace(Regex("""(charset\s*=\s*["']?)[A-Za-z0-9_.-]+"""), "$1utf-8")
+        return fixed.toByteArray(Charsets.UTF_8)
     }
 
     private fun String.ifNotEmpty(): String? = if (isEmpty()) null else this

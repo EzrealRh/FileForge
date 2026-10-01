@@ -208,4 +208,31 @@ class EpubTest {
         )
         assertEquals(listOf("NCX 给的名字"), read.chapters.map { it.title })
     }
+
+    @Test
+    fun `GBK 编码的章节按声明解出来而不是按 UTF-8 硬解`() {
+        // 中文电子书常见：XHTML 用 GB18030 写，XML 声明里写着 encoding="gb18030"
+        val chapter = ("""<?xml version="1.0" encoding="gb18030"?><html xmlns="http://www.w3.org/1999/xhtml">""" +
+            "<head><title>第一章</title></head><body><p>你好，转出来该是这些字。</p></body></html>")
+            .toByteArray(charset("GB18030"))
+        val opf = opf(
+            """<item id="a" href="text/ch1.xhtml" media-type="application/xhtml+xml"/>""",
+            """<itemref idref="a"/>""",
+        )
+        val read = Epub.read(book(opf, "OEBPS/text/ch1.xhtml" to chapter))
+        assertEquals("第一章", read.chapters.single().title, "标题不能是乱码")
+        assertTrue(read.chapters.single().source.contains("你好"), read.chapters.single().source.take(80))
+    }
+
+    @Test
+    fun `HTML 章节用 meta charset 声明编码也认`() {
+        val chapter = ("<html><head><meta charset=\"gbk\"><title>第二章</title></head>" +
+            "<body><p>简体中文内容测试</p></body></html>").toByteArray(charset("GBK"))
+        val opf = opf(
+            """<item id="a" href="text/ch1.html" media-type="text/html"/>""",
+            """<itemref idref="a"/>""",
+        )
+        val read = Epub.read(book(opf, "OEBPS/text/ch1.html" to chapter))
+        assertTrue(read.chapters.single().source.contains("简体中文内容测试"), read.chapters.single().source.take(80))
+    }
 }

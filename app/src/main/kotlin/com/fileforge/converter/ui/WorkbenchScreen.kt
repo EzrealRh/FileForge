@@ -481,27 +481,33 @@ private fun EmptyState(onPickPdf: () -> Unit, onPickFromGallery: () -> Unit, onA
                 tint = MaterialTheme.colorScheme.primary,
             )
             Spacer(Modifier.height(12.dp))
-            Text("PDF 工具箱：拆分、截取、压缩、合并", style = MaterialTheme.typography.titleMedium)
+            Text("EPUB、Word、PDF、视频…什么都能进这一个口", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(6.dp))
             Text(
-                "按体积拆分、按页码截取或删除、旋转、合并、压掉内嵌图片的水分、提取文字，也能转图片和 GIF、压视频。" +
+                "五十来种格式在本机互相转：电子书、Word、表格、Markdown、网页、图片、GIF、视频、音频、压缩包。" +
                     "文件全部留在本机处理，不联网、不上传；结果会留在工作台，可以接着做下一步。",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(20.dp))
-            Button(onClick = onPickPdf, modifier = Modifier.fillMaxWidth()) {
-                Icon(Icons.Outlined.PictureAsPdf, contentDescription = null)
+            Button(onClick = onAddFiles, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Outlined.Add, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
-                Text("加 PDF")
+                Text("添加文件（EPUB、Word、视频…都行）")
             }
             Spacer(Modifier.height(8.dp))
             FilledTonalButton(onClick = onPickFromGallery, modifier = Modifier.fillMaxWidth()) {
                 Text("从相册选图片、视频")
             }
             Spacer(Modifier.height(8.dp))
-            TextButton(onClick = onAddFiles, modifier = Modifier.fillMaxWidth()) {
-                Text("从文件管理器选其他类型（GIF、视频、HEIC…）")
+            TextButton(onClick = onPickPdf, modifier = Modifier.fillMaxWidth()) {
+                Icon(
+                    Icons.Outlined.PictureAsPdf,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("加 PDF")
             }
         }
     }
