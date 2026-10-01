@@ -57,26 +57,55 @@ class Workspace(context: Context) {
     /** 批次关系写在 workspace/.batches 里，重启后还能按批次分组（文件名当外键，id 每次重启会变）。 */
     private val batchBook = File(root, ".batches")
 
-    init {
+    private val loadLock = Any()
+
+    @Volatile
+    private var loaded = false
+
+    /**
+     * 把磁盘上的工作台读进内存：逐个文件开流嗅探类型，zip 还要再开一遍中央目录，
+     * 这是启动时最贵的一笔 I/O —— 所以不在构造里做，等 [prewarm] 或 [ensureLoaded] 来。
+     */
+    private fun load() {
         val membership = readBook()
-        root.listFiles()?.filter { !it.name.startsWith(".") }?.sortedBy { it.lastModified() }?.forEach { file ->
-            val known = membership[file.name]
-            val group = known?.let { entry ->
-                batches.putIfAbsent(entry.id, Batch(entry.id, entry.title, entry.addedAt))
-                entry.id
-            } ?: newBatch(file.name, file.lastModified())
-            val item = WorkItem(
-                id = ids.incrementAndGet(),
-                name = file.name,
-                file = file,
-                kind = sniff(file),
-                size = file.length(),
-                addedAt = file.lastModified(),
-                groupId = group,
-            )
-            items[item.id] = item
+        // 登记也要握着条目锁：装载在后台线程跑时，别的线程可能正在读同一张表
+        synchronized(items) {
+            root.listFiles()?.filter { !it.name.startsWith(".") }?.sortedBy { it.lastModified() }?.forEach { file ->
+                val known = membership[file.name]
+                val group = known?.let { entry ->
+                    batches.putIfAbsent(entry.id, Batch(entry.id, entry.title, entry.addedAt))
+                    entry.id
+                } ?: newBatch(file.name, file.lastModified())
+                val item = WorkItem(
+                    id = ids.incrementAndGet(),
+                    name = file.name,
+                    file = file,
+                    kind = sniff(file),
+                    size = file.length(),
+                    addedAt = file.lastModified(),
+                    groupId = group,
+                )
+                items[item.id] = item
+            }
         }
         saveBook()
+    }
+
+    /** 确保已经从磁盘装载。幂等；每个读写条目的公开入口都先过这里。 */
+    fun ensureLoaded() {
+        if (loaded) return
+        synchronized(loadLock) {
+            if (!loaded) {
+                load()
+                loaded = true
+            }
+        }
+    }
+
+    /** 启动预热：清一次 staging 残留，把工作台读进内存。给后台线程用。 */
+    fun prewarm() {
+        purgeStaging()
+        ensureLoaded()
     }
 
     private class Entry(val id: Long, val title: String, val addedAt: Long)
@@ -106,19 +135,32 @@ class Workspace(context: Context) {
         return id
     }
 
-    fun batches(): Map<Long, Batch> = synchronized(items) { batches.toMap() }
+    fun batches(): Map<Long, Batch> {
+        ensureLoaded()
+        return synchronized(items) { batches.toMap() }
+    }
 
     /** 另起一批（跨批操作时用），返回批号给后续 adopt。 */
-    fun startBatch(title: String): Long = newBatch(title)
+    fun startBatch(title: String): Long {
+        ensureLoaded()
+        return newBatch(title)
+    }
 
-    fun list(): List<WorkItem> = synchronized(items) { items.values.sortedByDescending { it.addedAt } }
+    fun list(): List<WorkItem> {
+        ensureLoaded()
+        return synchronized(items) { items.values.sortedByDescending { it.addedAt } }
+    }
 
-    fun find(id: Long): WorkItem? = synchronized(items) { items[id] }
+    fun find(id: Long): WorkItem? {
+        ensureLoaded()
+        return synchronized(items) { items[id] }
+    }
 
     fun import(uri: Uri, resolver: ContentResolver): WorkItem = importAll(listOf(uri), resolver).first()
 
     /** 一次选中的多个文件算一批：先落临时文件，再一起收进同一个批次。 */
     fun importAll(uris: List<Uri>, resolver: ContentResolver): List<WorkItem> {
+        ensureLoaded()
         val staged = ArrayList<Pair<String, File>>()
         uris.forEach { uri ->
             runCatching {
@@ -145,6 +187,7 @@ class Workspace(context: Context) {
      * [groupId] 给 0 表示另起一批（转换产物要传来源那一批进来，见 [BatchLineage.inherit]）。
      */
     fun adopt(source: File, name: String, fromOperation: String?, groupId: Long = BatchLineage.NONE): WorkItem {
+        ensureLoaded()
         // 重名必须避让：POSIX rename 会静默覆盖，两个条目指向同一个文件就全乱了。
         // 取名→挪文件→登记要在一把锁里完成 —— 转换没跑完时分享/导入也能进来，
         // 两路各自"查重→改名"会撞到同一个名字，后者把前者悄悄覆盖掉
@@ -177,12 +220,14 @@ class Workspace(context: Context) {
 
     /** 记一下这份成品在共享存储里的位置，只改内存表，不动文件。 */
     fun markShared(item: WorkItem, path: String): WorkItem {
+        ensureLoaded()
         val updated = item.copy(sharedPath = path)
         synchronized(items) { if (items.containsKey(item.id)) items[item.id] = updated }
         return updated
     }
 
     fun remove(item: WorkItem) {
+        ensureLoaded()
         synchronized(items) { items.remove(item.id) }
         item.file.delete()
         saveBook()

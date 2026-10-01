@@ -183,14 +183,16 @@ internal class Inline(
 
     private class Linked(val text: String, val alt: String, val url: String, val title: String?, val consumed: Int)
 
-    /** 找配对的括号，能躲开字符串里的括号与嵌套。 */
+    /** 找配对的括号，能躲开字符串里的括号、反斜杠转义与嵌套。 */
     private fun matching(text: String, from: Int, open: Char, close: Char): Int? {
         var depth = 0
         var index = from
         while (index < text.length) {
-            when (text[index]) {
-                open -> depth++
-                close -> {
+            when {
+                // 转义的是字面字符：`\]` 不算括号，数进去的话链接标签在半路就被截断了
+                text[index] == '\\' -> index++
+                text[index] == open -> depth++
+                text[index] == close -> {
                     depth--
                     if (depth == 0) return index
                 }

@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
 import androidx.core.content.FileProvider
+import com.fileforge.core.update.AssetDigest
 import com.fileforge.core.update.ReleaseAsset
 import com.fileforge.core.update.ReleaseFeed
 import com.fileforge.core.update.RemoteRelease
@@ -57,7 +58,11 @@ class UpdateRepository(context: Context) {
      * 下到 `cacheDir/apk/`。文件名用资产 id 自己拼，不拿服务器给的名字当路径，
      * 免得远端一个 `../` 就写到别处去。
      */
-    suspend fun download(asset: ReleaseAsset, onProgress: (percent: Int, done: Long, total: Long) -> Unit): File =
+    suspend fun download(
+        asset: ReleaseAsset,
+        expectedDigest: String? = null,
+        onProgress: (percent: Int, done: Long, total: Long) -> Unit,
+    ): File =
         withContext(Dispatchers.IO) {
             val dir = File(app.cacheDir, APK_DIR).apply { mkdirs() }
             dir.listFiles()?.forEach { stale -> runCatching { stale.delete() } }
@@ -98,6 +103,13 @@ class UpdateRepository(context: Context) {
                 runCatching { target.delete() }
                 throw UpdateFeedException(
                     "下载不完整：期望 ${SizeInput.format(asset.size)}，实际 ${SizeInput.format(written)}，已经丢掉重下",
+                )
+            }
+            // 发布说明里给了 SHA-256 就必须对上：HTTPS 保的是通道，保不了"这份包就是作者编译的那份"
+            if (expectedDigest != null && !AssetDigest.matches(target, expectedDigest)) {
+                runCatching { target.delete() }
+                throw UpdateFeedException(
+                    "安装包的 SHA-256 与发布说明里的摘要对不上，已经丢掉：可能是下载坏了，也可能是发布页被动了手脚",
                 )
             }
             onProgress(100, written, asset.size)

@@ -11,6 +11,7 @@ import androidx.lifecycle.viewModelScope
 import com.fileforge.core.model.DayGroup
 import com.fileforge.core.model.FileKind
 import com.fileforge.core.ops.Operation
+import com.fileforge.core.update.AssetDigest
 import com.fileforge.core.update.ReleaseAsset
 import com.fileforge.core.update.RemoteRelease
 import com.fileforge.converter.data.Batch
@@ -122,12 +123,17 @@ class WorkbenchViewModel(app: Application) : AndroidViewModel(app) {
     private var noticeSeq = 0
     private var topLevelHintShown = false
 
-    init {
-        workspace.purgeStaging()
-    }
-
-    private val _state = MutableStateFlow(WorkbenchState(items = workspace.list(), batches = workspace.batches()))
+    private val _state = MutableStateFlow(WorkbenchState())
     val state = _state.asStateFlow()
+
+    init {
+        // 工作台的目录扫描与逐个文件嗅探是最贵的一笔启动 I/O：挪到后台预热，
+        // 装载完再把列表交回状态流。以前这整段（连清 staging）都跑在主线程构造里
+        viewModelScope.launch(Dispatchers.IO) {
+            workspace.prewarm()
+            _state.update { it.refreshed() }
+        }
+    }
 
     val phoneSaveSupported: Boolean get() = gallery.supported
 
@@ -634,7 +640,10 @@ class WorkbenchViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) {
             _state.update { it.copy(update = available.copy(percent = 0, downloaded = null)) }
             val file = runCatching {
-                updates.download(available.asset) { percent, _, _ ->
+                updates.download(
+                    available.asset,
+                    AssetDigest.fromNotes(available.release.notes, available.asset.name),
+                ) { percent, _, _ ->
                     _state.update { current ->
                         val now = current.update as? UpdateUi.Available ?: return@update current
                         current.copy(update = now.copy(percent = percent))

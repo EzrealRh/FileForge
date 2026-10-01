@@ -179,7 +179,14 @@ internal object MarkdownBlocks {
         val line = lines[index]
         if (FENCE.matches(line) || ATX.matches(line) || HR.matches(line) || QUOTE.matches(line) || isHtmlStart(line)) return true
         if (SETEXT.matches(line) && index > 0 && lines[index - 1].isNotBlank()) return true
-        return LIST.matches(line) || isTable(lines, index) != null
+        val list = LIST.matchEntire(line)
+        if (list != null) {
+            // CommonMark 的规矩：无序列表随时能打断段落，有序列表只有从 1 起头才可以 ——
+            // 否则一段以"1985 年…\n3. 那年之后…"记的散文，第二行起就被读成列表了
+            val marker = list.groupValues[2]
+            return !marker.first().isDigit() || marker.dropLast(1) == "1" || isTable(lines, index) != null
+        }
+        return isTable(lines, index) != null
     }
 
     /** 收尾围栏：同样的字符、不短于开头、前面最多三个空格。 */
