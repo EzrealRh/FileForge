@@ -73,8 +73,10 @@ object Xml {
         if (head.contains("<!DOCTYPE", ignoreCase = true) || head.contains("<!ENTITY", ignoreCase = true)) {
             throw XmlException("这份 XML 带 DTD 或实体定义，不解析：实体展开能让转换工具去访问别人的地址或把内存吃光")
         }
-        if (head.contains("SYSTEM", ignoreCase = true) && head.contains("<!", ignoreCase = true)) {
-            throw XmlException("这份 XML 引用了外部定义（SYSTEM），不解析")
+        // NOTATION 声明也走 <!...SYSTEM 那条路：单独拦它。以前是"出现 SYSTEM + <! 就拒"，
+        // 正文或 CDATA 里带 SYSTEM 字样的正常文档会被误杀
+        if (head.contains("<!NOTATION", ignoreCase = true)) {
+            throw XmlException("这份 XML 带 NOTATION 声明，属于 DTD 那一族，不解析")
         }
     }
 

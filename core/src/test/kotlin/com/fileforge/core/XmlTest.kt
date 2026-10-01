@@ -112,6 +112,16 @@ class XmlTest {
                 "要报的是安全理由，实际是：${error.message}",
             )
         }
+        // NOTATION 也走 SYSTEM 那条路，单独拦
+        val notation = "<!NOTATION gif SYSTEM \"image/gif\">\n<r/>"
+        assertNotNull(runCatching { Xml.parse(notation) }.exceptionOrNull(), "带 NOTATION 的必须拒")
+    }
+
+    @Test
+    fun `正文或 CDATA 里带 SYSTEM 字样不算 DTD`() {
+        // 以前的判据是"前 8KB 出现 SYSTEM + <! 就拒"：CDATA 恰好自带 <!，正常文档被误杀
+        val made = Xml.parse("<r><![CDATA[详见 SYSTEM 手册]]></r>")
+        assertEquals("详见 SYSTEM 手册", (made.members["r"] as? JsonString)?.stringValue)
     }
 
     @Test
