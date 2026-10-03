@@ -90,6 +90,9 @@ fun WorkbenchScreen(
         viewModel.consumeNotice()
     }
 
+    // 剪贴板快速导入：刚复制的纯文字自动落成 txt（带防打扰判定，见 VM）
+    LaunchedEffect(Unit) { viewModel.importClipboardIfFresh() }
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {

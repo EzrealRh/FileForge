@@ -48,6 +48,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.fileforge.core.audio.AudioTarget
+import com.fileforge.core.util.TimeInput
 import com.fileforge.core.data.Delimiter
 import com.fileforge.core.data.Ico
 import com.fileforge.core.data.Xml
@@ -235,10 +236,10 @@ class Parameters(
     var durationSecondText by mutableStateOf("")
     var trimSpecText by mutableStateOf("")
     var audioTrimTarget by mutableStateOf(AudioTarget.Wav)
-    var audioTrimStartText by mutableStateOf("")
-    var audioTrimEndText by mutableStateOf("")
+    var audioTrimSpecText by mutableStateOf("")
     var pdfReorderSpec by mutableStateOf("")
     var imageWatermarkLogo by mutableStateOf<String?>(null)
+    var imageWatermarkSize by mutableStateOf(100f)
     var pdfLevel by mutableStateOf(1f)
     var pdfByTarget by mutableStateOf(false)
     var parts by mutableStateOf(2f)
@@ -357,7 +358,7 @@ class Parameters(
                     value = trimSpecText,
                     onValueChange = { trimSpecText = it.filter { c -> c.isDigit() || c == '-' || c == '.' || c == ',' || c == '，' } },
                     label = { Text("要截的段，可多段用逗号隔开") },
-                    supportingText = { Text("例：5-12,30-41 —— 止留空到片尾，如 5-") },
+                    supportingText = { Text("例：5-12,30-41 或 1:05-2:30 —— 止留空到片尾，如 5-") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -368,20 +369,14 @@ class Parameters(
                     audioTrimTarget = AudioTarget.entries[it]
                 }
                 OutlinedTextField(
-                    value = audioTrimStartText,
-                    onValueChange = { audioTrimStartText = it.filter { c -> c.isDigit() || c == '.' } },
-                    label = { Text("从第几秒开始（含）") },
+                    value = audioTrimSpecText,
+                    onValueChange = { audioTrimSpecText = it.filter { c -> c.isDigit() || c == '.' || c == ':' || c == '-' || c == ',' || c == '，' } },
+                    label = { Text("要截的段，可多段用逗号隔开") },
+                    supportingText = { Text("例：5-12,30-41 或 1:05-2:30 —— 止留空到片尾，如 5-") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                OutlinedTextField(
-                    value = audioTrimEndText,
-                    onValueChange = { audioTrimEndText = it.filter { c -> c.isDigit() || c == '.' } },
-                    label = { Text("到第几秒结束（留空=到片尾）") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Summary("AAC 选 M4A 时原样搬运秒出；其他编码会解了重编，WAV 是无损落盘")
+                Summary("AAC 选 M4A 时原样搬运秒出；其他编码会解了重编，WAV 是无损落盘；多段按顺序拼成一条")
             }
             OperationKind.PdfReorder -> {
                 OutlinedTextField(
@@ -500,7 +495,10 @@ class Parameters(
                 IntSlider("倾斜", imageWatermarkTilt, -90f..90f, { "%.0f°".format(it) }, step = 5f) {
                     imageWatermarkTilt = it
                 }
-                Summary("白字带阴影或 Logo 图按透明度叠上，大小按画面自适应；输出格式跟源走（PNG 保持 PNG）")
+                IntSlider("大小", imageWatermarkSize, 50f..300f, { "%.0f%%".format(it) }) {
+                    imageWatermarkSize = it
+                }
+                Summary("白字带阴影或 Logo 图按透明度叠上，字号按画面的百分百之五十到三倍可调；输出格式跟源走（PNG 保持 PNG）")
             }
             OperationKind.GifWatermark -> {
                 OutlinedTextField(
@@ -521,6 +519,9 @@ class Parameters(
                 }
                 IntSlider("倾斜", imageWatermarkTilt, -90f..90f, { "%.0f°".format(it) }, step = 5f) {
                     imageWatermarkTilt = it
+                }
+                IntSlider("大小", imageWatermarkSize, 50f..300f, { "%.0f%%".format(it) }) {
+                    imageWatermarkSize = it
                 }
                 Summary("白字盖到每一帧再重编回 GIF，帧数与停留不变；色板仍是 256 色")
             }
@@ -1056,15 +1057,16 @@ class Parameters(
         if (kind == OperationKind.RemovePdfPages && pageSpec.isBlank()) return "先写要删哪些页"
         if (kind == OperationKind.MergePdfs && items.size < 2) return "合并 PDF 至少选两个文件"
         if (kind == OperationKind.PdfWatermark && watermarkText.isBlank()) return "先写要盖的水印文字"
-        if (kind == OperationKind.ImageWatermark && imageWatermarkText.isBlank()) return "先写要盖的水印文字"
+        if (kind == OperationKind.ImageWatermark && imageWatermarkText.isBlank() && imageWatermarkLogo == null) {
+            return "先写要盖的水印文字，或选一张 Logo 图"
+        }
         if (kind == OperationKind.GifWatermark && imageWatermarkText.isBlank()) return "先写要盖的水印文字"
-        if (kind == OperationKind.VideoTrim && trimSpecText.isBlank()) return "先写要截的段，比如 5-12,30-41"
+        if (kind == OperationKind.VideoTrim && TimeInput.parseRanges(trimSpecText).isEmpty()) {
+            return "先写要截的段，比如 5-12,30-41 或 1:05-2:30；段给反了也读不出来"
+        }
         if (kind == OperationKind.PdfReorder && pdfReorderSpec.isBlank()) return "先写新的页序，比如 3,1,2"
-        if (kind == OperationKind.AudioTrim) {
-            val start = audioTrimStartText.toDoubleOrNull() ?: 0.0
-            val end = audioTrimEndText.toDoubleOrNull() ?: 0.0
-            if (start < 0.0) return "开始时间不能是负数"
-            if (end != 0.0 && end <= start) return "结束时间要比开始时间晚（留空表示到片尾）"
+        if (kind == OperationKind.AudioTrim && TimeInput.parseRanges(audioTrimSpecText).isEmpty()) {
+            return "先写要截的段，比如 5-12,30-41 或 1:05-2:30；段给反了也读不出来"
         }
         if (kind == OperationKind.JsonToXml && xmlRoot.isNotBlank() && !Xml.isElementName(xmlRoot.trim())) {
             return "根元素名「${xmlRoot.trim()}」不能当 XML 标签用"
@@ -1113,11 +1115,12 @@ class Parameters(
             OperationKind.ImageWatermark -> Operation.ImageWatermark(
                 imageWatermarkText.trim(), imageWatermarkSpot, imageWatermarkTiled,
                 imageWatermarkOpacity.roundToInt(), imageWatermarkTilt.roundToInt(),
-                imageWatermarkLogo,
+                imageWatermarkLogo, imageWatermarkSize.roundToInt(),
             )
             OperationKind.GifWatermark -> Operation.GifWatermark(
                 imageWatermarkText.trim(), imageWatermarkSpot, imageWatermarkTiled,
                 imageWatermarkOpacity.roundToInt(), imageWatermarkTilt.roundToInt(),
+                imageWatermarkSize.roundToInt(),
             )
             OperationKind.MergePdfs -> Operation.MergePdfs
             OperationKind.PdfToImages -> Operation.PdfToImages(imageFormat, pdfScale.roundToInt().toFloat(), quality.roundToInt())
@@ -1136,11 +1139,7 @@ class Parameters(
                 durationSecondText.toFloatOrNull()?.toDouble() ?: 0.0,
             )
             OperationKind.VideoTrim -> Operation.VideoTrim(trimSpecText)
-            OperationKind.AudioTrim -> Operation.AudioTrim(
-                audioTrimTarget,
-                audioTrimStartText.toDoubleOrNull() ?: 0.0,
-                audioTrimEndText.toDoubleOrNull() ?: 0.0,
-            )
+            OperationKind.AudioTrim -> Operation.AudioTrim(audioTrimTarget, audioTrimSpecText)
             OperationKind.PdfReorder -> Operation.PdfReorder(pdfReorderSpec)
             OperationKind.CompressVideo -> Operation.CompressVideo(
                 videoFormat, bitrate.roundToInt(), 0, 96,

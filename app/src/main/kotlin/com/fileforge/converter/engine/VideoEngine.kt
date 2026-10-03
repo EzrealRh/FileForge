@@ -13,6 +13,7 @@ import com.fileforge.core.naming.OutputNaming
 import com.fileforge.core.ops.Operation
 import com.fileforge.core.ops.VideoFormat
 import com.fileforge.core.util.SizeInput
+import com.fileforge.core.util.TimeInput
 import com.fileforge.core.video.MuxSupport
 import com.fileforge.core.video.VideoBitratePlan
 import com.fileforge.converter.data.WorkItem
@@ -444,15 +445,12 @@ class VideoEngine(private val workspace: Workspace, private val images: ImageEng
         }
     }
 
-    /** 「5-12,30-41」这种多段起止秒数 → 微秒区间；止留空表示到片尾。段给反了（止 ≤ 起）直接丢掉。 */
+    /** 「5-12,30-41」「1:05-2:30」多段起止 → 微秒区间；止留空表示到片尾。段给反了（止 ≤ 起）直接丢掉。 */
     private fun parseRanges(spec: String): List<Pair<Long, Long>> =
-        spec.split(',', '，').mapNotNull { part ->
-            val bits = part.trim().split('-')
-            val start = bits.getOrNull(0)?.trim()?.toDoubleOrNull() ?: return@mapNotNull null
-            val end = bits.getOrNull(1)?.trim()?.toDoubleOrNull() ?: 0.0
-            val startUs = (start.coerceAtLeast(0.0) * 1_000_000).toLong()
-            val endUs = if (end <= 0.0) Long.MAX_VALUE else (end * 1_000_000).toLong()
-            if (endUs <= startUs) null else startUs to endUs
+        TimeInput.parseRanges(spec).map { (start, end) ->
+            val startUs = (start * 1_000_000).toLong()
+            val endUs = end?.let { (it * 1_000_000).toLong() } ?: Long.MAX_VALUE
+            startUs to endUs
         }
 
     private fun MediaFormat.string(key: String): String? = runCatching { getString(key) }.getOrNull()

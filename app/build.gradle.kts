@@ -1,4 +1,4 @@
-val appVersion = "0.44.0"
+val appVersion = "0.45.0"
 
 plugins {
     alias(libs.plugins.android.application)
@@ -14,7 +14,7 @@ android {
         applicationId = "com.fileforge.converter"
         minSdk = 26
         targetSdk = 35
-        versionCode = 58
+        versionCode = 59
         versionName = appVersion
         resourceConfigurations += listOf("zh", "en")
     }
@@ -42,6 +42,12 @@ android {
 
     buildFeatures {
         compose = true
+    }
+
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+        }
     }
 
     packaging {
@@ -78,6 +84,13 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
 
     testImplementation(libs.junit.jupiter)
+    // Robolectric 让 ViewModel/参数面板这类安卓代码在 JVM 上跑真测试；
+    // JUnit5 平台靠 vintage 引擎带动 JUnit4 的 Robolectric 用例
+    testImplementation("org.robolectric:robolectric:4.14.1")
+    testImplementation("androidx.test:core-ktx:1.6.1")
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.junit.vintage:junit-vintage-engine:5.11.4")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
 }
 
 tasks.withType<Test>().configureEach { useJUnitPlatform() }

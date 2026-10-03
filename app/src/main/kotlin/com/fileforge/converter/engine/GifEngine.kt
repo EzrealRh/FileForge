@@ -63,7 +63,7 @@ class GifEngine(private val workspace: Workspace, private val images: ImageEngin
         source.frames.forEach { frame ->
             val bitmap = Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888)
             bitmap.setPixels(frame.argb, 0, source.width, 0, 0, source.width, source.height)
-            images.drawTextWatermark(bitmap, text, operation.spot, operation.tiled, operation.opacityPercent, operation.tilt)
+            images.drawTextWatermark(bitmap, text, operation.spot, operation.tiled, operation.opacityPercent, operation.tilt, operation.sizePercent)
             bitmap.getPixels(frame.argb, 0, source.width, 0, 0, source.width, source.height)
             bitmap.recycle()
         }

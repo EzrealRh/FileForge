@@ -53,7 +53,8 @@ sealed interface Operation {
         override val label get() = "合成为 PDF"
     }
 
-    /** 图片加文字/Logo 水印：单处（居中或四角）或平铺；[logoFrom] 是工作台里当 Logo 用的图名，空则用文字。 */
+    /** 图片加文字/Logo 水印：单处（居中或四角）或平铺；[logoFrom] 是工作台里当 Logo 用的图名，空则用文字；
+     *  [sizePercent] 是相对默认字号的百分比（Logo 同比例缩放）。 */
     data class ImageWatermark(
         val text: String,
         val spot: Int = 0,
@@ -61,6 +62,7 @@ sealed interface Operation {
         val opacityPercent: Int = 30,
         val tilt: Int = 0,
         val logoFrom: String? = null,
+        val sizePercent: Int = 100,
     ) : Operation {
         override val label get() = "图片加水印"
     }
@@ -72,6 +74,7 @@ sealed interface Operation {
         val tiled: Boolean = false,
         val opacityPercent: Int = 30,
         val tilt: Int = 0,
+        val sizePercent: Int = 100,
     ) : Operation {
         override val label get() = "GIF 加水印"
     }
@@ -163,11 +166,10 @@ sealed interface Operation {
         override val label get() = "截取片段"
     }
 
-    /** 音频截取：[target] 选 WAV（无损搬运）或 M4A（重编），endSecond ≤ 0 表示到片尾。 */
+    /** 音频截取：[target] 选 WAV（无损搬运）或 M4A（重编）；[spec] 多段起止（止留空到片尾），段间合并。 */
     data class AudioTrim(
         val target: AudioTarget = AudioTarget.Wav,
-        val startSecond: Double,
-        val endSecond: Double = 0.0,
+        val spec: String,
     ) : Operation {
         override val label get() = "截取音频"
     }

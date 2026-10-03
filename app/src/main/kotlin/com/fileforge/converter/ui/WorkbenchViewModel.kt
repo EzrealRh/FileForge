@@ -1,7 +1,9 @@
 package com.fileforge.converter.ui
 
 import android.app.Application
+import android.content.ClipboardManager
 import android.content.Context
+import android.os.Build
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
@@ -679,6 +681,29 @@ class WorkbenchViewModel(app: Application) : AndroidViewModel(app) {
             add(0, name)
         }.take(8)
         prefs.edit().putString("recentOps", updated.joinToString(",")).apply()
+    }
+
+    /**
+     * 剪贴板快速导入：打开应用时，剪贴板里的纯文字自动落成 txt。
+     * 两道闸防打扰：带可信时间戳的复制只认 60 秒内的；没有时间戳的，与上次自动导入
+     * 过的内容相同就跳过（记录在本地偏好）。导入后会发一条可读的通知，不要随手删。
+     */
+    fun importClipboardIfFresh() {
+        runCatching {
+            val manager = getApplication<Application>().getSystemService(ClipboardManager::class.java)
+            val clip = manager?.primaryClip ?: return
+            if (clip.itemCount == 0) return
+            val text = clip.getItemAt(0)?.text?.toString() ?: return
+            if (text.isBlank()) return
+            val prefs = getApplication<Application>().getSharedPreferences("fileforge_ui", Context.MODE_PRIVATE)
+            // 复制时间戳的键名按系统约定（API 26+），有的复制方会带上
+            val stamp = clip.description.extras?.getLong("android.content.extra.TIMESTAMP", 0L) ?: 0L
+            val fresh = Build.VERSION.SDK_INT >= 26 && stamp > 0 &&
+                System.currentTimeMillis() - stamp <= 60_000
+            if (!fresh && prefs.getString("lastClipboardImport", null) == text.hashCode().toString()) return
+            prefs.edit().putString("lastClipboardImport", text.hashCode().toString()).apply()
+            importPlainText(text, null)
+        }
     }
 
     /** 别的 App 分享进来的纯文本：落成工作台里的 txt，接着就能转格式。 */

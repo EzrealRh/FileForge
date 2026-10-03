@@ -81,10 +81,10 @@ class ImageEngine {
         decoded.recycle()
         if (logoFile != null) {
             val logo = decode(logoFile)
-            drawLogoWatermark(painted, logo, operation.spot, operation.tiled, operation.opacityPercent, operation.tilt)
+            drawLogoWatermark(painted, logo, operation.spot, operation.tiled, operation.opacityPercent, operation.tilt, operation.sizePercent)
             logo.recycle()
         } else {
-            drawTextWatermark(painted, operation.text.trim(), operation.spot, operation.tiled, operation.opacityPercent, operation.tilt)
+            drawTextWatermark(painted, operation.text.trim(), operation.spot, operation.tiled, operation.opacityPercent, operation.tilt, operation.sizePercent)
         }
 
         val format = when (item.kind) {
@@ -111,11 +111,12 @@ class ImageEngine {
         tiled: Boolean,
         opacityPercent: Int,
         tilt: Int,
+        sizePercent: Int = 100,
     ) {
         val canvas = android.graphics.Canvas(target)
         val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
             color = android.graphics.Color.argb(opacityPercent.coerceIn(3, 100) * 255 / 100, 255, 255, 255)
-            textSize = max(target.width, target.height) / 14f
+            textSize = max(target.width, target.height) / 14f * sizePercent.coerceIn(20, 400) / 100f
             setShadowLayer(6f, 2f, 2f, android.graphics.Color.argb(110, 0, 0, 0))
         }
         val textWidth = paint.measureText(text)
@@ -168,10 +169,11 @@ class ImageEngine {
         tiled: Boolean,
         opacityPercent: Int,
         tilt: Int,
+        sizePercent: Int = 100,
     ) {
         val canvas = android.graphics.Canvas(target)
         val longest = max(logo.width, logo.height).coerceAtLeast(1)
-        val scale = (min(target.width, target.height) * 0.25f) / longest
+        val scale = (min(target.width, target.height) * 0.25f) / longest * sizePercent.coerceIn(20, 400) / 100f
         val drawWidth = (logo.width * scale).coerceAtLeast(1f)
         val drawHeight = (logo.height * scale).coerceAtLeast(1f)
         val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {

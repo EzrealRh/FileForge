@@ -11,6 +11,7 @@ import com.fileforge.core.audio.AudioTarget
 import com.fileforge.core.audio.WavHeader
 import com.fileforge.core.ops.Operation
 import com.fileforge.core.util.SizeInput
+import com.fileforge.core.util.TimeInput
 import com.fileforge.converter.data.WorkItem
 import com.fileforge.converter.data.Workspace
 import java.io.File
@@ -93,16 +94,14 @@ class AudioEngine(private val workspace: Workspace) {
     }
 
     /**
-     * 音频截取：按起止秒数把这一段交出去。AAC 源选 M4A 时原样搬运（无损秒出），
-     * 其他按目标格式解了重编或落 WAV；endSecond ≤ 0 表示到片尾。
+     * 音频截取：按多段起止时间把音频交出去（段间合并）。AAC 源选 M4A 时原样搬运
+     * （无损秒出），其他按目标格式解了重编或落 WAV；段止留空表示到片尾。
      */
     fun trim(item: WorkItem, operation: Operation.AudioTrim, onProgress: (Int) -> Unit = {}): EngineOutput {
-        val startUs = (operation.startSecond.coerceAtLeast(0.0) * 1_000_000).toLong()
-        val endUs = if (operation.endSecond <= 0.0) Long.MAX_VALUE else (operation.endSecond * 1_000_000).toLong()
-        require(endUs > startUs) { "结束时间要比开始时间晚" }
-        val range = startUs..endUs
-
+        val parsed = TimeInput.parseRanges(operation.spec)
+        require(parsed.isNotEmpty()) { "先写要截的段，比如 5-12,30-41；止留空表示到片尾" }
         val target = operation.target
+
         val extractor = MediaExtractor()
         try {
             extractor.setDataSource(item.file.absolutePath)
@@ -121,14 +120,20 @@ class AudioEngine(private val workspace: Workspace) {
             val passthrough = AudioPlan.canPassthrough(sourceMime, target)
             if (!passthrough) require(AudioPlan.decodableMime(sourceMime)) { "系统里没有 $sourceMime 的解码器，这条音轨截不了" }
 
+            // 止留空的段按容器时长算到片尾；容器没报时长就到文件末尾
+            val ranges = parsed.map { (start, end) ->
+                val startUs = (start * 1_000_000).toLong()
+                val endUs = end?.let { (it * 1_000_000).toLong() } ?: (durationUs.takeIf { it > 0 } ?: Long.MAX_VALUE)
+                startUs..endUs
+            }
             val output = workspace.newStagingFile(target.extension)
             val written = try {
                 when {
-                    passthrough -> copyAcross(extractor, sourceFormat, output, durationUs, onProgress, range)
-                    target == AudioTarget.Wav -> decodeToWav(extractor, sourceFormat, sourceMime, output, durationUs, onProgress, range)
+                    passthrough -> copyAcross(extractor, sourceFormat, output, durationUs, onProgress, ranges)
+                    target == AudioTarget.Wav -> decodeToWav(extractor, sourceFormat, sourceMime, output, durationUs, onProgress, ranges)
                     else -> encodeToM4a(
                         extractor, sourceFormat, sourceMime, output,
-                        AudioPlan.bitrateKbps(null, durationUs, sourceKbps), durationUs, onProgress, range,
+                        AudioPlan.bitrateKbps(null, durationUs, sourceKbps), durationUs, onProgress, ranges,
                     )
                 }
             } catch (e: Throwable) {
@@ -136,7 +141,10 @@ class AudioEngine(private val workspace: Workspace) {
                 throw e
             }
             require(written > 0) { "截取范围里没有音频：起止时间超出长度了？" }
-            val span = "${operation.startSecond} 秒到 " + (if (operation.endSecond <= 0.0) "片尾" else "${operation.endSecond} 秒")
+            val span = ranges.joinToString("、") { range ->
+                val endLabel = if (range.last >= Long.MAX_VALUE) "片尾" else "${"%.1f".format(range.last / 1_000_000.0)} 秒"
+                "${"%.1f".format(range.first / 1_000_000.0)} 秒到 $endLabel"
+            }
             val how = when {
                 passthrough -> "原样搬运不重编"
                 target == AudioTarget.Wav -> "解码落成 WAV"
@@ -160,42 +168,52 @@ class AudioEngine(private val workspace: Workspace) {
         output: File,
         durationUs: Long,
         onProgress: (Int) -> Unit,
-        range: LongRange? = null,
+        ranges: List<LongRange>? = null,
     ): Int {
         val muxer = MediaMuxer(output.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
         val info = MediaCodec.BufferInfo()
         var written = 0
+        // AAC 每个采样 1024 帧：输出时间戳按帧数自己排，多段拼接才没有整段静音
+        val sampleRate = sourceFormat.integer(MediaFormat.KEY_SAMPLE_RATE) ?: 44_100
+        var frames = 0L
         var buffer = ByteBuffer.allocate(
             (sourceFormat.integer(MediaFormat.KEY_MAX_INPUT_SIZE) ?: 0).coerceIn(SAMPLE_BUFFER_MIN, SAMPLE_BUFFER_MAX),
         )
         try {
             val muxTrack = muxer.addTrack(sourceFormat)
             muxer.start()
-            // 截取模式：从起点（落在前一个采样上）开始，越过终点就收
-            range?.let { extractor.seekTo(it.first, MediaExtractor.SEEK_TO_PREVIOUS_SYNC) }
+            // 每段从它的起点（落在前一个采样上）开始，越过终点收工；范围外的采样丢掉
+            val spans = ranges ?: listOf(null)
+            for (span in spans) {
+                val first = span?.first
+                val last = span?.last
+                if (first != null && first > 0) extractor.seekTo(first, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
             while (true) {
                 buffer.clear()
                 var size = extractor.readSampleData(buffer, 0)
                 if (size < 0) break
-                if (range != null && extractor.getSampleTime() > range.last) break
+                val pts = extractor.getSampleTime()
+                if (last != null && pts > last) break
                 if (size > buffer.capacity()) {
                     // 采样比缓冲区大：放大一次重来，不能截半帧写进去（那是杂音）
                     buffer = ByteBuffer.allocate(minOf(size, SAMPLE_BUFFER_MAX))
                     size = extractor.readSampleData(buffer, 0)
                     if (size < 0) break
                 }
-                if (range != null && extractor.getSampleTime() < range.first) {
+                if (first != null && pts < first) {
                     extractor.advance()
                     continue
                 }
-                info.set(0, size, extractor.getSampleTime(), extractor.getSampleFlags())
+                info.set(0, size, frames * 1_000_000L / sampleRate, extractor.getSampleFlags())
                 // csd 已经在 addTrack 用的格式里，再写一遍会让开头多出一段放不出声的字节
                 if (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0) {
                     muxer.writeSampleData(muxTrack, buffer, info)
                     written++
                 }
                 extractor.advance()
-                reportProgress(extractor.getSampleTime(), durationUs, onProgress)
+                frames += 1024
+                reportProgress(pts, durationUs, onProgress)
+            }
             }
             muxer.stop()
         } finally {
@@ -214,7 +232,7 @@ class AudioEngine(private val workspace: Workspace) {
         kbps: Int,
         durationUs: Long,
         onProgress: (Int) -> Unit,
-        range: LongRange? = null,
+        ranges: List<LongRange>? = null,
     ): Int {
         val encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC)
         val muxer = MediaMuxer(output.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
@@ -225,8 +243,9 @@ class AudioEngine(private val workspace: Workspace) {
         var muxTrack = -1
         var written = 0
         var encoderDone = false
-        // 截取时输出时间戳从第一个写进的采样起算，不然成品开头是一段静音
-        var firstPts = -1L
+        // 截取时输出时间戳按"留下的 PCM 块"自己排：多段拼接后没有整段静音
+        var nextVirtual = 0L
+        var frameBytes = channels * 2
 
         /** 把编码器已经产出的采样搬进 muxer；muxer 只在编码器报格式后才起。 */
         fun pumpEncoder() {
@@ -249,15 +268,7 @@ class AudioEngine(private val workspace: Workspace) {
                         val config = encodeInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0
                         if (!config && encodeInfo.size > 0) {
                             encoder.getOutputBuffer(index)?.let { sample ->
-                                if (firstPts < 0) firstPts = encodeInfo.presentationTimeUs
-                                val out = MediaCodec.BufferInfo()
-                                out.set(
-                                    encodeInfo.offset,
-                                    encodeInfo.size,
-                                    (encodeInfo.presentationTimeUs - firstPts).coerceAtLeast(0),
-                                    encodeInfo.flags,
-                                )
-                                muxer.writeSampleData(muxTrack, sample, out)
+                                muxer.writeSampleData(muxTrack, sample, encodeInfo)
                                 written++
                             }
                         }
@@ -280,10 +291,19 @@ class AudioEngine(private val workspace: Workspace) {
             )
             encoder.start()
 
-            // 截取：从起点开始解码，越过终点就收；范围外的 PCM 块不进编码器
-            range?.let { extractor.seekTo(it.first, MediaExtractor.SEEK_TO_PREVIOUS_SYNC) }
-            decode(extractor, sourceFormat, sourceMime, durationUs, onProgress, stopAtUs = range?.last ?: Long.MAX_VALUE) { pcm, info ->
-                if (range != null && info.presentationTimeUs !in range) return@decode
+            // 每段从它的起点开始解码，越过最后一段的终点收工；范围外的 PCM 块不进编码器
+            ranges?.firstOrNull()?.let { extractor.seekTo(it.first, MediaExtractor.SEEK_TO_PREVIOUS_SYNC) }
+            val stopAtUs = ranges?.lastOrNull()?.last ?: Long.MAX_VALUE
+            decode(extractor, sourceFormat, sourceMime, durationUs, onProgress, stopAtUs = stopAtUs, onFormat = { format ->
+                // PCM 块时长按解出来的位深算：个别机型会给 float，块大小随之不同
+                frameBytes = channels * when (format.integer(MediaFormat.KEY_PCM_ENCODING)) {
+                    AudioFormat.ENCODING_PCM_8BIT -> 1
+                    AudioFormat.ENCODING_PCM_FLOAT -> 4
+                    AudioFormat.ENCODING_PCM_24BIT_PACKED -> 3
+                    else -> 2
+                }
+            }, onPcm = { pcm, info ->
+                if (ranges != null && ranges.none { info.presentationTimeUs in it }) return@decode
                 // 输入面满了不能丢样本：丢了成品就比原曲短，而流程还会"成功"结束
                 while (true) {
                     val index = encoder.dequeueInputBuffer(20_000L)
@@ -295,14 +315,16 @@ class AudioEngine(private val workspace: Workspace) {
                             pcm.limit(info.offset + size)
                             input.clear()
                             input.put(pcm)
-                            encoder.queueInputBuffer(index, 0, size, info.presentationTimeUs, info.flags)
+                            // 截取多段时时间戳按留下的块自己排：跳掉的 gap 不留静音
+                            encoder.queueInputBuffer(index, 0, size, nextVirtual, info.flags)
+                            nextVirtual += (size / frameBytes).toLong() * 1_000_000L / rate
                         }
                         break
                     }
                     pumpEncoder()
                 }
                 pumpEncoder()
-            }
+            })
 
             val tail = encoder.dequeueInputBuffer(50_000L)
             if (tail >= 0) encoder.queueInputBuffer(tail, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
@@ -331,7 +353,7 @@ class AudioEngine(private val workspace: Workspace) {
         output: File,
         durationUs: Long,
         onProgress: (Int) -> Unit,
-        range: LongRange? = null,
+        ranges: List<LongRange>? = null,
     ): Int {
         var rate = sourceFormat.integer(MediaFormat.KEY_SAMPLE_RATE) ?: 44_100
         var channels = sourceFormat.integer(MediaFormat.KEY_CHANNEL_COUNT) ?: 2
@@ -341,10 +363,12 @@ class AudioEngine(private val workspace: Workspace) {
         var blocks = 0
         val raf = RandomAccessFile(output, "rw")
         try {
-            range?.let { extractor.seekTo(it.first, MediaExtractor.SEEK_TO_PREVIOUS_SYNC) }
+            // 每段从它的起点开始解码，越过最后一段的终点收工；范围外的 PCM 块跳过不落盘
+            ranges?.firstOrNull()?.let { extractor.seekTo(it.first, MediaExtractor.SEEK_TO_PREVIOUS_SYNC) }
+            val stopAtUs = ranges?.lastOrNull()?.last ?: Long.MAX_VALUE
             raf.setLength(0)
             raf.write(ByteArray(WavHeader.SIZE))   // 先占位，长度要等写完才知道
-            decode(extractor, sourceFormat, sourceMime, durationUs, onProgress, stopAtUs = range?.last ?: Long.MAX_VALUE, onFormat = { format ->
+            decode(extractor, sourceFormat, sourceMime, durationUs, onProgress, stopAtUs = stopAtUs, onFormat = { format ->
                 // 以解码器**输出**的格式为准：个别机型会重采样，按源文件写头就变速。
                 // 位深也是 —— 绝大多数解码器给 16 位小端，但写错这一格是"能打开、内容是噪音"
                 rate = format.integer(MediaFormat.KEY_SAMPLE_RATE) ?: rate
@@ -362,7 +386,7 @@ class AudioEngine(private val workspace: Workspace) {
                 }
             }, onPcm = { pcm, info ->
                 // 截取：范围外的 PCM 块跳过不落盘
-                if (range == null || info.presentationTimeUs in range) {
+                if (ranges == null || ranges.any { info.presentationTimeUs in it }) {
                     val chunk = ByteArray(info.size)
                     pcm.position(info.offset)
                     pcm.limit(info.offset + info.size)
