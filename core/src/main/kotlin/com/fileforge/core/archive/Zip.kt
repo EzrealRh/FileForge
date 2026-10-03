@@ -447,17 +447,12 @@ object ZipWriter {
     private const val ZIP64_SENTINEL = 0xFFFF_FFFFL
     private const val ZIP64_SENTINEL_COUNT = 0xFFFF
 
-    /**
-     * zip64 的两道门槛，也是测试的注水口：真实的 4 GB / 65535 条在单测里根本够不着。
-     * 尺寸与偏移到 [zip64SizeLimit]（含）就得走扩展字段，条数严格多于 [zip64EntryCountLimit]
-     * 才落 EOCD64。谁改了谁负责还原，不然同一个 JVM 里的后续用例全被带偏。
-     */
-    internal var zip64SizeLimit: Long = 0xFFFF_FFFFL
-    internal var zip64EntryCountLimit: Long = 0xFFFFL
+    /** zip64 的两道门槛：尺寸与偏移到 [Limits.sizeLimit]（含）走扩展字段，条数严格多于 [Limits.entryCountLimit] 才落 EOCD64。 */
+    data class Limits(val sizeLimit: Long = 0xFFFF_FFFFL, val entryCountLimit: Long = 0xFFFFL)
 
-    fun write(items: List<ZipItem>): ByteArray {
+    fun write(items: List<ZipItem>, limits: Limits = Limits()): ByteArray {
         val sink = MemoryZipSink()
-        writeTo(items, sink)
+        writeTo(items, sink, limits)
         return sink.bytes()
     }
 
@@ -467,7 +462,7 @@ object ZipWriter {
      * 选哪条落点无所谓 —— 攒内存（[write]）还是往 staging 文件里写都行，因为回填靠的是
      * [ZipSink.seek]，跟能不能随机读没关系。
      */
-    fun writeTo(items: List<ZipItem>, sink: ZipSink) {
+    fun writeTo(items: List<ZipItem>, sink: ZipSink, limits: Limits = Limits()) {
         val records = ArrayList<CentralRecord>(items.size)
         items.forEach { item ->
             val name = item.name.toByteArray(Charsets.UTF_8)
@@ -477,7 +472,7 @@ object ZipWriter {
             // 是否 zip64 必须在写本地头之前定死：扩展长度占的是定长两位，事后再想加塞是加不进去的。
             // 此时只有 item.size 可看（压缩后的大小要等压完才知道），真压完发现长度也超了而这里没预留
             // —— 只能炸出来，写个 32 位截断的假包出去更糟（见下方回填处）。
-            val sizeZip64 = item.size >= zip64SizeLimit
+            val sizeZip64 = item.size >= limits.sizeLimit
             val extra64 = if (sizeZip64) short16(ZIP64_EXTRA_ID) + short16(16) + ByteArray(16) else ByteArray(0)
             // 长度与 CRC 先占 0：压完才知道，写完回头补那 12 个字节
             sink.write(
@@ -510,7 +505,7 @@ object ZipWriter {
                 size = plain.count
             }
             val compressed = counted.count
-            if (!sizeZip64 && (size >= zip64SizeLimit || compressed >= zip64SizeLimit)) {
+            if (!sizeZip64 && (size >= limits.sizeLimit || compressed >= limits.sizeLimit)) {
                 throw IllegalStateException(
                     "条目「${item.name}」实际写出的长度（原始 $size、压缩后 $compressed）超出 32 位门槛，" +
                         "但写本地头时按 item.size=${item.size} 没预留 zip64 扩展，回填时补不进去 —— " +
@@ -531,7 +526,7 @@ object ZipWriter {
         }
         val directoryAt = sink.position()
         records.forEach { record ->
-            val (header, extra) = centralHeader(record)
+            val (header, extra) = centralHeader(record, limits)
             sink.write(header)
             sink.write(record.name)     // 名字在前、扩展在后，规范定的次序颠倒一个字节都读不回来
             sink.write(extra)
@@ -539,8 +534,8 @@ object ZipWriter {
         val directorySize = sink.position() - directoryAt
         // 条数超 65535、或中央目录本身超 4 GB：EOCD 里四个字段全换哨兵，真值落在它前面的 EOCD64，
         // 再由 20 字节的定位器告诉读的人 EOCD64 在哪。三者缺一，zip64 的包就成了解不开的谜。
-        val archiveZip64 = records.size > zip64EntryCountLimit ||
-            directorySize >= zip64SizeLimit || directoryAt >= zip64SizeLimit
+        val archiveZip64 = records.size > limits.entryCountLimit ||
+            directorySize >= limits.sizeLimit || directoryAt >= limits.sizeLimit
         if (archiveZip64) {
             val recordAt = sink.position()
             sink.write(eocd64(records.size.toLong(), directorySize, directoryAt))
@@ -594,10 +589,10 @@ object ZipWriter {
      * zip64 扩展只收真正超了门槛的字段，顺序照它们在本头里的出场次序排：
      * 原始长度 → 压缩后长度 → 头偏移（读侧就按"谁是哨兵谁占位"的顺序领，多一个少一个都会读串位）。
      */
-    private fun centralHeader(record: CentralRecord): Pair<ByteArray, ByteArray> {
-        val size64 = record.size >= zip64SizeLimit
-        val compressed64 = record.compressedSize >= zip64SizeLimit
-        val offset64 = record.localOffset >= zip64SizeLimit
+    private fun centralHeader(record: CentralRecord, limits: Limits): Pair<ByteArray, ByteArray> {
+        val size64 = record.size >= limits.sizeLimit
+        val compressed64 = record.compressedSize >= limits.sizeLimit
+        val offset64 = record.localOffset >= limits.sizeLimit
         val body = ByteArrayOutputStream(24).apply {
             if (size64) write(long64(record.size))
             if (compressed64) write(long64(record.compressedSize))

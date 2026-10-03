@@ -191,6 +191,29 @@ internal class Inline(
             when {
                 // 转义的是字面字符：`\]` 不算括号，数进去的话链接标签在半路就被截断了
                 text[index] == '\\' -> index++
+                text[index] == '`' -> {
+                    // 代码段里的括号也是字面：跳到等长的收尾反引号；找不到就当普通字符
+                    var runEnd = index
+                    while (runEnd < text.length && text[runEnd] == '`') runEnd++
+                    val width = runEnd - index
+                    var probe = runEnd
+                    var closer = -1
+                    while (probe < text.length) {
+                        if (text[probe] == '`') {
+                            var end = probe
+                            while (end < text.length && text[end] == '`') end++
+                            if (end - probe == width) {
+                                closer = probe
+                                break
+                            }
+                            probe = end
+                        } else {
+                            probe++
+                        }
+                    }
+                    // 收尾反引号的最后一个字符由循环尾部的 index++ 越过
+                    index = if (closer >= 0) closer + width - 1 else index
+                }
                 text[index] == open -> depth++
                 text[index] == close -> {
                     depth--

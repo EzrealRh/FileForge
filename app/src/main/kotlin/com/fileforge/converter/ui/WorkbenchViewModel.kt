@@ -11,6 +11,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.fileforge.core.model.DayGroup
 import com.fileforge.core.model.FileKind
+import com.fileforge.core.naming.OutputNaming
 import com.fileforge.core.ops.Operation
 import com.fileforge.core.update.AssetDigest
 import com.fileforge.core.update.ReleaseAsset
@@ -447,6 +448,7 @@ class WorkbenchViewModel(app: Application) : AndroidViewModel(app) {
             notify("正在处理，先等这一批跑完")
             return
         }
+        rememberOperation(operation)
         val items = _state.value.selected
         if (items.isEmpty()) {
             notify("先选中要处理的文件")
@@ -662,6 +664,38 @@ class WorkbenchViewModel(app: Application) : AndroidViewModel(app) {
     fun saveUpdateToken() {
         updates.token = _state.value.updateToken
         checkForUpdate()
+    }
+
+    /** 最近用过的操作（新→旧，最多 8 个）：操作面板据此把常用的排前面。 */
+    fun recentOperationNames(): List<String> =
+        getApplication<Application>().getSharedPreferences("fileforge_ui", Context.MODE_PRIVATE)
+            .getString("recentOps", "")?.split(',').orEmpty().filter { it.isNotBlank() }
+
+    private fun rememberOperation(operation: Operation) {
+        val name = operation::class.simpleName ?: return
+        val prefs = getApplication<Application>().getSharedPreferences("fileforge_ui", Context.MODE_PRIVATE)
+        val updated = recentOperationNames().toMutableList().apply {
+            removeAll { it == name }
+            add(0, name)
+        }.take(8)
+        prefs.edit().putString("recentOps", updated.joinToString(",")).apply()
+    }
+
+    /** 别的 App 分享进来的纯文本：落成工作台里的 txt，接着就能转格式。 */
+    fun importPlainText(text: String, title: String?) {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                val tmp = File(getApplication<Application>().cacheDir, "shared-${System.nanoTime()}.txt")
+                tmp.writeText(text)
+                val name = OutputNaming.sanitize((title?.take(40) ?: "分享文本").ifBlank { "分享文本" }) + ".txt"
+                workspace.adopt(tmp, name, null)
+            }.onSuccess { item ->
+                _state.update { current -> current.refreshed().copy(selection = current.selection + item.id) }
+                notify("分享的文字已进工作台：${item.name}")
+            }.onFailure { error ->
+                notify("没能收下分享的文字：${error.message ?: error.javaClass.simpleName}")
+            }
+        }
     }
 
     fun checkForUpdate() = viewModelScope.launch(Dispatchers.IO) {

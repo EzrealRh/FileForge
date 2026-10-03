@@ -16,6 +16,7 @@ import com.fileforge.converter.data.WorkItem
 import java.io.ByteArrayOutputStream
 import java.io.File
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
 
 /** 位图解码上限：超过这个尺寸先按 2 的幂降采样，避免大图解码就 OOM。 */
@@ -62,62 +63,28 @@ class ImageEngine {
     }
 
     /**
-     * 图片加文字水印：白字按透明度叠上去，可带阴影保证浅色背景上读得见，
+     * 图片加文字/Logo 水印：白字带阴影或一张 Logo 图按透明度叠上去，
      * 单处（居中或四角）或隔行错位的平铺。像素重编一次，输出格式跟源走
      * （PNG 保持 PNG 留住透明通道，HEIC/其他出 JPG）。
      */
-    fun watermark(item: WorkItem, operation: Operation.ImageWatermark, staging: (String) -> File): EngineOutput {
-        val text = operation.text.trim()
-        require(text.isNotEmpty()) { "先写要盖的水印文字" }
+    fun watermark(
+        item: WorkItem,
+        operation: Operation.ImageWatermark,
+        logoFile: File?,
+        staging: (String) -> File,
+    ): EngineOutput {
+        require(operation.text.trim().isNotEmpty() || logoFile != null) {
+            "先写要盖的水印文字，或选一张 Logo 图"
+        }
         val decoded = decode(item.file)
         val painted = decoded.copy(Bitmap.Config.ARGB_8888, true)
         decoded.recycle()
-        val canvas = android.graphics.Canvas(painted)
-        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-            color = android.graphics.Color.argb(operation.opacityPercent.coerceIn(3, 100) * 255 / 100, 255, 255, 255)
-            textSize = max(painted.width, painted.height) / 14f
-            setShadowLayer(6f, 2f, 2f, android.graphics.Color.argb(110, 0, 0, 0))
-        }
-        val textWidth = paint.measureText(text)
-        val metrics = paint.fontMetrics
-        val textHeight = metrics.descent - metrics.ascent
-        val margin = max(painted.width, painted.height) / 30f
-
-        fun drawOne(x: Float, y: Float) {
-            canvas.save()
-            if (operation.tilt != 0) canvas.rotate(operation.tilt.toFloat(), x + textWidth / 2f, y)
-            canvas.drawText(text, x, y, paint)
-            canvas.restore()
-        }
-
-        if (operation.tiled) {
-            val stepX = textWidth + margin * 2f
-            val stepY = textHeight + margin * 2f
-            var row = 0
-            var y = -textHeight
-            while (y < painted.height + textHeight) {
-                // 隔行错位半格：铺出来才是水印的样子，不是表格
-                var x = -textWidth + if (row % 2 == 0) 0f else stepX / 2f
-                while (x < painted.width) {
-                    drawOne(x, y)
-                    x += stepX
-                }
-                y += stepY
-                row++
-            }
+        if (logoFile != null) {
+            val logo = decode(logoFile)
+            drawLogoWatermark(painted, logo, operation.spot, operation.tiled, operation.opacityPercent, operation.tilt)
+            logo.recycle()
         } else {
-            val spot = operation.spot.coerceIn(0, 4)
-            val x = when (spot) {
-                0, 2 -> (painted.width - textWidth) / 2f
-                1, 3 -> painted.width - textWidth - margin
-                else -> margin
-            }
-            val y = when (spot) {
-                0 -> (painted.height + textHeight) / 2f
-                1, 2 -> painted.height - metrics.descent - margin
-                else -> margin - metrics.ascent
-            }
-            drawOne(x, y)
+            drawTextWatermark(painted, operation.text.trim(), operation.spot, operation.tiled, operation.opacityPercent, operation.tilt)
         }
 
         val format = when (item.kind) {
@@ -128,11 +95,125 @@ class ImageEngine {
         val bytes = encode(painted, format, 92)
         painted.recycle()
         val placement = if (operation.tiled) "平铺" else SPOT_LABELS.getOrElse(operation.spot) { "居中" }
+        val what = if (logoFile != null) "Logo「${logoFile.nameWithoutExtension.take(12)}」" else "「${operation.text.trim().take(12)}」"
         return EngineOutput(
             OutputNaming.tagged(item.name, "水印", format.extension),
             staging(format.extension).apply { writeBytes(bytes) },
-            "「${text.take(12)}」$placement · ${operation.opacityPercent.coerceIn(3, 100)}% 不透明 · ${SizeInput.format(sizeOf(bytes))}",
+            "$what$placement · ${operation.opacityPercent.coerceIn(3, 100)}% 不透明 · ${SizeInput.format(sizeOf(bytes))}",
         )
+    }
+
+    /** 文字水印的绘制：图片水印与 GIF 逐帧水印共用。 */
+    fun drawTextWatermark(
+        target: Bitmap,
+        text: String,
+        spot: Int,
+        tiled: Boolean,
+        opacityPercent: Int,
+        tilt: Int,
+    ) {
+        val canvas = android.graphics.Canvas(target)
+        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.argb(opacityPercent.coerceIn(3, 100) * 255 / 100, 255, 255, 255)
+            textSize = max(target.width, target.height) / 14f
+            setShadowLayer(6f, 2f, 2f, android.graphics.Color.argb(110, 0, 0, 0))
+        }
+        val textWidth = paint.measureText(text)
+        val metrics = paint.fontMetrics
+        val textHeight = metrics.descent - metrics.ascent
+        val margin = max(target.width, target.height) / 30f
+
+        fun drawOne(x: Float, y: Float) {
+            canvas.save()
+            if (tilt != 0) canvas.rotate(tilt.toFloat(), x + textWidth / 2f, y)
+            canvas.drawText(text, x, y, paint)
+            canvas.restore()
+        }
+
+        if (tiled) {
+            val stepX = textWidth + margin * 2f
+            val stepY = textHeight + margin * 2f
+            var row = 0
+            var y = -textHeight
+            while (y < target.height + textHeight) {
+                // 隔行错位半格：铺出来才是水印的样子，不是表格
+                var x = -textWidth + if (row % 2 == 0) 0f else stepX / 2f
+                while (x < target.width) {
+                    drawOne(x, y)
+                    x += stepX
+                }
+                y += stepY
+                row++
+            }
+        } else {
+            val spotX = when (spot.coerceIn(0, 4)) {
+                0, 2 -> (target.width - textWidth) / 2f
+                1, 3 -> target.width - textWidth - margin
+                else -> margin
+            }
+            val spotY = when (spot.coerceIn(0, 4)) {
+                0 -> (target.height + textHeight) / 2f
+                1, 2 -> target.height - metrics.descent - margin
+                else -> margin - metrics.ascent
+            }
+            drawOne(spotX, spotY)
+        }
+    }
+
+    /** Logo 水印：Logo 缩到画面短边的四分之一以内，按同样的落位/平铺规则叠上去。 */
+    fun drawLogoWatermark(
+        target: Bitmap,
+        logo: Bitmap,
+        spot: Int,
+        tiled: Boolean,
+        opacityPercent: Int,
+        tilt: Int,
+    ) {
+        val canvas = android.graphics.Canvas(target)
+        val longest = max(logo.width, logo.height).coerceAtLeast(1)
+        val scale = (min(target.width, target.height) * 0.25f) / longest
+        val drawWidth = (logo.width * scale).coerceAtLeast(1f)
+        val drawHeight = (logo.height * scale).coerceAtLeast(1f)
+        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            alpha = opacityPercent.coerceIn(3, 100) * 255 / 100
+            isFilterBitmap = true
+        }
+        val margin = max(target.width, target.height) / 30f
+
+        fun drawOne(x: Float, y: Float) {
+            canvas.save()
+            if (tilt != 0) canvas.rotate(tilt.toFloat(), x + drawWidth / 2f, y + drawHeight / 2f)
+            canvas.drawBitmap(logo, null, android.graphics.RectF(x, y, x + drawWidth, y + drawHeight), paint)
+            canvas.restore()
+        }
+
+        if (tiled) {
+            val stepX = drawWidth + margin * 2f
+            val stepY = drawHeight + margin * 2f
+            var row = 0
+            var y = -drawHeight
+            while (y < target.height) {
+                var x = -drawWidth + if (row % 2 == 0) 0f else stepX / 2f
+                while (x < target.width) {
+                    drawOne(x, y)
+                    x += stepX
+                }
+                y += stepY
+                row++
+            }
+        } else {
+            val spotX = when (spot.coerceIn(0, 4)) {
+                0, 2 -> (target.width - drawWidth) / 2f
+                1, 3 -> target.width - drawWidth - margin
+                else -> margin
+            }
+            val spotY = when (spot.coerceIn(0, 4)) {
+                0 -> (target.height - drawHeight) / 2f
+                1, 2 -> target.height - drawHeight - margin
+                else -> margin
+            }
+            drawOne(spotX, spotY)
+        }
     }
 
     fun convert(item: WorkItem, operation: Operation.ConvertImage, staging: (String) -> File): EngineOutput {

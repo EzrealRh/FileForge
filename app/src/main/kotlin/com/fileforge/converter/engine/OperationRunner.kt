@@ -54,8 +54,15 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
             is Operation.CompressImage -> items.forEach { item ->
                 collect(item.name) { listOf(images.compress(item, operation, ::staging)) }
             }
-            is Operation.ImageWatermark -> items.forEach { item ->
-                collect(item.name) { listOf(images.watermark(item, operation, ::staging)) }
+            is Operation.ImageWatermark -> {
+                // Logo 从工作台里按名取：操作面板给出的是文件名
+                val logo = operation.logoFrom?.let { name -> workspace.list().firstOrNull { it.name == name } }?.file
+                items.forEach { item ->
+                    collect(item.name) { listOf(images.watermark(item, operation, logo, ::staging)) }
+                }
+            }
+            is Operation.GifWatermark -> items.forEach { item ->
+                collect(item.name) { listOf(gifs.watermark(item, operation)) }
             }
             is Operation.ImagesToPdf -> collect("${items.size} 张图片") {
                 listOf(pdf.imagesToPdf(items, operation.paper, operation.marginDp))
@@ -131,6 +138,14 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
             }
             is Operation.VideoTrim -> items.forEach { item ->
                 collect(item.name) { listOf(video.trim(item, operation, ::staging)) }
+            }
+            is Operation.AudioTrim -> items.forEach { item ->
+                collect(item.name) {
+                    listOf(audio.trim(item, operation) { percent -> onProgress(percent, item.name) })
+                }
+            }
+            is Operation.PdfReorder -> items.forEach { item ->
+                collect(item.name) { listOf(pdf.reorder(item, operation.spec)) }
             }
             is Operation.VideoToImage -> items.forEach { item ->
                 collect(item.name) { listOf(video.still(item, operation)) }

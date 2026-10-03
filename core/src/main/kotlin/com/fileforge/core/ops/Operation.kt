@@ -53,15 +53,27 @@ sealed interface Operation {
         override val label get() = "合成为 PDF"
     }
 
-    /** 图片加文字水印：单处（居中或四角）或平铺，白字按透明度叠上去，格式跟源走。 */
+    /** 图片加文字/Logo 水印：单处（居中或四角）或平铺；[logoFrom] 是工作台里当 Logo 用的图名，空则用文字。 */
     data class ImageWatermark(
         val text: String,
         val spot: Int = 0,
         val tiled: Boolean = false,
         val opacityPercent: Int = 30,
         val tilt: Int = 0,
+        val logoFrom: String? = null,
     ) : Operation {
         override val label get() = "图片加水印"
+    }
+
+    /** GIF 加文字水印：每一帧都盖同一份，参数与图片水印一致。 */
+    data class GifWatermark(
+        val text: String,
+        val spot: Int = 0,
+        val tiled: Boolean = false,
+        val opacityPercent: Int = 30,
+        val tilt: Int = 0,
+    ) : Operation {
+        override val label get() = "GIF 加水印"
     }
 
     /** 按目标体积分割，尾部不足一份的剩余页单独成文件。 */
@@ -143,12 +155,26 @@ sealed interface Operation {
         override val label get() = if (targetBytes != null) "压到 ${targetLabel(targetBytes)} 以内" else "压缩视频"
     }
 
-    /** 视频截取片段：起止之间的采样**原样搬运**不重编码；endSecond ≤ 0 表示到片尾。 */
-    data class VideoTrim(
+    /**
+     * 视频截取片段：[spec] 是逗号分隔的多段「起-止」秒数（止可留空到片尾，如 `5-12,30`），
+     * 段与段原样搬运后按时间顺序合并成一条，不重编码。
+     */
+    data class VideoTrim(val spec: String) : Operation {
+        override val label get() = "截取片段"
+    }
+
+    /** 音频截取：[target] 选 WAV（无损搬运）或 M4A（重编），endSecond ≤ 0 表示到片尾。 */
+    data class AudioTrim(
+        val target: AudioTarget = AudioTarget.Wav,
         val startSecond: Double,
         val endSecond: Double = 0.0,
     ) : Operation {
-        override val label get() = "截取片段"
+        override val label get() = "截取音频"
+    }
+
+    /** PDF 按给定页序重排另存：spec 形如 3,1,2 或 5-8,1 —— 顺序随意、可重复、可倒序。 */
+    data class PdfReorder(val spec: String) : Operation {
+        override val label get() = "重排页面"
     }
 
     /**

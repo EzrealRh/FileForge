@@ -348,9 +348,8 @@ class VideoEngine(private val workspace: Workspace, private val images: ImageEng
      * 封装跟源走（MP4→MP4、WebM→WebM），时间戳整体前移让片段从 0 开始。
      */
     fun trim(item: WorkItem, operation: Operation.VideoTrim, staging: (String) -> File): EngineOutput {
-        val startUs = (operation.startSecond.coerceAtLeast(0.0) * 1_000_000).toLong()
-        val endUs = if (operation.endSecond <= 0.0) Long.MAX_VALUE else (operation.endSecond * 1_000_000).toLong()
-        require(endUs > startUs) { "结束时间要比开始时间晚" }
+        val ranges = parseRanges(operation.spec)
+        require(ranges.isNotEmpty()) { "先写要截的段，比如 5-12,30-41；止留空表示到片尾" }
 
         val extractor = MediaExtractor()
         var muxer: MediaMuxer? = null
@@ -370,6 +369,7 @@ class VideoEngine(private val workspace: Workspace, private val images: ImageEng
             }
             require(videoTrack >= 0) { "这个文件里没有画面" }
             val videoFormat = extractor.getTrackFormat(videoTrack)
+            val durationUs = videoFormat.long(MediaFormat.KEY_DURATION) ?: 0L
             val audioMime = if (audioTrack >= 0) extractor.getTrackFormat(audioTrack).string(MediaFormat.KEY_MIME) else null
             // 音轨能不能搬进目标封装，与转码共用同一套判据；装不下就只出画面并说明
             val keepAudio = audioTrack >= 0 && MuxSupport.keepsAudio(if (webm) VideoFormat.WebM else VideoFormat.Mp4, audioMime)
@@ -387,17 +387,23 @@ class VideoEngine(private val workspace: Workspace, private val images: ImageEng
             val info = MediaCodec.BufferInfo()
             val buffer = ByteBuffer.allocateDirect(16 * 1024 * 1024)
 
-            fun copyTrack(track: Int, sink: Int): Int {
+            // 把一段 [start, end) 的采样原样搬进 muxer，时间戳整体前移 shift；返回实际写入数
+            fun copyTrack(track: Int, sink: Int, start: Long, end: Long, shift: Long): Int {
                 extractor.unselectTrack(track)
                 extractor.selectTrack(track)
-                if (startUs > 0) extractor.seekTo(startUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+                if (start > 0) extractor.seekTo(start, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
                 var count = 0
                 while (true) {
                     val size = extractor.sampleSize
                     val pts = extractor.sampleTime
                     if (extractor.readSampleData(buffer, 0) < 0) break
-                    if (pts > endUs) break
-                    info.set(0, size.toInt(), (pts - startUs).coerceAtLeast(0L), extractor.sampleFlags)
+                    if (pts > end) break
+                    // seek 落在前一个关键帧上：早于本段起点的采样丢掉
+                    if (pts < start) {
+                        extractor.advance()
+                        continue
+                    }
+                    info.set(0, size.toInt(), (pts - start + shift).coerceAtLeast(0L), extractor.sampleFlags)
                     mux.writeSampleData(sink, buffer, info)
                     count++
                     extractor.advance()
@@ -405,18 +411,29 @@ class VideoEngine(private val workspace: Workspace, private val images: ImageEng
                 return count
             }
 
-            val videoWritten = copyTrack(videoTrack, sinkVideo)
-            if (videoWritten == 0) {
-                throw IllegalStateException("开始时间超出了视频长度，这一段没有画面")
+            var videoShift = 0L
+            var audioShift = 0L
+            var videoWritten = 0
+            ranges.forEachIndexed { _, (start, end) ->
+                // 止留空的段按容器时长算到片尾；其余按声明的止点
+                val realEnd = if (end == Long.MAX_VALUE) (durationUs.takeIf { it > 0 } ?: Long.MAX_VALUE) else end
+                videoWritten += copyTrack(videoTrack, sinkVideo, start, realEnd, videoShift)
+                if (keepAudio) copyTrack(audioTrack, sinkAudio, start, realEnd, audioShift)
+                // 下一段的时间戳接着本段的标称时长排，拼起来才连贯
+                if (realEnd != Long.MAX_VALUE) {
+                    videoShift += realEnd - start
+                    audioShift += realEnd - start
+                }
             }
-            if (keepAudio) copyTrack(audioTrack, sinkAudio)
+            if (videoWritten == 0) {
+                throw IllegalStateException("截取范围里没有画面：起止时间超出视频长度了？")
+            }
             mux.stop()
 
             return EngineOutput(
                 OutputNaming.tagged(item.name, "截取", if (webm) "webm" else "mp4"),
                 output,
-                "${operation.startSecond} 秒到 " + (if (operation.endSecond <= 0.0) "片尾" else "${operation.endSecond} 秒") +
-                    " · 原样搬运不重编码" + if (keepAudio) "" else " · 音轨没带上",
+                "${ranges.size} 段（${operation.spec}）· 原样搬运不重编码" + if (keepAudio) "" else " · 音轨没带上",
             )
         } catch (error: Exception) {
             runCatching { output.delete() }
@@ -426,6 +443,17 @@ class VideoEngine(private val workspace: Workspace, private val images: ImageEng
             runCatching { extractor.release() }
         }
     }
+
+    /** 「5-12,30-41」这种多段起止秒数 → 微秒区间；止留空表示到片尾。段给反了（止 ≤ 起）直接丢掉。 */
+    private fun parseRanges(spec: String): List<Pair<Long, Long>> =
+        spec.split(',', '，').mapNotNull { part ->
+            val bits = part.trim().split('-')
+            val start = bits.getOrNull(0)?.trim()?.toDoubleOrNull() ?: return@mapNotNull null
+            val end = bits.getOrNull(1)?.trim()?.toDoubleOrNull() ?: 0.0
+            val startUs = (start.coerceAtLeast(0.0) * 1_000_000).toLong()
+            val endUs = if (end <= 0.0) Long.MAX_VALUE else (end * 1_000_000).toLong()
+            if (endUs <= startUs) null else startUs to endUs
+        }
 
     private fun MediaFormat.string(key: String): String? = runCatching { getString(key) }.getOrNull()
     private fun MediaFormat.integer(key: String): Int? = runCatching { getInteger(key) }.getOrNull()

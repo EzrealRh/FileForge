@@ -61,8 +61,13 @@ class MainActivity : ComponentActivity() {
         if (intent.action == Intent.ACTION_SEND) acceptShared(intent)
     }
 
-    /** 让别的 App 能把图片/视频/PDF 直接分享进来处理。 */
+    /** 让别的 App 能把图片/视频/PDF 直接分享进来处理；纯文本（网页选段、备忘）也收。 */
     private fun acceptShared(intent: Intent?) {
+        if (intent?.type == "text/plain") {
+            val text = intent.getStringExtra(Intent.EXTRA_TEXT)
+            if (!text.isNullOrBlank()) viewModel.importPlainText(text, intent.getStringExtra(Intent.EXTRA_SUBJECT))
+            return
+        }
         val uri = intent?.let {
             @Suppress("DEPRECATION")
             it.getParcelableExtra<Uri>(Intent.EXTRA_STREAM) ?: it.clipData?.getItemAt(0)?.uri

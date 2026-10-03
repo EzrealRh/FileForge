@@ -184,9 +184,9 @@ class ZipTest {
 
     @Test
     fun `单条尺寸超门槛时写 zip64 扩展且内容原样回来`() {
-        withZip64Limits(sizeLimit = 100) {
+        withZip64Limits(sizeLimit = 100) { limits ->
             val body = ByteArray(200) { (it % 13).toByte() }
-            val packed = ZipWriter.write(listOf(ZipItem("big.bin", body, FIXED_TIME)))
+            val packed = ZipWriter.write(listOf(ZipItem("big.bin", body, FIXED_TIME)), limits)
             // 本地头：扩展 20 字节（id + 长度 + 两条 8 字节），32 位长度让位给哨兵，version 也要抬到 45
             assertEquals(20, u16le(packed, 28), "本地头扩展长度")
             assertEquals(0xFFFFFFFFL, u32le(packed, 18), "本地头压缩后长度")
@@ -208,10 +208,10 @@ class ZipTest {
 
     @Test
     fun `直存条目两条长度都超门槛时真值按头序进扩展`() {
-        withZip64Limits(sizeLimit = 100) {
+        withZip64Limits(sizeLimit = 100) { limits ->
             val body = ByteArray(300) { (it * 7).toByte() }
             val item = ZipItem("raw.bin", body.size.toLong(), FIXED_TIME, stored = true) { body.inputStream() }
-            val packed = ZipWriter.write(listOf(item))
+            val packed = ZipWriter.write(listOf(item), limits)
             // 直存的压缩后长度等于原始长度：两条都超门槛，中央扩展里按头序先原始后压缩，共 16 字节
             val centralAt = packed.indexOfSignature(byteArrayOf(0x50, 0x4B, 0x01, 0x02))
             assertEquals(20, u16le(packed, centralAt + 30), "中央扩展长度")
@@ -230,11 +230,11 @@ class ZipTest {
 
     @Test
     fun `中央目录的头偏移超门槛时真值排在扩展最后`() {
-        withZip64Limits(sizeLimit = 100) {
+        withZip64Limits(sizeLimit = 100) { limits ->
             val body = ByteArray(80) { (it % 5).toByte() }
             fun stored(name: String) =
                 ZipItem(name, body.size.toLong(), FIXED_TIME, stored = true) { body.inputStream() }
-            val packed = ZipWriter.write(listOf(stored("one.bin"), stored("two.bin")))
+            val packed = ZipWriter.write(listOf(stored("one.bin"), stored("two.bin")), limits)
             // 第一条本地头 + 名字 + 数据占 117 字节，第二条的头偏移因此过了门槛，但两条的长度都没有
             val centralSig = byteArrayOf(0x50, 0x4B, 0x01, 0x02)
             val second = packed.indexOfSignature(centralSig, packed.indexOfSignature(centralSig) + 4)
@@ -250,9 +250,9 @@ class ZipTest {
 
     @Test
     fun `条目数超门槛时落 EOCD64 与定位器且各方都读得到全部条目`() {
-        withZip64Limits(countLimit = 2) {
+        withZip64Limits(countLimit = 2) { limits ->
             val bodies = listOf("甲".toByteArray(), "乙".toByteArray(), "丙".toByteArray())
-            val packed = ZipWriter.write(bodies.mapIndexed { i, body -> ZipItem("$i.txt", body, FIXED_TIME) })
+            val packed = ZipWriter.write(bodies.mapIndexed { i, body -> ZipItem("$i.txt", body, FIXED_TIME) }, limits)
             // EOCD64 定长 56、定位器定长 20，之后只剩 22 字节的普通 EOCD；定位器要指回 EOCD64 的位置
             val recordAt = packed.indexOfSignature(byteArrayOf(0x50, 0x4B, 0x06, 0x06))
             val locatorAt = packed.indexOfSignature(byteArrayOf(0x50, 0x4B, 0x06, 0x07))
@@ -303,10 +303,10 @@ class ZipTest {
 
     @Test
     fun `没预留扩展却真超了门槛要炸出来而不是写坏包`() {
-        withZip64Limits(sizeLimit = 100) {
+        withZip64Limits(sizeLimit = 100) { limits ->
             // 谎报尺寸：item.size 说 10，真实字节 300 —— 本地头写完才发现 32 位装不下，回填已无扩展可补
             val liar = ZipItem("liar.bin", 10L, FIXED_TIME, stored = true) { ByteArray(300).inputStream() }
-            val error = runCatching { ZipWriter.write(listOf(liar)) }.exceptionOrNull()
+            val error = runCatching { ZipWriter.write(listOf(liar), limits) }.exceptionOrNull()
             assertTrue(error is IllegalStateException, "实际抛了：$error")
             assertTrue(error!!.message!!.contains("liar.bin"), "报错要能定位到条目：${error.message}")
         }
@@ -424,23 +424,12 @@ class ZipTest {
         externalAttributes = externalAttributes,
     )
 
-    /** 把 ZipWriter 的 zip64 门槛临时注水到测试够得着的量级，走完无论成败都还原。 */
+    /** zip64 门槛以参数传给写入调用：测试用小阈值直击字节布局，不再动任何全局状态。 */
     private fun <T> withZip64Limits(
-        sizeLimit: Long = ZipWriter.zip64SizeLimit,
-        countLimit: Long = ZipWriter.zip64EntryCountLimit,
-        block: () -> T,
-    ): T {
-        val oldSize = ZipWriter.zip64SizeLimit
-        val oldCount = ZipWriter.zip64EntryCountLimit
-        ZipWriter.zip64SizeLimit = sizeLimit
-        ZipWriter.zip64EntryCountLimit = countLimit
-        return try {
-            block()
-        } finally {
-            ZipWriter.zip64SizeLimit = oldSize
-            ZipWriter.zip64EntryCountLimit = oldCount
-        }
-    }
+        sizeLimit: Long = 0xFFFF_FFFFL,
+        countLimit: Long = 0xFFFFL,
+        block: (ZipWriter.Limits) -> T,
+    ): T = block(ZipWriter.Limits(sizeLimit, countLimit))
 
     /** JDK 的 ZipFile 是另一套独立实现：它也读得动、解得对，才算真的跨过了实现的门槛。 */
     private fun javaZipFileRoundTrip(packed: ByteArray, name: String, body: ByteArray) {

@@ -110,9 +110,9 @@ class FileKindSniffTest {
         // 混进来就是点了必崩的按钮。两条打包（zip 与 tar.gz）是例外 —— 打包对任何类型都成立。
         listOf(FileKind.Mp3, FileKind.Aac, FileKind.M4a, FileKind.Flac, FileKind.Ogg, FileKind.Wav).forEach {
             assertEquals(
-                listOf(OperationKind.ConvertAudio, OperationKind.PackZip, OperationKind.PackTar),
+                listOf(OperationKind.ConvertAudio, OperationKind.AudioTrim, OperationKind.PackZip, OperationKind.PackTar),
                 OperationKind.applicable(setOf(it)),
-                "$it 只该给音频转换和打包",
+                "$it 只该给音频转换、截取和打包",
             )
         }
     }

@@ -6,7 +6,8 @@ import com.fileforge.core.model.FileKind
 enum class OperationKind(val label: String, val hint: String) {
     ConvertImage("图片格式转换", "JPG / PNG / WebP 互转"),
     CompressImage("压缩图片", "按质量或目标体积"),
-    ImageWatermark("图片加文字水印", "单处或平铺，透明度可选"),
+    ImageWatermark("图片加文字水印", "文字或 Logo 图，单处或平铺"),
+    GifWatermark("GIF 加水印", "文字水印盖到每一帧"),
     ImagesToPdf("图片合成 PDF", "一张一页"),
     CompressPdf("压缩 PDF", "内嵌图片降采样重编，文字不动"),
     SplitPdfBySize("PDF 按体积分割", "每份不超过目标大小"),
@@ -19,6 +20,7 @@ enum class OperationKind(val label: String, val hint: String) {
     PdfToDocx("PDF 转 Word", "按字号与位置还原标题、列表与段落"),
     AddPageNumbers("PDF 加页码", "底部或角落，可跳过前几页"),
     PdfWatermark("PDF 加水印", "文字水印，可平铺和调深浅"),
+    PdfReorder("PDF 重排页面", "按给定页序另存，可重复可倒序"),
     PdfToImages("PDF 每页导出图片", "页转 JPG / PNG / WebP"),
     EncryptPdf("PDF 加密码", "设打开密码，可再限制打印/复制/修改"),
     DecryptPdf("PDF 去密码", "填对打开密码，产出不带保护的副本"),
@@ -30,6 +32,7 @@ enum class OperationKind(val label: String, val hint: String) {
     CompressVideo("压缩视频", "硬件转码，可按目标体积反推码率"),
     VideoTrim("视频截取片段", "选起止时间，不重编码秒出"),
     ConvertAudio("音频转格式", "MP3 / FLAC / OGG 转 M4A 或 WAV"),
+    AudioTrim("音频截取", "选起止时间，WAV 无损 / M4A 重编"),
     ConvertTextEncoding("文本转编码", "GBK / UTF-8 / Big5 互转，顺带统一换行"),
     ConvertSubtitle("字幕转格式", "SRT / VTT / LRC / ASS 互转"),
     ExtractAudio("提取音频", "把视频里的声音拿出来"),
@@ -113,15 +116,16 @@ enum class OperationKind(val label: String, val hint: String) {
             ImagesToPdf -> fileKind.isImage
             CompressPdf, SplitPdfBySize, SplitPdfIntoParts, ExtractPdfPages, RemovePdfPages,
             RotatePdfPages, MergePdfs, PdfToText, PdfToImages, AddPageNumbers, PdfWatermark,
-            EncryptPdf, DecryptPdf, PdfToDocx, PdfToHtml,
+            EncryptPdf, DecryptPdf, PdfToDocx, PdfToHtml, PdfReorder,
             -> fileKind == FileKind.Pdf
-            CompressGif, GifToImages -> fileKind == FileKind.Gif
+            CompressGif, GifToImages, GifWatermark -> fileKind == FileKind.Gif
             ImagesToGif -> fileKind.isImage
             VideoToGif, VideoToImage, VideoTrim -> fileKind.isVideo
             CompressVideo -> fileKind.isVideo
             ConvertAudio -> fileKind.isAudio
             // 两种都只认"这是个文本文件"，具体是哪种字幕交给解析器判
             ConvertTextEncoding, ConvertSubtitle -> fileKind.isTextual
+            AudioTrim -> fileKind.isAudio || fileKind.isVideo
             // 印成 PDF、写成 Word 与写成电子书走同一条来源判定：docx / pptx / odt 先把正文抽出来，
             // 网页与 Markdown 按内容认，抽出来 / 认出来的是什么就是什么
             // 印成 PDF 排的是抽出来的文字；写成 Word 与写成电子书走文档树，

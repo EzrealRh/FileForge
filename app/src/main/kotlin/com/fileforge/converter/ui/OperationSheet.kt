@@ -17,6 +17,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.ArrowDropDown
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -74,8 +75,18 @@ import kotlin.math.roundToInt
 /** 选操作 + 填参数，一次敲定。可用操作按选中文件的真实类型筛过。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun OperationSheet(items: List<WorkItem>, onDismiss: () -> Unit, onStart: (Operation) -> Unit) {
+fun OperationSheet(
+    items: List<WorkItem>,
+    imageNames: List<String> = emptyList(),
+    recentKinds: List<String> = emptyList(),
+    onDismiss: () -> Unit,
+    onStart: (Operation) -> Unit,
+) {
     val available = remember(items) { OperationKind.applicable(items.map { it.kind }.toSet()) }
+    // 最近用过的排前面（按新→旧），没用过的保持目录顺序 —— 常用操作不用每次往下滑
+    val ordered = remember(items, recentKinds) {
+        available.sortedByDescending { kind -> recentKinds.indexOf(kind.name).takeIf { it >= 0 } ?: Int.MIN_VALUE }
+    }
     var chosen by remember(items) { mutableStateOf<OperationKind?>(null) }
     val kinds = items.map { it.kind }.toSet()
     // 参数面板比操作列表高，不跳过半展开的话小屏上"开始"会藏在折叠线下
@@ -104,7 +115,7 @@ fun OperationSheet(items: List<WorkItem>, onDismiss: () -> Unit, onStart: (Opera
 
             val kind = chosen
             if (kind == null) {
-                if (available.isEmpty()) {
+                if (ordered.isEmpty()) {
                     Text(
                         "这几类文件混在一起没有共同可做的操作，先只选同一类试试。",
                         Modifier.padding(20.dp),
@@ -112,7 +123,7 @@ fun OperationSheet(items: List<WorkItem>, onDismiss: () -> Unit, onStart: (Opera
                     )
                 } else {
                     Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
-                        available.forEach { option ->
+                        ordered.forEach { option ->
                             TextButton(
                                 onClick = { chosen = option },
                                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
@@ -131,7 +142,7 @@ fun OperationSheet(items: List<WorkItem>, onDismiss: () -> Unit, onStart: (Opera
                     }
                 }
             } else {
-                val draft = remember(kind, items) { Parameters(kind, items) }
+                val draft = remember(kind, items, imageNames) { Parameters(kind, items, imageNames) }
                 Column(
                     Modifier.padding(horizontal = 20.dp).heightIn(max = 380.dp).verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -158,7 +169,12 @@ fun OperationSheet(items: List<WorkItem>, onDismiss: () -> Unit, onStart: (Opera
  * 校验是 [validation] 这个纯函数，不是"点一下才写进去"的可变状态——否则按钮会卡在
  * 上一次的错误里灰着不动。数字输入一律先存原始字符串，避免小数点被回显吃掉。
  */
-class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
+class Parameters(
+    val kind: OperationKind,
+    val items: List<WorkItem>,
+    /** 工作台里可当 Logo 用的图名（不含本次选中的），图片水印的下拉候选。 */
+    val imageNames: List<String> = emptyList(),
+) {
     var imageFormat by mutableStateOf(if (kind == OperationKind.GifToImages) ImageFormat.Png else ImageFormat.Jpeg)
     var quality by mutableStateOf(if (kind == OperationKind.GifToImages || kind == OperationKind.VideoToImage) 92f else 82f)
     var maxEdge by mutableStateOf(if (kind == OperationKind.VideoToGif) 480f else 0f)
@@ -217,8 +233,12 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
     var bitrate by mutableStateOf(2500f)
     var startSecondText by mutableStateOf("")
     var durationSecondText by mutableStateOf("")
-    var trimStartText by mutableStateOf("")
-    var trimEndText by mutableStateOf("")
+    var trimSpecText by mutableStateOf("")
+    var audioTrimTarget by mutableStateOf(AudioTarget.Wav)
+    var audioTrimStartText by mutableStateOf("")
+    var audioTrimEndText by mutableStateOf("")
+    var pdfReorderSpec by mutableStateOf("")
+    var imageWatermarkLogo by mutableStateOf<String?>(null)
     var pdfLevel by mutableStateOf(1f)
     var pdfByTarget by mutableStateOf(false)
     var parts by mutableStateOf(2f)
@@ -333,9 +353,46 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
                 Summary("帧数或尺寸超出内存上限时会自动往下收，结果里会写明")
             }
             OperationKind.VideoTrim -> {
-                NumberField("从第几秒开始（含，关键帧对齐）", trimStartText) { trimStartText = it }
-                NumberField("到第几秒结束（留空=到片尾）", trimEndText) { trimEndText = it }
-                Summary("画面按关键帧对齐原样搬运，不重编码，几秒出片；音轨同窗截取，封装跟源走")
+                OutlinedTextField(
+                    value = trimSpecText,
+                    onValueChange = { trimSpecText = it.filter { c -> c.isDigit() || c == '-' || c == '.' || c == ',' || c == '，' } },
+                    label = { Text("要截的段，可多段用逗号隔开") },
+                    supportingText = { Text("例：5-12,30-41 —— 止留空到片尾，如 5-") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Summary("画面按关键帧对齐原样搬运，不重编码，几秒出片；多段按顺序拼成一条，音轨同窗截取，封装跟源走")
+            }
+            OperationKind.AudioTrim -> {
+                Segmented("输出格式", AudioTarget.entries.map { it.label }, audioTrimTarget.ordinal) {
+                    audioTrimTarget = AudioTarget.entries[it]
+                }
+                OutlinedTextField(
+                    value = audioTrimStartText,
+                    onValueChange = { audioTrimStartText = it.filter { c -> c.isDigit() || c == '.' } },
+                    label = { Text("从第几秒开始（含）") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = audioTrimEndText,
+                    onValueChange = { audioTrimEndText = it.filter { c -> c.isDigit() || c == '.' } },
+                    label = { Text("到第几秒结束（留空=到片尾）") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Summary("AAC 选 M4A 时原样搬运秒出；其他编码会解了重编，WAV 是无损落盘")
+            }
+            OperationKind.PdfReorder -> {
+                OutlinedTextField(
+                    value = pdfReorderSpec,
+                    onValueChange = { pdfReorderSpec = it },
+                    label = { Text("新的页序，例：3,1,2 或 5-8,1") },
+                    supportingText = { Text("顺序随意、可重复、可倒序；页码超界会直接说哪页不存在") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Summary("按你给的顺序把页重新拼一份另存，原文件不动")
             }
             OperationKind.GifToImages -> {
                 Segmented("导出哪些帧", listOf("全部帧", "只要首帧"), if (firstFrameOnly) 1 else 0) { firstFrameOnly = it == 1 }
@@ -393,6 +450,63 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
                     value = imageWatermarkText,
                     onValueChange = { imageWatermarkText = it },
                     label = { Text("水印文字") },
+                    supportingText = { Text("选了 Logo 图就盖图，没选就盖文字") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                // Logo 从工作台里挑：选中要加水印的这几张不会出现在候选里
+                var logoMenuOpen by remember { mutableStateOf(false) }
+                Box {
+                    OutlinedTextField(
+                        value = imageWatermarkLogo ?: "无（用上面的文字）",
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("用图片当水印（可选）") },
+                        trailingIcon = {
+                            IconButton(onClick = { logoMenuOpen = !logoMenuOpen }) {
+                                Icon(Icons.Outlined.ArrowDropDown, contentDescription = "选 Logo 图")
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    DropdownMenu(expanded = logoMenuOpen, onDismissRequest = { logoMenuOpen = false }) {
+                        DropdownMenuItem(
+                            text = { Text("无（用上面的文字）") },
+                            onClick = {
+                                imageWatermarkLogo = null
+                                logoMenuOpen = false
+                            },
+                        )
+                        imageNames.forEach { name ->
+                            DropdownMenuItem(
+                                text = { Text(name) },
+                                onClick = {
+                                    imageWatermarkLogo = name
+                                    logoMenuOpen = false
+                                },
+                            )
+                        }
+                    }
+                }
+                Segmented("位置", listOf("居中", "右下", "左下", "右上", "左上"), imageWatermarkSpot) {
+                    imageWatermarkSpot = it
+                }
+                Segmented("排布", listOf("单处", "平铺整张"), if (imageWatermarkTiled) 1 else 0) {
+                    imageWatermarkTiled = it == 1
+                }
+                IntSlider("不透明度", imageWatermarkOpacity, 5f..100f, { "%.0f%%".format(it) }) {
+                    imageWatermarkOpacity = it
+                }
+                IntSlider("倾斜", imageWatermarkTilt, -90f..90f, { "%.0f°".format(it) }, step = 5f) {
+                    imageWatermarkTilt = it
+                }
+                Summary("白字带阴影或 Logo 图按透明度叠上，大小按画面自适应；输出格式跟源走（PNG 保持 PNG）")
+            }
+            OperationKind.GifWatermark -> {
+                OutlinedTextField(
+                    value = imageWatermarkText,
+                    onValueChange = { imageWatermarkText = it },
+                    label = { Text("水印文字") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -408,7 +522,7 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
                 IntSlider("倾斜", imageWatermarkTilt, -90f..90f, { "%.0f°".format(it) }, step = 5f) {
                     imageWatermarkTilt = it
                 }
-                Summary("白字带阴影叠在画面上，字号按画面自适应；输出格式跟源走（PNG 保持 PNG）")
+                Summary("白字盖到每一帧再重编回 GIF，帧数与停留不变；色板仍是 256 色")
             }
             OperationKind.CompressVideo -> {
                 Segmented("封装", VideoFormat.entries.map { it.label }, videoFormat.ordinal) {
@@ -943,11 +1057,14 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
         if (kind == OperationKind.MergePdfs && items.size < 2) return "合并 PDF 至少选两个文件"
         if (kind == OperationKind.PdfWatermark && watermarkText.isBlank()) return "先写要盖的水印文字"
         if (kind == OperationKind.ImageWatermark && imageWatermarkText.isBlank()) return "先写要盖的水印文字"
-        if (kind == OperationKind.VideoTrim) {
-            val start = trimStartText.toFloatOrNull() ?: 0f
-            val end = trimEndText.toFloatOrNull() ?: 0f
-            if (start < 0f) return "开始时间不能是负数"
-            if (end != 0f && end <= start) return "结束时间要比开始时间晚（留空表示到片尾）"
+        if (kind == OperationKind.GifWatermark && imageWatermarkText.isBlank()) return "先写要盖的水印文字"
+        if (kind == OperationKind.VideoTrim && trimSpecText.isBlank()) return "先写要截的段，比如 5-12,30-41"
+        if (kind == OperationKind.PdfReorder && pdfReorderSpec.isBlank()) return "先写新的页序，比如 3,1,2"
+        if (kind == OperationKind.AudioTrim) {
+            val start = audioTrimStartText.toDoubleOrNull() ?: 0.0
+            val end = audioTrimEndText.toDoubleOrNull() ?: 0.0
+            if (start < 0.0) return "开始时间不能是负数"
+            if (end != 0.0 && end <= start) return "结束时间要比开始时间晚（留空表示到片尾）"
         }
         if (kind == OperationKind.JsonToXml && xmlRoot.isNotBlank() && !Xml.isElementName(xmlRoot.trim())) {
             return "根元素名「${xmlRoot.trim()}」不能当 XML 标签用"
@@ -996,6 +1113,11 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
             OperationKind.ImageWatermark -> Operation.ImageWatermark(
                 imageWatermarkText.trim(), imageWatermarkSpot, imageWatermarkTiled,
                 imageWatermarkOpacity.roundToInt(), imageWatermarkTilt.roundToInt(),
+                imageWatermarkLogo,
+            )
+            OperationKind.GifWatermark -> Operation.GifWatermark(
+                imageWatermarkText.trim(), imageWatermarkSpot, imageWatermarkTiled,
+                imageWatermarkOpacity.roundToInt(), imageWatermarkTilt.roundToInt(),
             )
             OperationKind.MergePdfs -> Operation.MergePdfs
             OperationKind.PdfToImages -> Operation.PdfToImages(imageFormat, pdfScale.roundToInt().toFloat(), quality.roundToInt())
@@ -1013,10 +1135,13 @@ class Parameters(val kind: OperationKind, val items: List<WorkItem>) {
                 startSecondText.toFloatOrNull()?.toDouble() ?: 0.0,
                 durationSecondText.toFloatOrNull()?.toDouble() ?: 0.0,
             )
-            OperationKind.VideoTrim -> Operation.VideoTrim(
-                trimStartText.toFloatOrNull()?.toDouble() ?: 0.0,
-                trimEndText.toFloatOrNull()?.toDouble() ?: 0.0,
+            OperationKind.VideoTrim -> Operation.VideoTrim(trimSpecText)
+            OperationKind.AudioTrim -> Operation.AudioTrim(
+                audioTrimTarget,
+                audioTrimStartText.toDoubleOrNull() ?: 0.0,
+                audioTrimEndText.toDoubleOrNull() ?: 0.0,
             )
+            OperationKind.PdfReorder -> Operation.PdfReorder(pdfReorderSpec)
             OperationKind.CompressVideo -> Operation.CompressVideo(
                 videoFormat, bitrate.roundToInt(), 0, 96,
                 if (videoByTarget) targetBytes else null,

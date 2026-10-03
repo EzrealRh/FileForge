@@ -145,6 +145,26 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
         }
     }
 
+    /**
+     * 按给定页序重排另存：spec 形如 3,1,2 或 5-8,1 —— 顺序随意、可重复、可倒序，
+     * 页码超界直接报错。页面用与删页同一条复制通路，资源跟着页走。
+     */
+    fun reorder(item: WorkItem, spec: String): EngineOutput {
+        val source = loadForReading(item.file)
+        try {
+            val order = PageRangeParser.toPageIndices(PageRangeParser.parse(spec), source.numberOfPages)
+            val output = workspace.newStagingFile("pdf")
+            copyPages(source, order, output)
+            return EngineOutput(
+                OutputNaming.tagged(item.name, "重排", "pdf"),
+                output,
+                "按新顺序排出 ${order.size} 页（可重复、可倒序）",
+            )
+        } finally {
+            runCatching { source.close() }
+        }
+    }
+
     /** 旋转：只认 90 的整数倍，顺时针；spec 留空表示所有页。其余页原样带过去。 */
     /**
      * 加页码：只在页面内容流末尾追加一段文字，原页面对象、字体、图片一概不动。

@@ -447,6 +447,10 @@ fun WorkbenchScreen(
     if (state.sheetOpen) {
         OperationSheet(
             items = state.selected,
+            imageNames = state.items
+                .filter { it.kind.isImage && state.selected.none { s -> s.id == it.id } }
+                .map { it.name },
+            recentKinds = viewModel.recentOperationNames(),
             onDismiss = { viewModel.openSheet(false) },
             onStart = viewModel::run,
         )

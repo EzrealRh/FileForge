@@ -55,6 +55,27 @@ class GifEngine(private val workspace: Workspace, private val images: ImageEngin
         )
     }
 
+    /** GIF 加文字水印：每一帧都盖同一份（落位/平铺/透明度与图片水印一致），重编码回 GIF。 */
+    fun watermark(item: WorkItem, operation: Operation.GifWatermark): EngineOutput {
+        val text = operation.text.trim()
+        require(text.isNotEmpty()) { "先写要盖的水印文字" }
+        val source = GifDecoder.decode(item.file.readBytes(), pixelBudget = PIXEL_BUDGET)
+        source.frames.forEach { frame ->
+            val bitmap = Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888)
+            bitmap.setPixels(frame.argb, 0, source.width, 0, 0, source.width, source.height)
+            images.drawTextWatermark(bitmap, text, operation.spot, operation.tiled, operation.opacityPercent, operation.tilt)
+            bitmap.getPixels(frame.argb, 0, source.width, 0, 0, source.width, source.height)
+            bitmap.recycle()
+        }
+        val bytes = GifEncoder(source.width, source.height, source.loopCount, 256).encode(source.frames)
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "水印", "gif"),
+            workspace.newStagingFile("gif").apply { writeBytes(bytes) },
+            "「${text.take(12)}」盖到全部 ${source.frames.size} 帧" +
+                if (source.truncated) "（帧太多，只处理了前面这些）" else "",
+        )
+    }
+
     fun fromVideo(item: WorkItem, operation: Operation.VideoToGif, onProgress: (Int) -> Unit = {}): EngineOutput {
         val meta = videoDisplayMeta(item.file)
         val fps = operation.fps.coerceIn(1, 25)

@@ -127,6 +127,8 @@
                 <data android:mimeType="image/*" />
                 <data android:mimeType="video/*" />
                 <data android:mimeType="application/pdf" />
+                <!-- 别的 App 分享进来的纯文本：直接落成工作台里的 txt，接着转格式 -->
+                <data android:mimeType="text/plain" />
             </intent-filter>
         </activity>
 

@@ -9,7 +9,6 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
-import android.provider.Settings
 import com.fileforge.core.naming.OutputNaming
 import java.io.File
 
@@ -58,17 +57,6 @@ class MediaStorePublisher(private val context: Context) {
 
     /** 顶层目录本身（有没有权限都能算出路径，建不建得成另说）。 */
     val topLevelDir: File get() = File(Environment.getExternalStorageDirectory(), TOP_LEVEL)
-
-    /** 系统"所有文件访问权限"设置页，直接停在本应用那一行。 */
-    fun topLevelPermissionIntent(): Intent {
-        val uri = Uri.parse("package:${context.packageName}")
-        val direct = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, uri)
-        val page = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
-        return (if (canStart(direct)) direct else page).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    }
-
-    private fun canStart(intent: Intent): Boolean =
-        runCatching { intent.resolveActivity(context.packageManager) != null }.getOrDefault(false)
 
     /** 返回文件在手机里的真实位置。 */
     private fun insert(item: WorkItem): String {
