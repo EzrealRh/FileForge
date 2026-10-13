@@ -55,7 +55,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from verify_odt_read import check, results  # noqa: E402
+from verify_odt_read import attempt, check, results  # noqa: E402
 
 BUILD = os.path.join("core", "build", "pdftable")
 DOCS = os.path.join("core", "build", "pdfdocs")
@@ -461,9 +461,9 @@ def main() -> int:
             found = [w for w in words if flat(title) in flat(w["text"])]
             if not found:
                 size_bad.append("%s 纸上没有「%s」" % (kind, title))
-            elif max(w["size"] for w in found) <= body + 0.5 and kind != "rtf":
+            elif max(w["size"] for w in found) <= body + 0.5:
                 size_bad.append("%s/%s 字号 %.1f 不比正文 %.1f 大" % (kind, title, max(w["size"] for w in found), body))
-    check(17, "小标题排在纸上且字号按层级抬（rtf 那份 pandoc 只把层级写在段落上，见第 17 条备注）",
+    check(17, "四个来源的小标题都排在纸上且字号按层级抬（含 pandoc 写在段落上的 \\outlinelevel）",
           not size_bad, "; ".join(size_bad[:2]))
 
     mark_bad = []
@@ -520,6 +520,26 @@ def main() -> int:
                if w["x1"] > PAGE_WIDTH - MARGIN + 2.0 or w["x0"] < MARGIN - 2.0]
     check(21, "来源里的标记符号不留在纸上；四个来源都没有空白页、字不出页边距",
           not leaked and not blank and not outside, "; ".join((leaked + blank + outside)[:2]))
+
+    # 22：RTF 的标题层级拿 pandoc 自己读自己写来对 —— 我们的读法认不认 pandoc 写在段落上的
+    # `\outlinelevelN`，与纸上是不是把它当标题排，两边一起对得上才算数
+    pandoc = attempt(22, "pandoc 读它自己写的 rtf", lambda: json.loads(subprocess.run(
+        ["pandoc", os.path.join(DOCS, "brief.rtf"), "-t", "json"], capture_output=True, check=True
+    ).stdout.decode("utf-8")))
+    if isinstance(pandoc, dict):
+        theirs = [block["c"][0] for block in pandoc["blocks"] if block.get("t") == "Header"]
+        words = [w for page in docs_pages["rtf"] for w in words_on(page)]
+        body_size = min(w["size"] for w in words)
+        ours = []
+        for title in truth["headings"]:
+            found = [w for w in words if flat(title) in flat(w["text"])]
+            ours.append(1 if found and max(w["size"] for w in found) > body_size + 0.5 else 0)
+        check(22, "RTF 的标题：pandoc 读自己写的文件认出的层级，与我们纸上抬字号的那几行是同一批",
+              len(theirs) >= 2 and all(ours), "pandoc 认到 %d 个标题，我们抬字号的是 %s（层级 %s）"
+              % (len(theirs), ours, theirs))
+    else:
+        check(22, "RTF 的标题：pandoc 读自己写的文件认出的层级，与我们纸上抬字号的那几行是同一批", False,
+              "读不动就别当过")
 
     failed = [item for item in results if not item[2]]
     print("\n共 %d 条，%d 条红" % (len(results), len(failed)))

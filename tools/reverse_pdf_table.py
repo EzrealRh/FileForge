@@ -36,6 +36,7 @@ BUILD = os.path.join(ROOT, "core", "build", "pdftable")
 PLAN = os.path.join(ROOT, "core", "src", "main", "kotlin", "com", "fileforge", "core", "pdf", "PrintPlan.kt")
 XLSX = os.path.join(ROOT, "core", "src", "main", "kotlin", "com", "fileforge", "core", "office", "XlsxSheets.kt")
 DOCX = os.path.join(ROOT, "core", "src", "main", "kotlin", "com", "fileforge", "core", "office", "DocxRead.kt")
+RTF = os.path.join(ROOT, "core", "src", "main", "kotlin", "com", "fileforge", "core", "office", "RtfRead.kt")
 ODT = os.path.join(ROOT, "core", "src", "main", "kotlin", "com", "fileforge", "core", "office", "OdtRead.kt")
 ENV = dict(os.environ, GRADLE_USER_HOME="D:/gradle-home")
 # 探针那一步换成 /d/ 写法：run.sh 拿它 find kotlin-stdlib，D:/gradle-home 里那个冒号会被
@@ -158,6 +159,12 @@ CASES = [
         "判据": 21, "名字": "页边距没算进位置（字贴到纸边）margin", "文件": PLAN,
         "原样": "                        val at = margin + indent + markerWidth",
         "改成": "                        val at = indent + markerWidth",
+    },
+    {
+        # 名字里带 ASCII 标记 rtflevel：Windows 的 Python 收命令行按 cp936 解，中文过滤词会变形
+        "判据": 22, "名字": "段落上写的层级不认了 rtflevel", "文件": RTF,
+        "原样": '            "outlinelevel" -> if (argument != null && argument in 0..7) inlineLevel = argument',
+        "改成": '            "outlinelevel" -> Unit',
     },
     {
         "判据": 15, "名字": "说明里多报一张表", "文件": XLSX,

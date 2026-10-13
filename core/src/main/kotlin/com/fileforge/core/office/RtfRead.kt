@@ -26,8 +26,9 @@ class RtfBody(val doc: Doc, val notes: List<String>)
  *    产物里就是一堆乱码）
  *  - **记号**：`\b \i \ul \strike` 与它们的 `0` 收尾；`\plain` 把这一层清回默认；`\fN` 指到
  *    字体表里标了 `\fmodern` 的那个号时算等宽
- *  - **段落**：`\par` 收一段，`\line` 段内换行，`\tab` 制表；`\sN` 要能在样式表里查到
- *    `\outlinelevelM` 才认成标题（样式号本身不是层级，凭它猜就是编的）
+ *  - **段落**：`\par` 收一段，`\line` 段内换行，`\tab` 制表；标题层级要么写在样式表里
+ *    （`\sN` 查得到 `\outlinelevelM` 才算 —— 样式号本身不是层级，凭它猜就是编的），
+ *    要么直接写在段落上（pandoc 那类写者就这么干，段落上这条盖过样式引用），两处都没写就不抬
  *  - **列表**：`{\listtext …}` 那一格写的是 `•` 就是圆点、写的是 `1.` 这样的就是编号；
  *    编号段落还会先在 `{\*\pn …}` 里写 `\pnlvlblt` / `\pndec`，两处都认、先说清的算
  *  - **链接**：`{\field{\*\fldinst{HYPERLINK "地址"}}{\fldrslt 文字}}` —— 地址在域指令里，
@@ -86,6 +87,7 @@ private class RtfScan(
     private var ansiCharset: Charset? = charsetFor(DEFAULT_CODEPAGE)
     private var fallback = 1
     private var style = -1
+    private var inlineLevel = -1
     private var indent = 0
     private var bullet: Boolean? = null
     private var styleSlot = -1
@@ -292,6 +294,7 @@ private class RtfScan(
                 style = -1
                 indent = 0
                 bullet = null
+                inlineLevel = -1
             }
             "plain" -> change(node) { target ->
                 target.bold = false
@@ -307,6 +310,9 @@ private class RtfScan(
             "strike" -> change(node) { it.strike = on }
             "f" -> change(node) { it.font = argument ?: -1 }
             "s" -> style = argument ?: -1
+            // 层级也可以不写在样式表里、直接写在段落上（pandoc 的 RTF 写者就这么干）。
+            // 段落上这条**盖过样式引用**：按 RTF 的规矩，直接格式优先于样式
+            "outlinelevel" -> if (argument != null && argument in 0..7) inlineLevel = argument
             "ilvl" -> indent = (argument ?: 0).coerceIn(0, 8)
             "pnlvlblt" -> bullet = true
             "pnlvlbody", "pnlvlcont" -> Unit
@@ -621,11 +627,12 @@ private class RtfScan(
         style = -1
         indent = 0
         bullet = null
+        inlineLevel = -1
     }
 
     private fun styleName(): String {
         if (bullet != null) return "ListParagraph"
-        val level = if (style >= 0) outlineLevels[style] else null
+        val level = if (inlineLevel >= 0) inlineLevel else if (style >= 0) outlineLevels[style] else null
         return if (level == null) "Body" else "Heading${(level + 1).coerceIn(1, 6)}"
     }
 

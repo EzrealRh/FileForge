@@ -58,6 +58,36 @@ class RtfReadTest {
     }
 
     @Test
+    fun `层级直接写在段落上也认（pandoc 的写法）`() {
+        val doc = read(
+            """\pard\ql \outlinelevel0 \b Title one\par""",
+            """\pard\ql \outlinelevel2 Third level\par""",
+            """\pard\ql Plain body\par""",
+        )
+        assertEquals(listOf("Heading1", "Heading3", "Body"), paras(doc).map { it.style })
+        assertEquals(listOf("Title one", "Third level", "Plain body"), paras(doc).map { it.text })
+    }
+
+    @Test
+    fun `段落上那条盖过样式表里的层级`() {
+        // 直接格式优先于样式引用：样式说 0 级、段落自己说 2 级，就按 2 级
+        val doc = read(
+            """{\stylesheet{\s1\outlinelevel0 Title One;}}""",
+            """\pard\plain \s1 \outlinelevel2 demoted here\par""",
+        )
+        assertEquals(listOf("Heading3"), paras(doc).map { it.style })
+    }
+
+    @Test
+    fun `段落上的层级不传染下一段`() {
+        val doc = read(
+            """\pard\outlinelevel1 Head\par""",
+            """\pard next body\par""",
+        )
+        assertEquals(listOf("Heading2", "Body"), paras(doc).map { it.style })
+    }
+
+    @Test
     fun `样式没被 pard 清掉时后面的段落不跟着变标题`() {
         // pandoc 会把样式一路带下去（第一个标题之后整篇都成标题），我们按段落收：
         // 真实写者每段都写 \pard，所以这条只影响没写 \pard 的文件 —— 宁可少给标题

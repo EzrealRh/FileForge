@@ -44,8 +44,8 @@ CASES = [
     {
         "名字": "样式号一律当标题（没写层级也抬）",
         "判据": 2,
-        "原样": "        val level = if (style >= 0) outlineLevels[style] else null",
-        "改成": "        val level: Int? = if (style >= 0) 0 else null",
+        "原样": "        val level = if (inlineLevel >= 0) inlineLevel else if (style >= 0) outlineLevels[style] else null",
+        "改成": "        val level: Int? = if (inlineLevel >= 0) inlineLevel else if (style >= 0) 0 else null",
     },
     {
         "名字": "空段落也占一块",
