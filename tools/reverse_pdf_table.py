@@ -50,7 +50,7 @@ REBUILD = ("GRADLE_USER_HOME=D:/gradle-home ./gradlew --offline :core:jar -q && 
            "GRADLE_USER_HOME=/d/gradle-home PDFPROBE_OUT=/d/fflogs/pdfprobe "
            "bash tools/pdfprobe/run.sh xlsxpdf C:/Windows/Fonts/simhei.ttf "
            "core/build/pdftable/$f.xlsx core/build/pdftable/$f-app.pdf || exit 1; done && "
-           "for f in docx odt pptx rtf; do "
+           "for f in docx odt pptx rtf md html; do "
            "GRADLE_USER_HOME=/d/gradle-home PDFPROBE_OUT=/d/fflogs/pdfprobe "
            "bash tools/pdfprobe/run.sh docpdf C:/Windows/Fonts/simhei.ttf "
            "core/build/pdfdocs/brief.$f core/build/pdfdocs/brief-$f.pdf || exit 1; done")
@@ -175,7 +175,7 @@ CASES = [
 
 PRODUCTS = ["book.pdf", "wide.pdf", "long.pdf", "book-app.pdf", "wide-app.pdf", "long-app.pdf"]
 DOCS = os.path.join(ROOT, "core", "build", "pdfdocs")
-DOC_PRODUCTS = ["brief-docx.pdf", "brief-odt.pdf", "brief-pptx.pdf", "brief-rtf.pdf"]
+DOC_PRODUCTS = ["brief-%s.pdf" % kind for kind in ("docx", "odt", "pptx", "rtf", "md", "html")]
 
 
 def sha1_of(path: str) -> str:

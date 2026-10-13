@@ -440,7 +440,7 @@ def main() -> int:
     docs_pages = {kind: pages_of("brief-%s" % kind, DOCS) for kind in truth["sources"]}
 
     grid_bad = []
-    for kind in truth["sources"]:
+    for kind in truth["structured"]:
         read = [band for _page, _i, band in all_bands("brief-%s" % kind, DOCS)]
         want = [list(row) for row in truth["table"]["rows"]]
         flat_want = [[flat(cell) for cell in row] for row in want]
@@ -450,11 +450,11 @@ def main() -> int:
             if len(band) != truth["table"]["columns"]:
                 grid_bad.append("%s 有一带读了 %d 格（表是 %d 列）：%s"
                                 % (kind, len(band), truth["table"]["columns"], band))
-    check(16, "四个来源的表格在纸上还是网格：逐带与来源里的行列一致、每带列数一致",
+    check(16, "各来源的表格在纸上还是网格：逐带与来源里的行列一致、每带列数一致",
           not grid_bad and all(docs_pages[k] for k in truth["sources"]), "; ".join(grid_bad[:2]))
 
     size_bad = []
-    for kind in truth["sources"]:
+    for kind in truth["structured"]:
         words = [w for page in docs_pages[kind] for w in words_on(page)]
         body = min(w["size"] for w in words)
         for title in truth["headings"]:
@@ -463,11 +463,11 @@ def main() -> int:
                 size_bad.append("%s 纸上没有「%s」" % (kind, title))
             elif max(w["size"] for w in found) <= body + 0.5:
                 size_bad.append("%s/%s 字号 %.1f 不比正文 %.1f 大" % (kind, title, max(w["size"] for w in found), body))
-    check(17, "四个来源的小标题都排在纸上且字号按层级抬（含 pandoc 写在段落上的 \\outlinelevel）",
+    check(17, "各来源的小标题都排在纸上且字号按层级抬（含 pandoc 写在段落上的 \\outlinelevel）",
           not size_bad, "; ".join(size_bad[:2]))
 
     mark_bad = []
-    for kind in ("docx", "odt"):
+    for kind in truth["with_markers"]:
         words = [w for page in docs_pages[kind] for w in words_on(page)]
         marks = [w["text"] for w in words if w["text"] in ("•", "·", "-")]
         if len(marks) != len(truth["bullets"]):
@@ -479,11 +479,11 @@ def main() -> int:
         for text in truth["bullets"] + truth["numbered"]:
             if not any(flat(text) in flat(w["text"]) for w in words):
                 mark_bad.append("%s 列表项「%s」没在纸上" % (kind, text))
-    check(18, "列表的记号画在纸上：圆点按字体给的那一笔，编号按层各数各的（docx / odt）",
+    check(18, "列表的记号画在纸上：圆点按字体给的那一笔，编号按层各数各的（文件里声明了列表的那几类）",
           not mark_bad, "; ".join(mark_bad[:2]))
 
     hang_bad = []
-    for kind in ("docx", "odt"):
+    for kind in truth["with_markers"]:
         words = sorted([w for page in docs_pages[kind] for w in words_on(page)], key=lambda w: (round(w["top"], 1), w["x0"]))
         for text in truth["bullets"]:
             at = next((i for i, w in enumerate(words) if flat(text) in flat(w["text"])), None)
@@ -497,7 +497,7 @@ def main() -> int:
     check(19, "记号与文字各占各的位置：文字从记号右边起，不重叠", not hang_bad, "; ".join(hang_bad[:2]))
 
     quote_bad = []
-    for kind in ("docx", "odt"):
+    for kind in truth["with_markers"]:
         words = [w for page in docs_pages[kind] for w in words_on(page)]
         body_at = min(w["x0"] for w in words)
         quoted = [w for w in words if flat(truth["quote"]) in flat(w["text"])]
@@ -518,7 +518,7 @@ def main() -> int:
     outside = ["%s 的字越出页边距：%s" % (kind, w["text"]) for kind in truth["sources"]
                for page in docs_pages[kind] for w in words_on(page)
                if w["x1"] > PAGE_WIDTH - MARGIN + 2.0 or w["x0"] < MARGIN - 2.0]
-    check(21, "来源里的标记符号不留在纸上；四个来源都没有空白页、字不出页边距",
+    check(21, "来源里的标记符号不留在纸上；各来源都没有空白页、字不出页边距",
           not leaked and not blank and not outside, "; ".join((leaked + blank + outside)[:2]))
 
     # 22：RTF 的标题层级拿 pandoc 自己读自己写来对 —— 我们的读法认不认 pandoc 写在段落上的

@@ -23,7 +23,6 @@ import com.fileforge.core.pdf.PdfTier
 import com.fileforge.core.pdf.PrintPlanner
 import com.fileforge.core.pdf.SplitPlanner
 import com.fileforge.core.pdf.StampFrame
-import com.fileforge.core.pdf.TextLayoutPlanner
 import com.fileforge.core.pdf.StampSpot
 import com.fileforge.core.pdf.TextFit
 import com.fileforge.core.pdf.WatermarkPlan
@@ -659,96 +658,13 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
         runCatching { info.metadataKeys.toList() }.getOrDefault(emptyList())
 
     /**
-     * 印成 PDF。
+     * 印成 PDF：**所有来源都走同一棵文档树**（`SourceText.of` 判一次，`PrintPlanner` 排一次）。
      *
-     * 排连续文字走 `:core` 的 TextLayoutPlanner，排文档树走 PrintPlanner —— 两边的折行是同一条规矩
-     * （`TextLayoutPlanner.wrap`）。这里只做两件事：把宽度那把尺子换成真字体量出来的数，
-     * 以及把排好的行与线画上去。
+     * 与"抽成一片文字再排版"不是一条路 —— 那种排法把表格摊平成制表符、把"这是二级标题"
+     * 与"这是一列表"抹平，纸上就只剩字号均匀的连续文字；而"网页转 PDF""Markdown 转 PDF"
+     * 是转换工具站上的头几条，要的恰恰是表格还长在表格里。
      */
-    fun textToPdf(item: WorkItem, operation: Operation.TextToPdf): EngineOutput {
-        // 文件里写着结构的来源（docx / pptx / odt / rtf / xlsx）一律走文档树（见 treeToPdf）：
-        // 标题层级、列表记号与表格的行列关系都在那棵树里 —— 抽平文字再排版，
-        // 就把它们抹成一片正文，表格摊平成制表符更是把"哪一格属于哪一列"整个印丢
-        if (item.kind in TREE_SOURCES) return treeToPdf(item, operation)
-        // 剩下的是文本类来源：按编码读进来，再按内容认网页还是 Markdown
-        require(item.file.length() <= MAX_TEXT_BYTES) {
-            "这份文本 ${item.file.length() / 1024 / 1024} MB，超过 ${MAX_TEXT_BYTES / 1024 / 1024} MB 上限"
-        }
-        val decoded = com.fileforge.core.text.TextCodecs.decodeForConversion(item.file.readBytes(), null)
-        val notes = ArrayList(listOf("按 ${decoded.encoding.label} 读" + if (decoded.hadBom) "（源带 BOM）" else ""))
-        // 带记号的文本直接印会把 # 与 ** 或整个 <div> 一起印到纸上；先吃掉，并写明吃了
-        // 先判网页：<!doctype>、<div> 这种记号普通文章里不会出现，比 Markdown 那套更具体
-        val flat = when {
-            Html.looksLikeHtml(decoded.text) -> {
-                notes += "先按网页抽掉标签再排版（源文件里有 HTML 标签）"
-                Html.toPlainText(decoded.text).text
-            }
-            Markdown.looksLikeMarkdown(decoded.text) -> {
-                notes += "先按 Markdown 去掉标记再排版（源文本里有标题/列表/代码那类记号）"
-                Markdown.toPlainText(decoded.text).text
-            }
-            else -> decoded.text
-        }
-        val body = Extracted(flat, notes)
-        val document = PDDocument()
-        var handle: FontHandle? = null
-        val missing = intArrayOf(0)
-        try {
-            val rectangle = when (operation.paper) {
-                PdfPaper.A5 -> PDRectangle.A5
-                PdfPaper.Letter -> PDRectangle.LETTER
-                else -> PDRectangle.A4                        // 文本没有"按图片尺寸"这一说，按 A4 走
-            }
-            val pageHeight = rectangle.height
-            val margin = operation.marginPt
-                .coerceIn(0, (minOf(rectangle.width, pageHeight) / 4).toInt())
-                .toFloat()
-            val size = operation.fontSize.toFloat()
-            handle = fontFor(document, body.text.take(4000))
-            val font = handle.font
-            val layout = TextLayoutPlanner.layout(
-                text = body.text,
-                pageWidth = rectangle.width,
-                pageHeight = pageHeight - if (operation.numberPages) size * 2.5f else 0f,
-                margin = margin,
-                size = size,
-                lineHeightFactor = operation.lineHeight,
-                firstLineIndent = if (operation.firstLineIndent) size * 2f else 0f,
-            ) { text, fontSize -> measure(font, text, fontSize) }
-
-            layout.pages.forEachIndexed { index, page ->
-                val pdPage = PDPage(rectangle)
-                document.addPage(pdPage)
-                val stream = PDPageContentStream(document, pdPage)
-                stream.beginText()
-                stream.setFont(font, size)
-                stream.setNonStrokingColor(0f, 0f, 0f)
-                // 每行自己定位置，不用 setLeading + newLine 的相对推进：段首缩进让各行 x 不同，
-                // 相对推进只能跟着第一行的 x 走，缩进就会一路传染到整页
-                page.lines.forEach { line ->
-                    if (line.text.isEmpty()) return@forEach                  // 空行不画，位置由下一行的矩阵带过去
-                    stream.setTextMatrix(Matrix.getTranslateInstance(line.x, pageHeight - line.y))
-                    stream.showText(onlyDrawable(font, line.text, missing))
-                }
-                stream.endText()
-                if (operation.numberPages) {
-                    drawPageNumber(stream, font, size, rectangle, margin, index + 1, layout.pages.size)
-                }
-                stream.close()
-            }
-            val output = workspace.newStagingFile("pdf")
-            document.save(output)
-            val notes = ArrayList<String>()
-            notes += body.losses
-            notes += "${layout.pageCount} 页 · ${size.toInt()}pt · ${operation.paper.label}"
-            if (missing[0] > 0) notes += "选中字体没有 ${missing[0]} 个字，这些位置会缺字"
-            layout.notes.forEach { notes += it }
-            return EngineOutput(OutputNaming.tagged(item.name, "", "pdf"), output, notes.joinToString(" · "))
-        } finally {
-            runCatching { handle?.close() }
-            runCatching { document.close() }
-        }
-    }
+    fun textToPdf(item: WorkItem, operation: Operation.TextToPdf): EngineOutput = treeToPdf(item, operation)
 
     /**
      * 文档树印成 PDF：**表格画成真的网格**（一行一格、列边界画线、表头那条线加重），
@@ -1213,9 +1129,6 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
         const val AES_KEY_LENGTH = 128
         const val MAX_IMAGE_PIXELS = 12_000_000L
         val PROCESSABLE = setOf("DeviceRGB", "DeviceGray")
-
-        /** 文件里写着结构的来源：印成 PDF 时走文档树（表格画网格、列表画记号），不抽成一片正文。 */
-        val TREE_SOURCES = setOf(FileKind.Docx, FileKind.Pptx, FileKind.Odt, FileKind.Rtf, FileKind.Xlsx)
 
         /** 页码用的深色：0.15 灰比纯黑柔和，扫成灰底也还看得清。 */
         const val DARK = 0.15f

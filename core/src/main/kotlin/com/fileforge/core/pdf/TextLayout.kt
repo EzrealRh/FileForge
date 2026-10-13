@@ -1,22 +1,16 @@
 package com.fileforge.core.pdf
 
-/** 一行排好的文字，坐标已经按页面算好（y 从页面顶部往下数，交给引擎时再翻成 PDF 的从下往上）。 */
+/** 纸上的一条文字：坐标已经按页面算好（y 从页面顶部往下数，交给引擎时再翻成 PDF 的从下往上）。 */
 class TextLine(val text: String, val x: Float, val y: Float, val size: Float)
 
-/** 排完的一页。 */
-class TextPage(val lines: List<TextLine>)
-
-/** 排版结果：页、以及"排的时候做了什么妥协"。 */
-class TextLayout(val pages: List<TextPage>, val notes: List<String>) {
-    val pageCount: Int get() = pages.size
-}
-
 /**
- * 把一段纯文本排成页。
+ * 把一段文字切成行 —— 断行这一件事只有一份，正文和表格的格子都调它。
  *
  * 这里**不含任何 PDF 与字体 API**：宽度由调用方给的 [widthOf] 算（安卓那边就是
- * `font.getStringWidth(text) / 1000 * size`）。这样断行与分页这套规则能脱离设备单测，
+ * `font.getStringWidth(text) / 1000 * size`）。这样断行规则能脱离设备单测，
  * 而"宽度模型到底准不准"另由 `tools/pdfprobe` 在桌面 PDFBox 上量。
+ *
+ * 分页、坐标和表格网格都在 [PrintPlanner] 那一层：这一层只管"这段文字在该断的地方断"。
  *
  * 中文排版有三处必须照中文的规矩来，照英文那套会明显难看甚至错：
  *  1. **CJK 字符之间都能断**，不等空格。英文只在词边界断，硬套到中文上就是一整行放不下才被迫整段溢出。
@@ -32,65 +26,6 @@ object TextLayoutPlanner {
 
     /** 不许出现在行尾的字符：开括号与开引号。 */
     private const val NO_LINE_END = "（［｛〈《“‘([{"
-
-    /**
-     * @param widthOf 这段文字以 size 字号占多宽
-     * @param lineHeightFactor 行距倍数（1.4 是常见默认）
-     * @param firstLineIndent 段首行往右挪多少，同时这一行少排这么宽
-     */
-    fun layout(
-        text: String,
-        pageWidth: Float,
-        pageHeight: Float,
-        margin: Float,
-        size: Float,
-        lineHeightFactor: Float = 1.4f,
-        firstLineIndent: Float = 0f,
-        widthOf: (String, Float) -> Float,
-    ): TextLayout {
-        val contentWidth = pageWidth - margin * 2
-        val lineHeight = size * lineHeightFactor
-        val usableHeight = pageHeight - margin * 2
-        require(contentWidth > 0 && usableHeight > 0) { "页边距比页面还大，排不下任何东西" }
-
-        val notes = ArrayList<String>()
-        val lines = ArrayList<Pair<String, Boolean>>()            // 文本 + 是不是段首行
-        var widestNeeded = 0f
-        text.replace("\r\n", "\n").replace('\r', '\n').split('\n').forEach { raw ->
-            val paragraph = raw.trimEnd()
-            if (paragraph.isEmpty()) {
-                lines += "" to false                              // 空行要留住：那是段落间隔
-                return@forEach
-            }
-            val wrapped = wrap(paragraph, contentWidth, size, firstLineIndent, widthOf) { overflow ->
-                widestNeeded = maxOf(widestNeeded, overflow)
-            }
-            wrapped.forEachIndexed { row, line -> lines += (line to (row == 0)) }
-        }
-        if (widestNeeded > contentWidth) {
-            notes += "有单个字符就比正文宽度还宽（${"%.0f".format(widestNeeded)}pt > ${"%.0f".format(contentWidth)}pt），那行只能溢出"
-        }
-
-        val perPage = maxOf(1, (usableHeight / lineHeight).toInt())
-        val pages = ArrayList<TextPage>()
-        var index = 0
-        while (index < lines.size) {
-            val chunk = lines.subList(index, minOf(index + perPage, lines.size))
-            pages += TextPage(chunk.mapIndexed { row, (line, headOfParagraph) ->
-                TextLine(
-                    text = line,
-                    // 缩进得画在纸上：只把第一行排窄而位置不动，用户看起来就是"右边平、左边缺一块"，
-                    // 中文的段首空两格要的是整行往右移
-                    x = margin + if (headOfParagraph && line.isNotEmpty()) firstLineIndent else 0f,
-                    y = margin + (row + 1) * lineHeight,                     // 基线：留出一个行高，别贴着顶边距
-                    size = size,
-                )
-            })
-            index += perPage
-        }
-        if (pages.isEmpty()) pages += TextPage(emptyList())
-        return TextLayout(pages, notes)
-    }
 
     /**
      * 一段切成若干行。

@@ -6,6 +6,7 @@ import com.fileforge.core.audio.WavHeader
 import com.fileforge.core.doc.Doc
 import com.fileforge.core.doc.DocParagraph
 import com.fileforge.core.doc.DocTable
+import com.fileforge.core.doc.PlainDoc
 import com.fileforge.core.gif.GifCanvasPlan
 import com.fileforge.core.gif.GifDecoder
 import com.fileforge.core.gif.GifException
@@ -13,6 +14,7 @@ import com.fileforge.core.gif.Lzw
 import com.fileforge.core.office.RtfRead
 import com.fileforge.core.office.RtfWrite
 import com.fileforge.core.ops.VideoFormat
+import com.fileforge.core.pdf.PrintPlanner
 import com.fileforge.core.pdf.TextFit
 import com.fileforge.core.pdf.TextLayoutPlanner
 import com.fileforge.core.video.MuxSupport
@@ -268,15 +270,15 @@ class FixesArchiveMediaTest {
         return units * 6f * size / 12f
     }
 
-    private fun layout(text: String, pageWidth: Float) =
-        TextLayoutPlanner.layout(text, pageWidth, 842f, 56f, 12f, 1.4f, 0f, ::widthOf)
+    private fun wrapped(text: String, pageWidth: Float) = PrintPlanner.plan(
+        PlainDoc.toDoc(text).parts, pageWidth, 842f, 56f, 12f, 1.4f, 0f, ::widthOf,
+    ).pages.flatMap { page -> page.texts.map { it.text } }
 
     @Test
     fun `断行把开括号推下去时按 raw 算退回量，括号不丢行不错位`() {
         // 内容宽 24pt、每字 6pt："ab (" 恰好装满，开括号得推到下一行。
         // 退回的字符数曾按去空白后的 line 算，括号和空白一起被跳过 —— 那个字符哪一行都不在
-        val lines = layout("ab ( c", pageWidth = 24f + 56f * 2)
-            .pages.flatMap { page -> page.lines.map { it.text } }
+        val lines = wrapped("ab ( c", pageWidth = 24f + 56f * 2)
         assertEquals("ab ( c", lines.joinToString(""), "断完拼回去必须一字不差：$lines")
         assertTrue(lines.none { it.endsWith("(") }, "开括号不许留在行尾：$lines")
         assertEquals(1, lines.joinToString("").count { it == '(' }, "括号一个不多一个不少：$lines")

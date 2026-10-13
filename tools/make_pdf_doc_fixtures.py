@@ -11,11 +11,16 @@
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import subprocess
 
 OUT = os.path.join("core", "build", "pdfdocs")
+
+# 判据按来源分组：表格与字号六类都判；列表记号只判"文件里声明了列表"的那几类
+STRUCTURED = ["docx", "odt", "pptx", "rtf", "md", "html"]
+LINED = ["docx", "odt", "md", "html"]
 
 # 来源：标题两级、正文、圆点列表、编号列表（带一层子项）、引用、一张带表头的表、一段代码
 BRIEF = """# 一级标题
@@ -65,8 +70,15 @@ TRUTH = {
     },
     # 纸上没有的东西：来源里的记号（#、-、>、|、```）不许漏到纸上
     "forbidden": ["#", "|", "```", ">"],
-    "sources": ["docx", "odt", "pptx", "rtf"],
+    "sources": ["docx", "odt", "pptx", "rtf", "md", "html"],
+    "with_markers": LINED,
+    "structured": STRUCTURED,
 }
+
+
+def io_write(target, text):
+    with io.open(target, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(text)
 
 
 def main() -> None:
@@ -76,6 +88,9 @@ def main() -> None:
         handle.write(BRIEF)
     for kind in TRUTH["sources"]:
         target = os.path.join(OUT, "brief.%s" % kind)
+        if kind == "md":
+            io_write(target, BRIEF)
+            continue
         run = subprocess.run(["pandoc", md, "-o", target], capture_output=True, text=True)
         if run.returncode != 0 or not os.path.isfile(target):
             raise SystemExit("pandoc 写 %s 失败：%s" % (kind, (run.stderr or "").strip()[:200]))

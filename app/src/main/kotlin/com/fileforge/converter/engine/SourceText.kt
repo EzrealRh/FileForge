@@ -71,23 +71,34 @@ internal object SourceText {
                 listOf("按文件里写的结构排") + read.notes,
             )
         }
-        val source = when (item.kind) {
-            FileKind.Docx -> {
-                val extracted = OfficeSource.text(item.file, item.kind)
-                notes += extracted.losses
-                extracted.text
-            }
-            else -> {
-                require(item.file.length() <= MAX_TEXT_BYTES) {
-                    "这份文本 ${item.file.length() / 1024 / 1024} MB，超过 ${MAX_TEXT_BYTES / 1024 / 1024} MB 上限"
+        if (item.kind == FileKind.Docx) {
+            // docx 也用读回来的树：这一份稿子里写着这是二级标题、这是列表第几层、这张表有表头，
+            // 抽平再按内容猜会把它们抹成一片正文 —— 与 odt / pptx / rtf 三条是同一条读法
+            val read = OoxmlFile(item.file).use { pack ->
+                val body = pack.docxStructure()
+                val extra = if (pack.names.any { it.startsWith("word/embeddings/") }) {
+                    listOf("文件里嵌着的别的文档只是附件，没当成文字搬")
+                } else {
+                    emptyList()
                 }
-                val decoded = TextCodecs.decodeForConversion(item.file.readBytes(), null)
-                notes += "按 ${decoded.encoding.label} 读" + if (decoded.hadBom) "（源带 BOM）" else ""
-                decoded.text
+                body to extra
             }
+            require(read.first.doc.parts.isNotEmpty()) {
+                (read.first.notes + read.second + "这份 docx 里没有可读的正文").joinToString(" · ")
+            }
+            return Reading(
+                read.first.doc,
+                com.fileforge.core.doc.HtmlWrite.text(read.first.doc.parts),
+                listOf("按文件里写的结构排") + read.first.notes + read.second,
+            )
         }
-        val reading = TextDoc.read(source)
-        return Reading(reading.doc, source, listOf(reading.route.note) + notes)
+        require(item.file.length() <= MAX_TEXT_BYTES) {
+            "这份文本 ${item.file.length() / 1024 / 1024} MB，超过 ${MAX_TEXT_BYTES / 1024 / 1024} MB 上限"
+        }
+        val decoded = TextCodecs.decodeForConversion(item.file.readBytes(), null)
+        notes += "按 ${decoded.encoding.label} 读" + if (decoded.hadBom) "（源带 BOM）" else ""
+        val reading = TextDoc.read(decoded.text)
+        return Reading(reading.doc, decoded.text, listOf(reading.route.note) + notes)
     }
 }
 

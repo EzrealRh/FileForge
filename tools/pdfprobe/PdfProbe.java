@@ -39,6 +39,7 @@ import org.apache.pdfbox.pdmodel.encryption.AccessPermission;
 import org.apache.pdfbox.pdmodel.encryption.InvalidPasswordException;
 import org.apache.pdfbox.pdmodel.encryption.StandardProtectionPolicy;
 import com.fileforge.core.doc.Doc;
+import com.fileforge.core.doc.TextDoc;
 import com.fileforge.core.doc.DocPara;
 import com.fileforge.core.doc.DocPart;
 import com.fileforge.core.doc.DocParagraph;
@@ -62,10 +63,7 @@ import com.fileforge.core.pdf.PrintPage;
 import com.fileforge.core.pdf.PrintPlan;
 import com.fileforge.core.pdf.PrintPlanner;
 import com.fileforge.core.pdf.PrintRule;
-import com.fileforge.core.pdf.TextLayout;
-import com.fileforge.core.pdf.TextLayoutPlanner;
 import com.fileforge.core.pdf.TextLine;
-import com.fileforge.core.pdf.TextPage;
 import kotlin.jvm.functions.Function2;
 
 /**
@@ -424,19 +422,22 @@ public final class PdfProbe {
                     throw new IllegalStateException("这个字体量不出「" + chunk + "」", e);
                 }
             };
-            TextLayout plan = TextLayoutPlanner.INSTANCE.layout(
-                body, pageW, pageH, margin, size, 1.4f, indent, widthOf);
+            // 走应用那条路：文字先摊成一棵树，再由那份排版器排页 —— 判的是产品真用的那条，
+            // 不是第二条实现（app 里所有来源现在都走这条）
+            PrintPlan plan = PrintPlanner.INSTANCE.plan(
+                TextDoc.INSTANCE.read(body).getDoc().getParts(),
+                pageW, pageH, margin, size, 1.4f, indent, widthOf, pickBullet(font));
 
             int drawn = 0;
             float modelRightMost = 0f;
-            for (TextPage page : plan.getPages()) {
+            for (PrintPage page : plan.getPages()) {
                 PDPage pdPage = new PDPage(new PDRectangle(pageW, pageH));
                 doc.addPage(pdPage);
                 PDPageContentStream stream = new PDPageContentStream(doc, pdPage);
                 stream.beginText();
                 stream.setFont(font, size);
                 stream.setNonStrokingColor(0f, 0f, 0f);
-                for (TextLine line : page.getLines()) {
+                for (TextLine line : page.getTexts()) {
                     if (line.getText().isEmpty()) continue;
                     stream.setTextMatrix(Matrix.getTranslateInstance(line.getX(), pageH - line.getY()));
                     stream.showText(line.getText());
@@ -527,6 +528,15 @@ public final class PdfProbe {
             RtfBody rtf = RtfRead.INSTANCE.read(java.nio.file.Files.readAllBytes(source.toPath()));
             parts = rtf.getDoc().getParts();
             say.addAll(rtf.getNotes());
+        } else if (lower.endsWith(".md") || lower.endsWith(".html") || lower.endsWith(".htm")
+                || lower.endsWith(".txt")) {
+            // 文字类来源与 app 里 SourceText 那条一样：先摊成一棵树，再交给同一份排版器
+            String text = new String(java.nio.file.Files.readAllBytes(source.toPath()),
+                    java.nio.charset.StandardCharsets.UTF_8);
+            TextDoc.Reading reading = TextDoc.INSTANCE.read(text);
+            parts = reading.getDoc().getParts();
+            say.add(reading.getRoute().getNote());
+            say.addAll(reading.getDoc().getNotes());
         } else {
             try (java.util.zip.ZipFile zip = new java.util.zip.ZipFile(source)) {
                 kotlin.jvm.functions.Function1<String, byte[]> load = name -> {

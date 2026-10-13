@@ -45,7 +45,7 @@ enum class OperationKind(val label: String, val hint: String) {
     FormatJson("JSON 格式化", "缩进或压平、键排序；数字原文不被改写"),
     JsonToCsv("JSON 转 CSV", "对象数组拆成表，会丢什么都先说明"),
     CsvToJson("CSV 转 JSON", "首行当列名；默认不猜类型，007 不会变成 7"),
-    TextToPdf("印成 PDF", "自动断行分页，中文可在字之间断；表格画成横平竖直的网格"),
+    TextToPdf("印成 PDF", "按文件里的结构排：标题抬字号、列表画记号、表格画成横平竖直的网格，自动断行分页"),
     OfficeToText("Word 演示提取文字", "docx / pptx 抽正文，丢了什么逐条写明"),
     XlsxToCsv("表格转 CSV", "每张表一份 CSV，日期不再是序列号"),
     XlsxToHtml("Excel 转网页", "每张表一块表格，浏览器直接打开；行列按文件里的位置对齐"),
@@ -127,8 +127,6 @@ enum class OperationKind(val label: String, val hint: String) {
             // 两种都只认"这是个文本文件"，具体是哪种字幕交给解析器判
             ConvertTextEncoding, ConvertSubtitle -> fileKind.isTextual
             AudioTrim -> fileKind.isAudio || fileKind.isVideo
-            // 印成 PDF、写成 Word 与写成电子书走同一条来源判定：docx / pptx / odt 先把正文抽出来，
-            // 网页与 Markdown 按内容认，抽出来 / 认出来的是什么就是什么
             // 印成 PDF、写成 Word 与写成电子书走同一条来源判定：docx / pptx / odt / rtf 先把正文抽出来，
             // 网页与 Markdown 按内容认，抽出来 / 认出来的是什么就是什么
             // xlsx 走文档树：PDF 那边现在画得出网格了（PrintPlanner），一张表在纸上还是横平竖直的
