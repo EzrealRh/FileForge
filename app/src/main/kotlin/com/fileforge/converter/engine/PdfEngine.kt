@@ -9,7 +9,6 @@ import android.os.ParcelFileDescriptor
 import com.fileforge.core.naming.OutputNaming
 import com.fileforge.core.ops.Operation
 import com.fileforge.core.ops.PdfPaper
-import com.fileforge.core.office.XlsxSheets
 import com.fileforge.core.pdf.Horizontal
 import com.fileforge.core.pdf.PageGroups
 import com.fileforge.core.pdf.PageNumberPlan
@@ -592,42 +591,35 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
     /**
      * 印成 PDF。
      *
-     * 断行与分页的规矩全在 `:core` 的 TextLayoutPlanner（那边可单测）；这里只做两件事：
-     * 把宽度那把尺子换成真字体量出来的数，以及把排好的行画上去。xlsx 不在这条路上（见 tableToPdf）。
+     * 排连续文字走 `:core` 的 TextLayoutPlanner，排文档树走 PrintPlanner —— 两边的折行是同一条规矩
+     * （`TextLayoutPlanner.wrap`）。这里只做两件事：把宽度那把尺子换成真字体量出来的数，
+     * 以及把排好的行与线画上去。
      */
     fun textToPdf(item: WorkItem, operation: Operation.TextToPdf): EngineOutput {
-        // xlsx 走文档树那一条：表格画成真网格（见 tableToPdf），摊平成制表符会把列的位置关系印丢
-        if (item.kind == FileKind.Xlsx) return tableToPdf(item, operation)
-        // docx / pptx / odt 先抽正文再排版：排的是抽出来的那份文字，所以"丢了什么"由抽取那一层说
-        val body = when (item.kind) {
-            FileKind.Docx, FileKind.Pptx, FileKind.Odt -> OfficeSource.text(item.file, item.kind)
-            // RTF 抽正文走结构读法：连控制字一起印到纸上是最难看的产物，段落边界也按文件里写的分
-            FileKind.Rtf -> {
-                val read = com.fileforge.core.office.RtfRead.read(item.file.readBytes())
-                Extracted(com.fileforge.core.doc.HtmlWrite.text(read.doc.parts), read.notes)
-            }
-            else -> {
-                require(item.file.length() <= MAX_TEXT_BYTES) {
-                    "这份文本 ${item.file.length() / 1024 / 1024} MB，超过 ${MAX_TEXT_BYTES / 1024 / 1024} MB 上限"
-                }
-                val decoded = com.fileforge.core.text.TextCodecs.decodeForConversion(item.file.readBytes(), null)
-                val notes = ArrayList(listOf("按 ${decoded.encoding.label} 读" + if (decoded.hadBom) "（源带 BOM）" else ""))
-                // 带记号的文本直接印会把 # 与 ** 或整个 <div> 一起印到纸上；先吃掉，并写明吃了
-                // 先判网页：<!doctype>、<div> 这种记号普通文章里不会出现，比 Markdown 那套更具体
-                val body = when {
-                    Html.looksLikeHtml(decoded.text) -> {
-                        notes += "先按网页抽掉标签再排版（源文件里有 HTML 标签）"
-                        Html.toPlainText(decoded.text).text
-                    }
-                    Markdown.looksLikeMarkdown(decoded.text) -> {
-                        notes += "先按 Markdown 去掉标记再排版（源文本里有标题/列表/代码那类记号）"
-                        Markdown.toPlainText(decoded.text).text
-                    }
-                    else -> decoded.text
-                }
-                Extracted(body, notes)
-            }
+        // 文件里写着结构的来源（docx / pptx / odt / rtf / xlsx）一律走文档树（见 treeToPdf）：
+        // 标题层级、列表记号与表格的行列关系都在那棵树里 —— 抽平文字再排版，
+        // 就把它们抹成一片正文，表格摊平成制表符更是把"哪一格属于哪一列"整个印丢
+        if (item.kind in TREE_SOURCES) return treeToPdf(item, operation)
+        // 剩下的是文本类来源：按编码读进来，再按内容认网页还是 Markdown
+        require(item.file.length() <= MAX_TEXT_BYTES) {
+            "这份文本 ${item.file.length() / 1024 / 1024} MB，超过 ${MAX_TEXT_BYTES / 1024 / 1024} MB 上限"
         }
+        val decoded = com.fileforge.core.text.TextCodecs.decodeForConversion(item.file.readBytes(), null)
+        val notes = ArrayList(listOf("按 ${decoded.encoding.label} 读" + if (decoded.hadBom) "（源带 BOM）" else ""))
+        // 带记号的文本直接印会把 # 与 ** 或整个 <div> 一起印到纸上；先吃掉，并写明吃了
+        // 先判网页：<!doctype>、<div> 这种记号普通文章里不会出现，比 Markdown 那套更具体
+        val flat = when {
+            Html.looksLikeHtml(decoded.text) -> {
+                notes += "先按网页抽掉标签再排版（源文件里有 HTML 标签）"
+                Html.toPlainText(decoded.text).text
+            }
+            Markdown.looksLikeMarkdown(decoded.text) -> {
+                notes += "先按 Markdown 去掉标记再排版（源文本里有标题/列表/代码那类记号）"
+                Markdown.toPlainText(decoded.text).text
+            }
+            else -> decoded.text
+        }
+        val body = Extracted(flat, notes)
         val document = PDDocument()
         var handle: FontHandle? = null
         val missing = intArrayOf(0)
@@ -689,19 +681,17 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
     }
 
     /**
-     * xlsx 印成 PDF：走文档树，**表格画成真的网格**（一行一格、列边界画线、表头那条线加重）。
+     * 文档树印成 PDF：**表格画成真的网格**（一行一格、列边界画线、表头那条线加重），
+     * 标题按层级抬字号，列表把圆点与编号画在纸上，引用往里缩一块。
      *
-     * 与"抽文字再排版"不是一条路：那种排法把格子摊平成制表符，两列的表在纸上就是一行字，
-     * 列与列的位置关系全丢 —— 而"表格转 PDF"要保住的恰恰是这个。
+     * 树由 [SourceText] 给 —— 写成 Word、写成电子书与这一条拿的是同一棵树，同一份文件在三种产物里
+     * 才是同一个结构。与"抽文字再排版"不是一条路：那种排法把格子摊平成制表符，
+     * 两列的表在纸上就是一行字，列与列的位置关系全丢 —— 而"表格转 PDF"要保住的恰恰是这个。
      */
-    private fun tableToPdf(item: WorkItem, operation: Operation.TextToPdf): EngineOutput {
-        val read = OoxmlFile(item.file).use { pack ->
-            require(pack.kind == FileKind.Xlsx) { "这份包里没找到 xl/workbook.xml，它不是 xlsx" }
-            val book = XlsxSheets.book { name -> pack.bytesOf(name) }
-            book.sheets to book.reasons
-        }
-        val parts = XlsxSheets.parts(read.first)
-        require(parts.isNotEmpty()) { read.second.ifEmpty { listOf("每张表都是空的") }.joinToString(" · ") }
+    private fun treeToPdf(item: WorkItem, operation: Operation.TextToPdf): EngineOutput {
+        val reading = SourceText.of(item)
+        val parts = reading.doc.parts
+        require(parts.isNotEmpty()) { (reading.notes + "这份文件里没有可排的内容").joinToString(" · ") }
         val document = PDDocument()
         var handle: FontHandle? = null
         val missing = intArrayOf(0)
@@ -718,6 +708,7 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
             val size = operation.fontSize.toFloat()
             handle = fontFor(document, com.fileforge.core.doc.HtmlWrite.text(parts).take(4000))
             val font = handle.font
+            val bullet = bulletFor(font)
             val plan = PrintPlanner.plan(
                 parts = parts,
                 pageWidth = rectangle.width,
@@ -725,7 +716,9 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
                 margin = margin,
                 size = size,
                 lineHeightFactor = operation.lineHeight,
+                firstLineIndent = if (operation.firstLineIndent) size * 2f else 0f,
                 widthOf = { text, pt -> measure(font, text, pt) },
+                bullet = bullet,
             )
             plan.pages.forEachIndexed { index, page ->
                 val pdPage = PDPage(rectangle)
@@ -754,12 +747,10 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
             }
             val output = workspace.newStagingFile("pdf")
             document.save(output)
-            val notes = ArrayList<String>()
-            notes += XlsxSheets.summary(read.first)
-            notes += XlsxSheets.notes(read.first).filter { it !in notes }
-            if (read.second.isNotEmpty()) {
-                notes += "另有 ${read.second.size} 张表没转出来：${read.second.joinToString("、")}"
-            }
+            // 说明由 SourceText 那一份给（按哪条路读的、几张表、丢了什么），这里不重数一遍；
+            // 两条来源可能写同一句话，去重后再接排版那层的交代
+            val notes = ArrayList(LinkedHashSet(reading.notes + reading.doc.notes))
+            if (bullet != "•") notes += "这份字体没有圆点（U+2022），列表的记号用「$bullet」"
             notes += "${plan.pageCount} 页 · ${size.toInt()}pt · ${operation.paper.label} · 表格画成网格"
             if (missing[0] > 0) notes += "选中字体没有 ${missing[0]} 个字，这些位置会缺字"
             plan.notes.forEach { notes += it }
@@ -769,6 +760,13 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
             runCatching { document.close() }
         }
     }
+
+    /**
+     * 圆点这一笔要看字体有没有：安卓上挑到的那款不一定带 U+2022，硬画就得到一个方框，
+     * 或者被 [onlyDrawable] 吃掉 —— 列表看起来就跟正文没区别了。挑不到就用中圆点，再退到连字符。
+     */
+    private fun bulletFor(font: com.tom_roush.pdfbox.pdmodel.font.PDFont): String =
+        listOf("•", "·", "-").firstOrNull { mark -> runCatching { font.getStringWidth(mark) }.isSuccess } ?: ""
 
     /**
      * 一行有多长。字体里没有那个字时按一个字宽占位 —— 缺几个由 [onlyDrawable] 数，
@@ -1145,6 +1143,9 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
         const val AES_KEY_LENGTH = 128
         const val MAX_IMAGE_PIXELS = 12_000_000L
         val PROCESSABLE = setOf("DeviceRGB", "DeviceGray")
+
+        /** 文件里写着结构的来源：印成 PDF 时走文档树（表格画网格、列表画记号），不抽成一片正文。 */
+        val TREE_SOURCES = setOf(FileKind.Docx, FileKind.Pptx, FileKind.Odt, FileKind.Rtf, FileKind.Xlsx)
 
         /** 页码用的深色：0.15 灰比纯黑柔和，扫成灰底也还看得清。 */
         const val DARK = 0.15f

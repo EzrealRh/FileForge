@@ -44,6 +44,14 @@ import com.fileforge.core.doc.DocParagraph;
 import com.fileforge.core.doc.DocRun;
 import com.fileforge.core.doc.DocTable;
 import com.fileforge.core.office.DocxWrite;
+import com.fileforge.core.office.DocxBody;
+import com.fileforge.core.office.DocxRead;
+import com.fileforge.core.office.OdtBody;
+import com.fileforge.core.office.OdtRead;
+import com.fileforge.core.office.PptxSlideBody;
+import com.fileforge.core.office.PptxRead;
+import com.fileforge.core.office.RtfBody;
+import com.fileforge.core.office.RtfRead;
 import com.fileforge.core.office.Sheet;
 import com.fileforge.core.office.XlsxSheets;
 import com.fileforge.core.pdf.PdfDoc;
@@ -81,7 +89,7 @@ public final class PdfProbe {
             case "security" -> verifySecurity(new File(args[1]));
             case "textlayout" -> verifyTextLayout(new File(args[1]), new File(args[2]));
             case "pdftable" -> writePdfTable(new File(args[1]), new File(args[2]), new File(args[3]));
-            case "xlsxpdf" -> writeXlsxPdf(new File(args[1]), new File(args[2]), new File(args[3]));   // 与 pdftable 同参数序：字体 输入 输出
+            case "xlsxpdf", "docpdf" -> writeDocPdf(new File(args[1]), new File(args[2]), new File(args[3]));   // 字体 输入 输出
             case "pdfdoc" -> pdfStructure(new File(args[1]), new File(args[2]));
             default -> throw new IllegalArgumentException("unknown cmd " + args[0]);
         }
@@ -502,32 +510,88 @@ public final class PdfProbe {
     }
 
     /**
-     * 「xlsx 印成 PDF」那条链子在桌面上走一遍：JDK 的 ZipFile 按部件名给字节，往后的
-     * XlsxSheets.book → parts → PrintPlanner 全是 :core 里应用真正调的那份代码。
-     * 应用与桌面只差最后那层字体与页面尺寸，判据因此能核到产品那条路而不是仪器。
+     * 「印成 PDF」走文档树那条路的桌面替身：按扩展名挑 :core 里对应那份结构读法
+     * （docx / odt / pptx / xlsx 用 ZipFile 按部件给字节，rtf 直接读字节），
+     * 再交给 PrintPlanner 排页 —— 应用侧 SourceText.of 串的就是这几份。
+     * 桌面与应用只差最后那层字体与页面尺寸，判据因此核的是产品那条路而不是仪器。
      */
-    private static void writeXlsxPdf(File fontFile, File source, File out) throws Exception {
-        final java.util.zip.ZipFile zip = new java.util.zip.ZipFile(source);
-        try {
-            kotlin.jvm.functions.Function1<String, byte[]> load = name -> {
-                java.util.zip.ZipEntry entry = zip.getEntry(name);
-                if (entry == null) return null;
-                try (java.io.InputStream in = zip.getInputStream(entry)) {
-                    return in.readAllBytes();
-                } catch (IOException e) {
-                    throw new IllegalStateException("部件读不出来：" + name, e);
+    private static void writeDocPdf(File fontFile, File source, File out) throws Exception {
+        String lower = source.getName().toLowerCase();
+        List<DocPart> parts;
+        List<String> say = new ArrayList<>();
+        if (lower.endsWith(".rtf")) {
+            RtfBody rtf = RtfRead.INSTANCE.read(java.nio.file.Files.readAllBytes(source.toPath()));
+            parts = rtf.getDoc().getParts();
+            say.addAll(rtf.getNotes());
+        } else {
+            try (java.util.zip.ZipFile zip = new java.util.zip.ZipFile(source)) {
+                kotlin.jvm.functions.Function1<String, byte[]> load = name -> {
+                    java.util.zip.ZipEntry entry = zip.getEntry(name);
+                    if (entry == null) return null;
+                    try (java.io.InputStream in = zip.getInputStream(entry)) {
+                        return in.readAllBytes();
+                    } catch (IOException e) {
+                        throw new IllegalStateException("部件读不出来：" + name, e);
+                    }
+                };
+                if (lower.endsWith(".docx")) {
+                    DocxBody body = DocxRead.INSTANCE.read(load);
+                    parts = body.getDoc().getParts();
+                    say.addAll(body.getNotes());
+                } else if (lower.endsWith(".odt")) {
+                    OdtBody body = OdtRead.INSTANCE.read(load);
+                    parts = body.getDoc().getParts();
+                    say.addAll(body.getNotes());
+                } else if (lower.endsWith(".pptx")) {
+                    List<String> names = new ArrayList<>();
+                    zip.entries().asIterator().forEachRemaining(entry -> names.add(entry.getName()));
+                    PptxSlideBody body = PptxRead.INSTANCE.read(load, names);
+                    parts = body.getDoc().getParts();
+                    say.addAll(body.getNotes());
+                } else if (lower.endsWith(".xlsx")) {
+                    XlsxSheets.Book book = XlsxSheets.INSTANCE.book(load);
+                    parts = XlsxSheets.INSTANCE.parts(book.getSheets());
+                    say.addAll(XlsxSheets.INSTANCE.summary(book.getSheets()));
+                    say.addAll(XlsxSheets.INSTANCE.notes(book.getSheets()));
+                    say.addAll(book.getReasons());
+                } else {
+                    throw new IllegalArgumentException("认不出的来源：" + source.getName());
                 }
-            };
-            XlsxSheets.Book book = XlsxSheets.INSTANCE.book(load);
-            List<DocPart> parts = XlsxSheets.INSTANCE.parts(book.getSheets());
-            List<String> say = new ArrayList<>();
-            say.addAll(XlsxSheets.INSTANCE.summary(book.getSheets()));
-            say.addAll(XlsxSheets.INSTANCE.notes(book.getSheets()));
-            say.addAll(book.getReasons());
-            renderTable(parts, fontFile, out, say);
-        } finally {
-            zip.close();
+            }
         }
+        renderTable(parts, fontFile, out, say);
+    }
+
+    /**
+     * 圆点这一笔要看字体有没有：SimHei 就没有 U+2022，硬画得到一个方框，或者被 drawing 那层跳过。
+     * 问的是**量宽那一条路**（与 app 里 bulletFor 同一句）而不是 hasGlyph —— hasGlyph 照 cmap
+     * 回答"有"，子集编码那一路照样抛。
+     */
+    private static String pickBullet(PDType0Font font) {
+        for (String candidate : new String[] {"•", "·", "-"}) {
+            try {
+                font.getStringWidth(candidate);
+                return candidate;
+            } catch (Exception absent) {
+                // 这一个画不出来，试下一个
+            }
+        }
+        return "";
+    }
+
+    /** 只画字体画得出来的那些字，跳过画不出来的并数一笔（与 app 里 onlyDrawable 同一招）。 */
+    private static String drawable(PDType0Font font, String text) {
+        StringBuilder kept = new StringBuilder();
+        for (int i = 0; i < text.length(); i++) {
+            String one = text.substring(i, i + 1);
+            try {
+                font.getStringWidth(one);
+                kept.append(one);
+            } catch (Exception absent) {
+                // 这一个画不出来：跳过它，总数由调用那头数
+            }
+        }
+        return kept.toString();
     }
 
     /** 把一棵文档树排成页并画出去：排版调的是 :core 那份 PrintPlanner，不是在 Java 里重写一套规矩。 */
@@ -536,16 +600,18 @@ public final class PdfProbe {
         try (PDDocument doc = new PDDocument()) {
             PDType0Font font = PDType0Font.load(
                     doc, java.nio.file.Files.newInputStream(fontFile.toPath()), true);
+            // 尺子与 app 里那份 measure 一样宽容：量不动就按一个字宽占位，缺几个由画那一层数
             Function2<String, Float, Float> widthOf = (chunk, pt) -> {
                 try {
                     return font.getStringWidth(chunk) / 1000f * pt;
-                } catch (IOException e) {
-                    throw new IllegalStateException("这个字体量不出「" + chunk + "」", e);
+                } catch (Exception e) {
+                    return chunk.length() * pt;
                 }
             };
-            PrintPlan laid = PrintPlanner.INSTANCE.plan(parts, pageW, pageH, margin, size, 1.4f, widthOf);
+            PrintPlan laid = PrintPlanner.INSTANCE.plan(parts, pageW, pageH, margin, size, 1.4f, 0f, widthOf, pickBullet(font));
             int drawn = 0;
             int stroked = 0;
+            int dropped = 0;
             for (PrintPage page : laid.getPages()) {
                 PDPage pdPage = new PDPage(new PDRectangle(pageW, pageH));
                 doc.addPage(pdPage);
@@ -564,7 +630,9 @@ public final class PdfProbe {
                     if (line.getText().isEmpty()) continue;
                     stream.setFont(font, line.getSize());
                     stream.setTextMatrix(Matrix.getTranslateInstance(line.getX(), pageH - line.getY()));
-                    stream.showText(line.getText());
+                    String kept = drawable(font, line.getText());
+                    dropped += line.getText().length() - kept.length();
+                    if (!kept.isEmpty()) stream.showText(kept);
                     drawn++;
                 }
                 stream.endText();
@@ -572,6 +640,7 @@ public final class PdfProbe {
             }
             out.getParentFile().mkdirs();
             doc.save(out);
+            if (dropped > 0) laid.getNotes().add("选中字体画不出 " + dropped + " 个字，这些位置被跳过（与 app 里 onlyDrawable 同一招）");
             StringBuilder notes = new StringBuilder();
             for (String note : headNotes) notes.append(note).append((char) 10);
             for (String note : laid.getNotes()) notes.append(note).append((char) 10);

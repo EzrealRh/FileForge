@@ -40,6 +40,7 @@ pdfplumber 的坐标，两边都不沾我们自己的读法。
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -57,6 +58,7 @@ sys.path.insert(0, HERE)
 from verify_odt_read import check, results  # noqa: E402
 
 BUILD = os.path.join("core", "build", "pdftable")
+DOCS = os.path.join("core", "build", "pdfdocs")
 PAGE_WIDTH = 595.0
 MARGIN = 56.0
 FIXTURES = ("book", "wide", "long")
@@ -97,14 +99,15 @@ OPENED = []
 PAGES = {}
 
 
-def pages_of(name: str) -> list:
+def pages_of(name: str, folder: str = None) -> list:
     """页对象是惰性的（要到用时才读流），所以文档句柄得一直开着，进程退出再散。"""
-    if name in PAGES:
-        return PAGES[name]
-    handle = pdfplumber.open(os.path.join(BUILD, "%s.pdf" % name))
+    path = os.path.join(folder or BUILD, "%s.pdf" % name)
+    if path in PAGES:
+        return PAGES[path]
+    handle = pdfplumber.open(path)
     OPENED.append(handle)
-    PAGES[name] = list(handle.pages)
-    return PAGES[name]
+    PAGES[path] = list(handle.pages)
+    return PAGES[path]
 
 
 def words_on(page):
@@ -147,10 +150,10 @@ def bands(page, segment) -> list:
     return out
 
 
-def all_bands(name: str) -> list:
+def all_bands(name: str, folder: str = None) -> list:
     """整份 PDF 按先后读出来的带：(页号, 带号, 这一带的格子)。"""
     out = []
-    for page_index, page in enumerate(pages_of(name)):
+    for page_index, page in enumerate(pages_of(name, folder)):
         for segment in segments(page):
             for row_index, row in enumerate(bands(page, segment)):
                 out.append((page_index, row_index, row))
@@ -429,6 +432,94 @@ def main() -> int:
                 say_bad.append("%s-app 把空表「%s」也列进行列清单了" % (name, title))
     check(15, "应用那条链子的说明诚实：notes 里几张表、每张几行几列，与 openpyxl 数出来的一致",
           not say_bad, "; ".join(say_bad[:2]))
+
+    # 16-21：docx / odt / pptx / rtf 走文档树印出来的那份 PDF。
+    # 文件由 **pandoc 的写者**产出（不是我们拼的），纸上该有什么由 brief.md 那份来源定，
+    # 读回来还是 pdfplumber 的坐标 —— 与上面那 15 条同样的四角对证。
+    truth = json.load(open(os.path.join(DOCS, "truth.json"), encoding="utf-8"))
+    docs_pages = {kind: pages_of("brief-%s" % kind, DOCS) for kind in truth["sources"]}
+
+    grid_bad = []
+    for kind in truth["sources"]:
+        read = [band for _page, _i, band in all_bands("brief-%s" % kind, DOCS)]
+        want = [list(row) for row in truth["table"]["rows"]]
+        flat_want = [[flat(cell) for cell in row] for row in want]
+        if read[:len(flat_want)] != flat_want:
+            grid_bad.append("%s 的表在纸上不是那三行三列：%s" % (kind, read[:3]))
+        for band in read:
+            if len(band) != truth["table"]["columns"]:
+                grid_bad.append("%s 有一带读了 %d 格（表是 %d 列）：%s"
+                                % (kind, len(band), truth["table"]["columns"], band))
+    check(16, "四个来源的表格在纸上还是网格：逐带与来源里的行列一致、每带列数一致",
+          not grid_bad and all(docs_pages[k] for k in truth["sources"]), "; ".join(grid_bad[:2]))
+
+    size_bad = []
+    for kind in truth["sources"]:
+        words = [w for page in docs_pages[kind] for w in words_on(page)]
+        body = min(w["size"] for w in words)
+        for title in truth["headings"]:
+            found = [w for w in words if flat(title) in flat(w["text"])]
+            if not found:
+                size_bad.append("%s 纸上没有「%s」" % (kind, title))
+            elif max(w["size"] for w in found) <= body + 0.5 and kind != "rtf":
+                size_bad.append("%s/%s 字号 %.1f 不比正文 %.1f 大" % (kind, title, max(w["size"] for w in found), body))
+    check(17, "小标题排在纸上且字号按层级抬（rtf 那份 pandoc 只把层级写在段落上，见第 17 条备注）",
+          not size_bad, "; ".join(size_bad[:2]))
+
+    mark_bad = []
+    for kind in ("docx", "odt"):
+        words = [w for page in docs_pages[kind] for w in words_on(page)]
+        marks = [w["text"] for w in words if w["text"] in ("•", "·", "-")]
+        if len(marks) != len(truth["bullets"]):
+            mark_bad.append("%s 纸上画了 %d 个圆点，来源里是 %d 项圆点列表：%s"
+                            % (kind, len(marks), len(truth["bullets"]), marks))
+        nums = [w["text"] for w in words if re.fullmatch(r"\d+\.", w["text"])]
+        if nums != truth["number_marks"]:
+            mark_bad.append("%s 编号序列不对：%s（该是 %s）" % (kind, nums, truth["number_marks"]))
+        for text in truth["bullets"] + truth["numbered"]:
+            if not any(flat(text) in flat(w["text"]) for w in words):
+                mark_bad.append("%s 列表项「%s」没在纸上" % (kind, text))
+    check(18, "列表的记号画在纸上：圆点按字体给的那一笔，编号按层各数各的（docx / odt）",
+          not mark_bad, "; ".join(mark_bad[:2]))
+
+    hang_bad = []
+    for kind in ("docx", "odt"):
+        words = sorted([w for page in docs_pages[kind] for w in words_on(page)], key=lambda w: (round(w["top"], 1), w["x0"]))
+        for text in truth["bullets"]:
+            at = next((i for i, w in enumerate(words) if flat(text) in flat(w["text"])), None)
+            if at is None:
+                continue
+            before = words[at - 1]["text"] if at else ""
+            if before not in ("•", "·", "-"):
+                hang_bad.append("%s「%s」前面那一个词是 %r，不像记号" % (kind, text, before))
+            if words[at]["x0"] <= words[at - 1]["x1"]:
+                hang_bad.append("%s「%s」压到记号上了" % (kind, text))
+    check(19, "记号与文字各占各的位置：文字从记号右边起，不重叠", not hang_bad, "; ".join(hang_bad[:2]))
+
+    quote_bad = []
+    for kind in ("docx", "odt"):
+        words = [w for page in docs_pages[kind] for w in words_on(page)]
+        body_at = min(w["x0"] for w in words)
+        quoted = [w for w in words if flat(truth["quote"]) in flat(w["text"])]
+        if not quoted:
+            quote_bad.append("%s 纸上没有引用那句" % kind)
+        elif quoted[0]["x0"] <= body_at:
+            quote_bad.append("%s 引用没往里缩（x=%.1f vs 正文 %.1f）" % (kind, quoted[0]["x0"], body_at))
+    check(20, "引用在纸上往里缩一块（没有边框，靠位置认出来）", not quote_bad, "; ".join(quote_bad[:2]))
+
+    leaked = []
+    for kind in truth["sources"]:
+        words = [w["text"] for page in docs_pages[kind] for w in words_on(page)]
+        for token in truth["forbidden"]:
+            if any(token == w or w.startswith(token) for w in words):
+                leaked.append("%s 纸上漏了记号 %r（出现在 %s）" % (kind, token, [w for w in words if token in w][:1]))
+    blank = ["%s 第%d页" % (kind, index + 1) for kind in truth["sources"]
+             for index, page in enumerate(docs_pages[kind]) if not words_on(page)]
+    outside = ["%s 的字越出页边距：%s" % (kind, w["text"]) for kind in truth["sources"]
+               for page in docs_pages[kind] for w in words_on(page)
+               if w["x1"] > PAGE_WIDTH - MARGIN + 2.0 or w["x0"] < MARGIN - 2.0]
+    check(21, "来源里的标记符号不留在纸上；四个来源都没有空白页、字不出页边距",
+          not leaked and not blank and not outside, "; ".join((leaked + blank + outside)[:2]))
 
     failed = [item for item in results if not item[2]]
     print("\n共 %d 条，%d 条红" % (len(results), len(failed)))

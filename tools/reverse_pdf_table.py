@@ -35,17 +35,24 @@ ROOT = os.path.join(HERE, "..")
 BUILD = os.path.join(ROOT, "core", "build", "pdftable")
 PLAN = os.path.join(ROOT, "core", "src", "main", "kotlin", "com", "fileforge", "core", "pdf", "PrintPlan.kt")
 XLSX = os.path.join(ROOT, "core", "src", "main", "kotlin", "com", "fileforge", "core", "office", "XlsxSheets.kt")
+DOCX = os.path.join(ROOT, "core", "src", "main", "kotlin", "com", "fileforge", "core", "office", "DocxRead.kt")
+ODT = os.path.join(ROOT, "core", "src", "main", "kotlin", "com", "fileforge", "core", "office", "OdtRead.kt")
 ENV = dict(os.environ, GRADLE_USER_HOME="D:/gradle-home")
 # 探针那一步换成 /d/ 写法：run.sh 拿它 find kotlin-stdlib，D:/gradle-home 里那个冒号会被
 # classpath 的冒号分隔符切成两截（表现是"kotlin.jvm.functions 这个包不存在"）
 REBUILD = ("GRADLE_USER_HOME=D:/gradle-home ./gradlew --offline :core:jar -q && "
+           "python tools/make_pdf_table_fixtures.py && python tools/make_pdf_doc_fixtures.py && "
            "for f in book wide long; do "
            "GRADLE_USER_HOME=/d/gradle-home PDFPROBE_OUT=/d/fflogs/pdfprobe "
            "bash tools/pdfprobe/run.sh pdftable C:/Windows/Fonts/simhei.ttf "
            "core/build/pdftable/$f.plan.tsv core/build/pdftable/$f.pdf || exit 1; "
            "GRADLE_USER_HOME=/d/gradle-home PDFPROBE_OUT=/d/fflogs/pdfprobe "
            "bash tools/pdfprobe/run.sh xlsxpdf C:/Windows/Fonts/simhei.ttf "
-           "core/build/pdftable/$f.xlsx core/build/pdftable/$f-app.pdf || exit 1; done")
+           "core/build/pdftable/$f.xlsx core/build/pdftable/$f-app.pdf || exit 1; done && "
+           "for f in docx odt pptx rtf; do "
+           "GRADLE_USER_HOME=/d/gradle-home PDFPROBE_OUT=/d/fflogs/pdfprobe "
+           "bash tools/pdfprobe/run.sh docpdf C:/Windows/Fonts/simhei.ttf "
+           "core/build/pdfdocs/brief.$f core/build/pdfdocs/brief-$f.pdf || exit 1; done")
 VERIFY = ["python", "tools/verify_pdf_table.py"]
 
 # 每条：判据号、名字、文件、原样、改成
@@ -121,6 +128,38 @@ CASES = [
         "改成": "            out += DocTable(header = false, sheet.rows.drop(1))",
     },
     {
+        "判据": 16, "名字": "docx 的表少读一格（每行丢掉第一格）", "文件": DOCX,
+        "原样": "            rows += cells",
+        "改成": "            rows += cells.drop(1)",
+    },
+    {
+        "判据": 17, "名字": "odt 的标题不抬层级", "文件": ODT,
+        "原样": '        return DocParagraph(DocPara(merge(flat), "Heading${level.coerceIn(1, 6)}"))',
+        "改成": '        return DocParagraph(DocPara(merge(flat), "Body"))',
+    },
+    {
+        "判据": 18, "名字": "圆点列表不画记号", "文件": PLAN,
+        "原样": '                bullet                                       // 这一笔由调用方按字体给：字体没有 U+2022 时',
+        "改成": '                ""                                         // 圆点不画：列表就跟正文没区别了',
+    },
+    {
+        "判据": 19, "名字": "记号那一列不留位置（文字压上去）", "文件": PLAN,
+        "原样": "else widthOf(marker, sizeNow) + sizeNow * 0.5f",
+        "改成": "else 0f",
+    },
+    {
+        "判据": 20, "名字": "引用不往里缩", "文件": PLAN,
+        "原样": '            if (para.style == "Quote") indent += size * 1.5f',
+        "改成": '            if (para.style == "Quote") indent += 0f',
+    },
+    {
+        # 名字里留一个 ASCII 标记（margin）：Windows 的 Python 收命令行按 cp936 解，
+        # 中文的 --only 过滤词会变形，只剩 ASCII 片段可靠
+        "判据": 21, "名字": "页边距没算进位置（字贴到纸边）margin", "文件": PLAN,
+        "原样": "                        val at = margin + indent + markerWidth",
+        "改成": "                        val at = indent + markerWidth",
+    },
+    {
         "判据": 15, "名字": "说明里多报一张表", "文件": XLSX,
         "原样": '        out += "${made.size} 张表 · ${made.sumOf { it.rows.size }} 行"',
         "改成": '        out += "${made.size + 1} 张表 · ${made.sumOf { it.rows.size }} 行"',
@@ -128,6 +167,8 @@ CASES = [
 ]
 
 PRODUCTS = ["book.pdf", "wide.pdf", "long.pdf", "book-app.pdf", "wide-app.pdf", "long-app.pdf"]
+DOCS = os.path.join(ROOT, "core", "build", "pdfdocs")
+DOC_PRODUCTS = ["brief-docx.pdf", "brief-odt.pdf", "brief-pptx.pdf", "brief-rtf.pdf"]
 
 
 def sha1_of(path: str) -> str:
@@ -136,23 +177,29 @@ def sha1_of(path: str) -> str:
 
 
 def wipe() -> None:
-    if not os.path.isdir(BUILD):
-        return
-    for name in os.listdir(BUILD):
-        if name.endswith(".pdf") or name.endswith(".notes.txt"):
-            os.remove(os.path.join(BUILD, name))
+    """只删 PDF 与说明，夹具（.xlsx / .plan.tsv / pandoc 写的四种文档）留着当来料。"""
+    for folder in (BUILD, DOCS):
+        if not os.path.isdir(folder):
+            continue
+        for name in os.listdir(folder):
+            if name.endswith(".pdf") or name.endswith(".notes.txt"):
+                os.remove(os.path.join(folder, name))
 
 
 def rebuilt() -> tuple:
-    """重编 jar + 重跑探针。返回（编译或探针红了吗, 这一轮真写盘了吗, 线索）。"""
-    before = {name: os.path.getmtime(os.path.join(BUILD, name))
-              for name in PRODUCTS if os.path.isfile(os.path.join(BUILD, name))}
+    """重编 jar + 重落夹具 + 重跑探针。返回（编译或探针红了吗, 这一轮真写盘了吗, 线索）。
+
+    每轮开头先把 PDF 全删了，所以"产物在不在"就是"这一轮有没有真写盘"的证据 ——
+    比只比 mtime 更硬（Gradle 认定 UP-TO-DATE 跳过探针时，旧文件还在会把没跑说成跑过）。
+    """
     run = subprocess.run(["bash", "-c", REBUILD], cwd=ROOT, capture_output=True, env=ENV)
     out = (run.stdout or b"").decode("utf-8", "replace") + (run.stderr or b"").decode("utf-8", "replace")
-    made = any(os.path.isfile(os.path.join(BUILD, name)) and
-               before.get(name) != os.path.getmtime(os.path.join(BUILD, name)) for name in PRODUCTS)
+    missing = [os.path.join(BUILD, name) for name in PRODUCTS if not os.path.isfile(os.path.join(BUILD, name))]
+    missing += [os.path.join(DOCS, name) for name in DOC_PRODUCTS if not os.path.isfile(os.path.join(DOCS, name))]
     lines = [line for line in out.splitlines() if line.startswith("e: ") or "FAILED" in line]
-    return run.returncode != 0, made, " / ".join(lines[:3]) or "退出码 %s" % run.returncode
+    clue = " / ".join(lines[:3]) or ("缺产物：" + "、".join(os.path.basename(x) for x in missing)
+                                    if missing else "退出码 %s" % run.returncode)
+    return run.returncode != 0, not missing, clue
 
 
 def verifier() -> tuple:

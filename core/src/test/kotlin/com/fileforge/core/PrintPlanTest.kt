@@ -32,8 +32,8 @@ class PrintPlanTest {
     private fun ruler(text: String, at: Float): Float =
         text.sumOf { ch -> if (ch.code > 0x2E7F) at.toDouble() else (at * 0.5f).toDouble() }.toFloat()
 
-    private fun plan(parts: List<DocPart>, height: Float = pageHeight) =
-        PrintPlanner.plan(parts, pageWidth, height, margin, size, 1.4f, ::ruler)
+    private fun plan(parts: List<DocPart>, height: Float = pageHeight, indent: Float = 0f) =
+        PrintPlanner.plan(parts, pageWidth, height, margin, size, 1.4f, indent, ::ruler)
 
     private fun table(rows: List<List<String>>, header: Boolean = false) = DocTable(header, rows)
 
@@ -199,5 +199,97 @@ class PrintPlanTest {
         val page = made.pages.first()
         val horizontals = page.rules.filter { it.y1 == it.y2 }
         assertEquals(rows.size + 1, horizontals.size, "三条行底线加一条顶线：${horizontals.size}")
+    }
+
+    private fun item(text: String, bullet: Boolean?, layer: Int = 0) =
+        DocParagraph(DocPara(listOf(DocRun(text)), "ListParagraph", layer, bullet))
+
+    @Test
+    fun `列表的记号画在纸上`() {
+        val made = plan(listOf(item("圆点一项", true), item("圆点二项", true)))
+        val marks = made.pages.first().texts.filter { it.text == "•" }
+        assertEquals(2, marks.size, "两项各画一个点：${made.pages.first().texts.map { it.text }}")
+    }
+
+    @Test
+    fun `编号按层各数各的`() {
+        val made = plan(listOf(
+            item("第一项", false),
+            item("子项", false, 1),
+            item("第二项", false),
+            item("另一子项", false, 1),
+        ))
+        val marks = made.pages.first().texts.filter { it.text.endsWith(".") }.map { it.text }
+        // 上一层进到第 2 项，下面那一层就该从头再数 —— Word 与网页上的列表都是这个规矩
+        assertEquals(listOf("1.", "1.", "2.", "1."), marks, "浅层连着数、父项一进子层就归零：$marks")
+    }
+
+    @Test
+    fun `列表断了一次编号从头数`() {
+        val made = plan(listOf(
+            item("甲", false), item("乙", false),
+            para("中间一段正文"),
+            item("丙", false),
+        ))
+        val marks = made.pages.first().texts.filter { it.text.endsWith(".") }.map { it.text }
+        assertEquals(listOf("1.", "2.", "1."), marks, "正文把列表断了，编号该归零重来：$marks")
+    }
+
+    @Test
+    fun `插一张表也算把列表断了`() {
+        val made = plan(listOf(item("甲", false), item("乙", false), table(listOf(listOf("格"))), item("丙", false)))
+        val marks = made.pages.first().texts.filter { it.text.endsWith(".") }.map { it.text }
+        assertEquals(listOf("1.", "2.", "1."), marks, "表前后是两段列表：$marks")
+    }
+
+    @Test
+    fun `记号那一列不跟着折行`() {
+        val long = "很长的一段列表项".repeat(14)
+        val made = plan(listOf(item(long, true)))
+        val lines = made.pages.first().texts
+        assertEquals(1, lines.count { it.text == "•" }, "点只画在第一行：${lines.size} 行字")
+        val body = lines.filter { it.text != "•" }
+        assertTrue(body.all { it.x == body.first().x }, "折回来的各行左端要对齐（悬挂缩进）")
+        assertTrue(body.first().x > lines.first { it.text == "•" }.x, "文字要让开记号那一列")
+    }
+
+    @Test
+    fun `引用往里缩一块`() {
+        val made = plan(listOf(para("正文"), DocParagraph(DocPara(listOf(DocRun("引文")), "Quote"))))
+        val lines = made.pages.first().texts
+        assertEquals(margin, lines.first { it.text == "正文" }.x)
+        assertEquals(margin + size * 1.5f, lines.first { it.text == "引文" }.x, "引用靠缩进认出来")
+    }
+
+    @Test
+    fun `段首缩进只抬正文`() {
+        val parts = listOf(
+            para("正文一段"), item("列表项", true),
+            DocParagraph(DocPara(listOf(DocRun("代码行")), "SourceCode")),
+            DocParagraph(DocPara(listOf(DocRun("二级标题")), "Heading2")),
+        )
+        val lines = plan(parts, indent = size * 2f).pages.first().texts
+        assertEquals(margin + size * 2f, lines.first { it.text == "正文一段" }.x, "正文要整行右移")
+        assertEquals(margin, lines.first { it.text == "•" }.x, "列表已有记号那一列，不叠第二层缩进")
+        assertEquals(margin, lines.first { it.text == "代码行" }.x, "代码块缩进会打乱对齐")
+        assertEquals(margin, lines.first { it.text == "二级标题" }.x, "标题不靠段首缩进")
+    }
+
+    @Test
+    fun `字体没有圆点时调用方可以换一个记号`() {
+        val parts = listOf(item("圆点一项", true), item("圆点二项", true))
+        val made = PrintPlanner.plan(parts, pageWidth, pageHeight, margin, size, 1.4f, 0f, ::ruler, "·")
+        val marks = made.pages.first().texts.filter { it.text == "·" }
+        assertEquals(2, marks.size, "该按给的那个字符画：${made.pages.first().texts.map { it.text }}")
+        assertTrue(made.pages.first().texts.none { it.text == "•" }, "不该偷偷用回圆点")
+    }
+
+    @Test
+    fun `代码块不是等宽字体这件事只说一遍`() {
+        val made = plan(listOf(
+            DocParagraph(DocPara(listOf(DocRun("第一段代码")), "SourceCode")),
+            DocParagraph(DocPara(listOf(DocRun("第二段代码")), "SourceCode")),
+        ))
+        assertEquals(1, made.notes.count { it.contains("等宽") }, made.notes.toString())
     }
 }

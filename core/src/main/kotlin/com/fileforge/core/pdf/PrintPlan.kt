@@ -33,8 +33,9 @@ class PrintPlan(val pages: List<PrintPage>, val notes: List<String>) {
  *  - **格子换行用正文同一套规矩**（[TextLayoutPlanner.wrap]）：两套断行的话，同一段话在正文里
  *    断在四字处、在格子里断在三字处，读回来对不上，判据也没法判
  *
- * 跨页时表头那一行重复（文件自己说首行是表头才重复），行不拆开跨页。纸上没有自动编号也没有
- * 粗体：标题靠字号与段前留白，表头靠那一条加重的分隔线。
+ * 跨页时表头那一行重复（文件自己说首行是表头才重复），行不拆开跨页。列表的记号**画在纸上**
+ * （圆点照画，编号按层各数各的，中间断了就从头数），引用往里缩一块；没有粗体字：
+ * 标题靠字号与段前留白，表头靠那一条加重的分隔线。
  */
 object PrintPlanner {
 
@@ -53,10 +54,12 @@ object PrintPlanner {
         margin: Float,
         size: Float,
         lineHeightFactor: Float = 1.4f,
+        firstLineIndent: Float = 0f,
         widthOf: (String, Float) -> Float,
+        bullet: String = "•",
     ): PrintPlan {
         require(pageWidth > margin * 2 && pageHeight > margin * 2) { "页边距比页面还大，排不下任何东西" }
-        val flow = Flow(pageWidth, pageHeight, margin, size, lineHeightFactor, widthOf)
+        val flow = Flow(pageWidth, pageHeight, margin, size, lineHeightFactor, firstLineIndent, bullet, widthOf)
         parts.forEach { part ->
             when (part) {
                 is DocParagraph -> flow.paragraph(part.para)
@@ -139,6 +142,8 @@ object PrintPlanner {
         private val margin: Float,
         private val size: Float,
         private val lineHeightFactor: Float,
+        private val firstLineIndent: Float,
+        private val bullet: String,
         private val widthOf: (String, Float) -> Float,
     ) {
         private val notes = ArrayList<String>()
@@ -151,6 +156,8 @@ object PrintPlanner {
         private var wrapped = 0
         private var repeated = 0
         private var lastHeading = ""
+        private var saidCodeFont = false
+        private val listCount = HashMap<Int, Int>()          // 层号 → 这一层排到第几个（只编号列表用）
 
         fun finish(): PrintPlan {
             seal()
@@ -160,7 +167,13 @@ object PrintPlanner {
             return PrintPlan(pages, notes)
         }
 
-        /** 一段正文或小标题：字号按层级放大，段后留半行。 */
+        /**
+         * 一段正文、小标题、列表项或引用。
+         *
+         * 列表的记号**画在纸上**：文件里那一层是"这是列表第几项"，纸上没有 Word 的 numbering 可借，
+         * 不画就等于把列表摊平成段落。编号按层各数各的，一层里排到第几就是几；
+         * 出现别的块（正文、表、分隔线）就把计数清掉 —— 那是新的一段列表。
+         */
         fun paragraph(para: DocPara) {
             val text = para.text
             if (text.isBlank()) {
@@ -178,20 +191,53 @@ object PrintPlanner {
             }
             val sizeNow = size * scale
             val lineHeight = sizeNow * lineHeightFactor
-            val indent = para.indent * size * 2f
+            val isList = para.bullet != null
+            var indent = para.indent * size * 2f
+            if (!isList) listCount.clear()                       // 列表断了一次，下一段从头数
+            if (para.style == "Quote") indent += size * 1.5f     // 引用没有边框，靠往里缩一块认出来
+            if (para.style == "SourceCode" && !saidCodeFont) {
+                saidCodeFont = true
+                notes += "代码块用的是正文字体（这份字体不是等宽的，竖线对不齐）"
+            }
+            val marker = if (isList) markerFor(para) else ""
+            // 记号与文字之间留半个字：紧贴着画的话，"•字" 在 PDF 的词抽取里会被当成一个词
+            val markerWidth = if (marker.isEmpty()) 0f else widthOf(marker, sizeNow) + sizeNow * 0.5f
+            // 记号钉在缩进那一列，文字往后走：折行回来的第二行也要跟第一行的字对齐（悬挂缩进），
+            // 让记号跟着折回来就把"1."顶到下一行去了
             if (level > 0) y += sizeNow * 0.4f                       // 标题前留一点：纸上没有段前距这一说
-            splitLines(text).forEach { piece ->
-                wrapInto(piece, contentWidth - indent, sizeNow).forEach { line ->
-                    advance(lineHeight)
-                    texts += TextLine(line, margin + indent, y + sizeNow, sizeNow)
-                    y += lineHeight
-                }
+            val canIndent = level == 0 && !isList && para.style != "SourceCode"
+            splitLines(text).forEachIndexed { pieceIndex, piece ->
+                val shift = if (pieceIndex == 0 && canIndent) firstLineIndent else 0f
+                wrapInto(piece, (contentWidth - indent - markerWidth - shift).coerceAtLeast(size), sizeNow)
+                    .forEachIndexed { lineIndex, line ->
+                        advance(lineHeight)
+                        val at = margin + indent + markerWidth + if (lineIndex == 0) shift else 0f
+                        if (lineIndex == 0 && marker.isNotEmpty()) {
+                            texts += TextLine(marker, margin + indent, y + sizeNow, sizeNow)
+                        }
+                        texts += TextLine(line, at, y + sizeNow, sizeNow)
+                        y += lineHeight
+                    }
             }
             y += size * 0.5f
         }
 
+        /** 这一项前面画什么记号：圆点不动计数，编号按层各数各的。 */
+        private fun markerFor(para: DocPara): String {
+            val layer = para.indent.coerceAtLeast(0)
+            listCount.keys.filter { it > layer }.forEach { listCount.remove(it) }
+            return if (para.bullet == true) {
+                bullet                                       // 这一笔由调用方按字体给：字体没有 U+2022 时
+            } else {
+                val next = (listCount[layer] ?: 0) + 1
+                listCount[layer] = next
+                "$next."
+            }
+        }
+
         /** 分隔线：一条横贯栏宽的细线。 */
         fun rule() {
+            listCount.clear()
             advance(size * lineHeightFactor)
             val at = y + size * 0.3f
             rules += PrintRule(margin, at, margin + contentWidth, at, RULE_THIN)
@@ -207,6 +253,7 @@ object PrintPlanner {
          */
         fun table(table: DocTable) {
             if (table.rows.isEmpty()) return
+            listCount.clear()                                       // 中间插了一张表，列表就是从这一段断开了
             val padX = size * PAD_X_RATIO
             val padY = size * PAD_Y_RATIO
             val lineHeight = size * lineHeightFactor
