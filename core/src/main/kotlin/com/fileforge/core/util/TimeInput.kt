@@ -12,8 +12,11 @@ object TimeInput {
     fun parseSeconds(text: String): Double? {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return null
+        val parts = trimmed.split(':')
+        // 只认三种写法：纯秒、分秒、时分秒。四段以上不是时间，不能一路乘成一个大数
+        if (parts.size > 3) return null
         var total = 0.0
-        for (part in trimmed.split(':')) {
+        for (part in parts) {
             val value = part.trim().toDoubleOrNull() ?: return null
             if (value < 0) return null
             total = total * 60 + value

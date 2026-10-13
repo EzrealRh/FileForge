@@ -384,10 +384,12 @@ class FileKindSniffTest {
             setOf(
                 OperationKind.XlsxToCsv, OperationKind.XlsxToHtml, OperationKind.XlsxToMarkdown,
                 OperationKind.TextToDocx, OperationKind.TextToOdt, OperationKind.TextToEpub,
+                OperationKind.TextToPdf,
             ).all { it in xlsx },
             "xlsx 该有这几条：$xlsx",
         )
-        assertTrue(OperationKind.TextToPdf !in xlsx, "PDF 还画不了表格网格，先不给 xlsx「印成 PDF」：$xlsx")
+        // 以前不给：PDF 那边画不出网格，摊平成制表符印出去等于把表印丢
+        assertTrue(OperationKind.TextToPdf in xlsx, "xlsx 现在能印成 PDF（表格画成真网格）：$xlsx")
         assertTrue(
             OperationKind.OdsToCsv !in xlsx && OperationKind.CsvToXlsx !in xlsx,
             "xlsx 既不是 ODS，也不是「把文本写成 xlsx」的来料：$xlsx",

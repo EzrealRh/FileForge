@@ -44,7 +44,7 @@ TAMPERS = [
     {
         "名字": "列表一律按圆点排",
         "判据": 6,
-        "原样": "                bullet = !formats.getOrElse(indent) { formats.last() }",
+        "原样": "                bullet = !formats.getOrElse(indent) { formats.lastOrNull() ?: false }",
         "改成": "                bullet = true",
     },
     {

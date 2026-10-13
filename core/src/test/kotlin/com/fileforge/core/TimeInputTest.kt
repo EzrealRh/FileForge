@@ -43,8 +43,8 @@ class TimeInputTest {
 
     @Test
     fun `段给反了或读不出的丢掉`() {
-        assertEquals(emptyList(), TimeInput.parseRanges("12-5"))
-        assertEquals(emptyList(), TimeInput.parseRanges("abc"))
-        assertEquals(emptyList(), TimeInput.parseRanges(""))
+        assertEquals(emptyList<Pair<Double, Double?>>(), TimeInput.parseRanges("12-5"))
+        assertEquals(emptyList<Pair<Double, Double?>>(), TimeInput.parseRanges("abc"))
+        assertEquals(emptyList<Pair<Double, Double?>>(), TimeInput.parseRanges(""))
     }
 }

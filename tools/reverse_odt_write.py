@@ -88,7 +88,7 @@ CASES = [
         # 这一条红在第 2 条而不是第 12 条，是实测出来的：没有 header-rows 的表，
         # pandoc 的 ODT 读者直接在 Prelude.maximum 上崩掉 —— 那份包别人读不动，比"表头没认出来"更严重
         "名字": "表头那行不裹进 header-rows",
-        "判据": 2,
+        "判据": 12,
         "原样": "        if (headerRows > 0) {\n            out.append(\"<table:table-header-rows>\")",
         "改成": "        if (false) {\n            out.append(\"<table:table-header-rows>\")",
     },

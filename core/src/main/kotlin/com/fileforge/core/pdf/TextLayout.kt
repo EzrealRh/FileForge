@@ -97,8 +97,11 @@ object TextLayoutPlanner {
      *
      * 逐个字符往前加，超宽就在合适的位置断：CJK 边界随时可断，西文要退到上一个词边界。
      * 断完再把不合规矩的收尾标点/开括号推到下一行。
+     *
+     * 表格的格子也走这一套（见 [PrintPlanner]）：两处各写一套断行的话，同一段话在正文里
+     * 断在三字处、在格子里断在四字处，读回来就对不上，更别说判据了。
      */
-    private fun wrap(
+    internal fun wrap(
         paragraph: String,
         contentWidth: Float,
         size: Float,

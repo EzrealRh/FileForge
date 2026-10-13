@@ -38,12 +38,20 @@ import org.apache.pdfbox.pdmodel.encryption.AccessPermission;
 import org.apache.pdfbox.pdmodel.encryption.InvalidPasswordException;
 import org.apache.pdfbox.pdmodel.encryption.StandardProtectionPolicy;
 import com.fileforge.core.doc.Doc;
+import com.fileforge.core.doc.DocPara;
 import com.fileforge.core.doc.DocPart;
 import com.fileforge.core.doc.DocParagraph;
+import com.fileforge.core.doc.DocRun;
 import com.fileforge.core.doc.DocTable;
 import com.fileforge.core.office.DocxWrite;
+import com.fileforge.core.office.Sheet;
+import com.fileforge.core.office.XlsxSheets;
 import com.fileforge.core.pdf.PdfDoc;
 import com.fileforge.core.pdf.PdfLine;
+import com.fileforge.core.pdf.PrintPage;
+import com.fileforge.core.pdf.PrintPlan;
+import com.fileforge.core.pdf.PrintPlanner;
+import com.fileforge.core.pdf.PrintRule;
 import com.fileforge.core.pdf.TextLayout;
 import com.fileforge.core.pdf.TextLayoutPlanner;
 import com.fileforge.core.pdf.TextLine;
@@ -72,6 +80,8 @@ public final class PdfProbe {
             case "stamp" -> verifyStamping(new File(args[1]));
             case "security" -> verifySecurity(new File(args[1]));
             case "textlayout" -> verifyTextLayout(new File(args[1]), new File(args[2]));
+            case "pdftable" -> writePdfTable(new File(args[1]), new File(args[2]), new File(args[3]));
+            case "xlsxpdf" -> writeXlsxPdf(new File(args[1]), new File(args[2]), new File(args[3]));   // 与 pdftable 同参数序：字体 输入 输出
             case "pdfdoc" -> pdfStructure(new File(args[1]), new File(args[2]));
             default -> throw new IllegalArgumentException("unknown cmd " + args[0]);
         }
@@ -446,6 +456,131 @@ public final class PdfProbe {
             String wanted = nonWhitespace(body);
             report("文字层抽回来的字数与源文本相当（抽出 " + extracted.length() + " / 应有 " + wanted.length() + "）",
                 wanted.length() * 0.98 <= extracted.length());
+        }
+    }
+
+    /**
+     * 表格印成 PDF：读一份排片单（由 openpyxl 读原件生成），用 :core 那份 PrintPlanner 排成页，
+     * 桌面 PDFBox 把线与字都画出去。判据脚本再用 pdfplumber / pdfminer / pdftotext 三个独立读路
+     * 把 PDF 读回来核位置 —— 排的、画的、读回来的三边都不沾我们自己的读法。
+     */
+    private static void writePdfTable(File fontFile, File planFile, File out) throws Exception {
+        List<DocPart> parts = new ArrayList<>();
+        List<String> lines = java.nio.file.Files.readAllLines(planFile.toPath(), java.nio.charset.StandardCharsets.UTF_8);
+        int at = 0;
+        while (at < lines.size()) {
+            String line = lines.get(at);
+            if (line.startsWith("#SHEET\t")) {
+                String[] head = line.split("\t");
+                boolean header = head.length > 2 && head[2].endsWith("=1");
+                parts.add(new DocParagraph(new DocPara(
+                        List.of(new DocRun(head[1], false, false, false, false, false, null)), "Heading2", 0, null)));
+                List<List<String>> rows = new ArrayList<>();
+                at++;
+                while (at < lines.size() && !lines.get(at).startsWith("#")) {
+                    List<String> row = new ArrayList<>();
+                    for (String cell : lines.get(at).split("\t", -1)) row.add(cell.replace("\\n", "\n"));
+                    rows.add(row);
+                    at++;
+                }
+                parts.add(new DocTable(header, rows));
+                continue;
+            }
+            if (line.startsWith("#TEXT\t")) {
+                parts.add(new DocParagraph(new DocPara(
+                        List.of(new DocRun(line.substring(6), false, false, false, false, false, null)), "Body", 0, null)));
+            }
+            if (line.startsWith("#EMPTY\t")) {
+                // 空表要不要占一节由产品那侧的 XlsxSheets.parts 决定，探针不自己判一遍：
+                // 探针判了，判据测的就是仪器不是产品
+                parts.addAll(XlsxSheets.INSTANCE.parts(
+                        List.of(new Sheet(line.substring(7), List.of(), List.of()))));
+            }
+            at++;
+        }
+        renderTable(parts, fontFile, out, List.of());
+    }
+
+    /**
+     * 「xlsx 印成 PDF」那条链子在桌面上走一遍：JDK 的 ZipFile 按部件名给字节，往后的
+     * XlsxSheets.book → parts → PrintPlanner 全是 :core 里应用真正调的那份代码。
+     * 应用与桌面只差最后那层字体与页面尺寸，判据因此能核到产品那条路而不是仪器。
+     */
+    private static void writeXlsxPdf(File fontFile, File source, File out) throws Exception {
+        final java.util.zip.ZipFile zip = new java.util.zip.ZipFile(source);
+        try {
+            kotlin.jvm.functions.Function1<String, byte[]> load = name -> {
+                java.util.zip.ZipEntry entry = zip.getEntry(name);
+                if (entry == null) return null;
+                try (java.io.InputStream in = zip.getInputStream(entry)) {
+                    return in.readAllBytes();
+                } catch (IOException e) {
+                    throw new IllegalStateException("部件读不出来：" + name, e);
+                }
+            };
+            XlsxSheets.Book book = XlsxSheets.INSTANCE.book(load);
+            List<DocPart> parts = XlsxSheets.INSTANCE.parts(book.getSheets());
+            List<String> say = new ArrayList<>();
+            say.addAll(XlsxSheets.INSTANCE.summary(book.getSheets()));
+            say.addAll(XlsxSheets.INSTANCE.notes(book.getSheets()));
+            say.addAll(book.getReasons());
+            renderTable(parts, fontFile, out, say);
+        } finally {
+            zip.close();
+        }
+    }
+
+    /** 把一棵文档树排成页并画出去：排版调的是 :core 那份 PrintPlanner，不是在 Java 里重写一套规矩。 */
+    private static void renderTable(List<DocPart> parts, File fontFile, File out, List<String> headNotes) throws Exception {
+        float pageW = 595f, pageH = 842f, margin = 56f, size = 10f;
+        try (PDDocument doc = new PDDocument()) {
+            PDType0Font font = PDType0Font.load(
+                    doc, java.nio.file.Files.newInputStream(fontFile.toPath()), true);
+            Function2<String, Float, Float> widthOf = (chunk, pt) -> {
+                try {
+                    return font.getStringWidth(chunk) / 1000f * pt;
+                } catch (IOException e) {
+                    throw new IllegalStateException("这个字体量不出「" + chunk + "」", e);
+                }
+            };
+            PrintPlan laid = PrintPlanner.INSTANCE.plan(parts, pageW, pageH, margin, size, 1.4f, widthOf);
+            int drawn = 0;
+            int stroked = 0;
+            for (PrintPage page : laid.getPages()) {
+                PDPage pdPage = new PDPage(new PDRectangle(pageW, pageH));
+                doc.addPage(pdPage);
+                PDPageContentStream stream = new PDPageContentStream(doc, pdPage);
+                stream.setLineCapStyle(0);
+                for (PrintRule rule : page.getRules()) {
+                    stream.setLineWidth(rule.getWidth());
+                    stream.moveTo(rule.getX1(), pageH - rule.getY1());
+                    stream.lineTo(rule.getX2(), pageH - rule.getY2());
+                    stream.stroke();
+                    stroked++;
+                }
+                stream.beginText();
+                stream.setNonStrokingColor(0f, 0f, 0f);
+                for (TextLine line : page.getTexts()) {
+                    if (line.getText().isEmpty()) continue;
+                    stream.setFont(font, line.getSize());
+                    stream.setTextMatrix(Matrix.getTranslateInstance(line.getX(), pageH - line.getY()));
+                    stream.showText(line.getText());
+                    drawn++;
+                }
+                stream.endText();
+                stream.close();
+            }
+            out.getParentFile().mkdirs();
+            doc.save(out);
+            StringBuilder notes = new StringBuilder();
+            for (String note : headNotes) notes.append(note).append((char) 10);
+            for (String note : laid.getNotes()) notes.append(note).append((char) 10);
+            java.nio.file.Files.write(
+                    new File(out.getParentFile(), out.getName().replaceFirst("\\.pdf$", ".notes.txt")).toPath(),
+                    notes.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            System.out.println("pdftable " + out.getName() + " 页数=" + laid.getPages().size()
+                    + " 画的字=" + drawn + " 画的线=" + stroked);
+            for (String note : laid.getNotes()) System.out.println("  note " + note);
         }
     }
 

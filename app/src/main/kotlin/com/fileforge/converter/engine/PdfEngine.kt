@@ -9,6 +9,7 @@ import android.os.ParcelFileDescriptor
 import com.fileforge.core.naming.OutputNaming
 import com.fileforge.core.ops.Operation
 import com.fileforge.core.ops.PdfPaper
+import com.fileforge.core.office.XlsxSheets
 import com.fileforge.core.pdf.Horizontal
 import com.fileforge.core.pdf.PageGroups
 import com.fileforge.core.pdf.PageNumberPlan
@@ -19,6 +20,7 @@ import com.fileforge.core.pdf.PdfLine
 import com.fileforge.core.pdf.PdfPermission
 import com.fileforge.core.pdf.PdfSecurity
 import com.fileforge.core.pdf.PdfTier
+import com.fileforge.core.pdf.PrintPlanner
 import com.fileforge.core.pdf.SplitPlanner
 import com.fileforge.core.pdf.StampFrame
 import com.fileforge.core.pdf.TextLayoutPlanner
@@ -588,12 +590,14 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
 
     /** 提取文字层。spec 留空取全文；给了范围就逐页抽，免得把不连续的页混成一段。 */
     /**
-     * 纯文本印成 PDF。
+     * 印成 PDF。
      *
      * 断行与分页的规矩全在 `:core` 的 TextLayoutPlanner（那边可单测）；这里只做两件事：
-     * 把宽度那把尺子换成真字体量出来的数，以及把排好的行画上去。
+     * 把宽度那把尺子换成真字体量出来的数，以及把排好的行画上去。xlsx 不在这条路上（见 tableToPdf）。
      */
     fun textToPdf(item: WorkItem, operation: Operation.TextToPdf): EngineOutput {
+        // xlsx 走文档树那一条：表格画成真网格（见 tableToPdf），摊平成制表符会把列的位置关系印丢
+        if (item.kind == FileKind.Xlsx) return tableToPdf(item, operation)
         // docx / pptx / odt 先抽正文再排版：排的是抽出来的那份文字，所以"丢了什么"由抽取那一层说
         val body = when (item.kind) {
             FileKind.Docx, FileKind.Pptx, FileKind.Odt -> OfficeSource.text(item.file, item.kind)
@@ -677,6 +681,88 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
             notes += "${layout.pageCount} 页 · ${size.toInt()}pt · ${operation.paper.label}"
             if (missing[0] > 0) notes += "选中字体没有 ${missing[0]} 个字，这些位置会缺字"
             layout.notes.forEach { notes += it }
+            return EngineOutput(OutputNaming.tagged(item.name, "", "pdf"), output, notes.joinToString(" · "))
+        } finally {
+            runCatching { handle?.close() }
+            runCatching { document.close() }
+        }
+    }
+
+    /**
+     * xlsx 印成 PDF：走文档树，**表格画成真的网格**（一行一格、列边界画线、表头那条线加重）。
+     *
+     * 与"抽文字再排版"不是一条路：那种排法把格子摊平成制表符，两列的表在纸上就是一行字，
+     * 列与列的位置关系全丢 —— 而"表格转 PDF"要保住的恰恰是这个。
+     */
+    private fun tableToPdf(item: WorkItem, operation: Operation.TextToPdf): EngineOutput {
+        val read = OoxmlFile(item.file).use { pack ->
+            require(pack.kind == FileKind.Xlsx) { "这份包里没找到 xl/workbook.xml，它不是 xlsx" }
+            val book = XlsxSheets.book { name -> pack.bytesOf(name) }
+            book.sheets to book.reasons
+        }
+        val parts = XlsxSheets.parts(read.first)
+        require(parts.isNotEmpty()) { read.second.ifEmpty { listOf("每张表都是空的") }.joinToString(" · ") }
+        val document = PDDocument()
+        var handle: FontHandle? = null
+        val missing = intArrayOf(0)
+        try {
+            val rectangle = when (operation.paper) {
+                PdfPaper.A5 -> PDRectangle.A5
+                PdfPaper.Letter -> PDRectangle.LETTER
+                else -> PDRectangle.A4
+            }
+            val pageHeight = rectangle.height
+            val margin = operation.marginPt
+                .coerceIn(0, (minOf(rectangle.width, pageHeight) / 4).toInt())
+                .toFloat()
+            val size = operation.fontSize.toFloat()
+            handle = fontFor(document, com.fileforge.core.doc.HtmlWrite.text(parts).take(4000))
+            val font = handle.font
+            val plan = PrintPlanner.plan(
+                parts = parts,
+                pageWidth = rectangle.width,
+                pageHeight = pageHeight - if (operation.numberPages) size * 2.5f else 0f,
+                margin = margin,
+                size = size,
+                lineHeightFactor = operation.lineHeight,
+                widthOf = { text, pt -> measure(font, text, pt) },
+            )
+            plan.pages.forEachIndexed { index, page ->
+                val pdPage = PDPage(rectangle)
+                document.addPage(pdPage)
+                val stream = PDPageContentStream(document, pdPage)
+                stream.setLineCapStyle(0)
+                page.rules.forEach { rule ->
+                    stream.setLineWidth(rule.width)
+                    stream.moveTo(rule.x1, pageHeight - rule.y1)
+                    stream.lineTo(rule.x2, pageHeight - rule.y2)
+                    stream.stroke()
+                }
+                stream.beginText()
+                stream.setNonStrokingColor(0f, 0f, 0f)
+                page.texts.forEach { line ->
+                    if (line.text.isEmpty()) return@forEach
+                    stream.setFont(font, line.size)
+                    stream.setTextMatrix(Matrix.getTranslateInstance(line.x, pageHeight - line.y))
+                    stream.showText(onlyDrawable(font, line.text, missing))
+                }
+                stream.endText()
+                if (operation.numberPages) {
+                    drawPageNumber(stream, font, size, rectangle, margin, index + 1, plan.pageCount)
+                }
+                stream.close()
+            }
+            val output = workspace.newStagingFile("pdf")
+            document.save(output)
+            val notes = ArrayList<String>()
+            notes += XlsxSheets.summary(read.first)
+            notes += XlsxSheets.notes(read.first).filter { it !in notes }
+            if (read.second.isNotEmpty()) {
+                notes += "另有 ${read.second.size} 张表没转出来：${read.second.joinToString("、")}"
+            }
+            notes += "${plan.pageCount} 页 · ${size.toInt()}pt · ${operation.paper.label} · 表格画成网格"
+            if (missing[0] > 0) notes += "选中字体没有 ${missing[0]} 个字，这些位置会缺字"
+            plan.notes.forEach { notes += it }
             return EngineOutput(OutputNaming.tagged(item.name, "", "pdf"), output, notes.joinToString(" · "))
         } finally {
             runCatching { handle?.close() }
