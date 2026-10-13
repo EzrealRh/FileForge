@@ -103,6 +103,7 @@ object TextDoc {
     enum class Route(val note: String) {
         Web("按网页结构排"),
         Markdown("按 Markdown 记号排"),
+        Table("按分隔符分成一张表"),
         Plain("按空行分段排（文本里没有网页标签或 Markdown 记号）"),
     }
 
@@ -124,6 +125,9 @@ object TextDoc {
             val page = Markdown.toHtml(source)
             val parsed = Html.toDoc(page.text)
             return Reading(Doc(parsed.parts, page.notes + parsed.notes), Route.Markdown)
+        }
+        CsvTree.table(source)?.let { table ->
+            return Reading(Doc(table.parts, table.notes), Route.Table)
         }
         return Reading(PlainDoc.toDoc(source), Route.Plain)
     }

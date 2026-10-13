@@ -529,7 +529,8 @@ public final class PdfProbe {
             parts = rtf.getDoc().getParts();
             say.addAll(rtf.getNotes());
         } else if (lower.endsWith(".md") || lower.endsWith(".html") || lower.endsWith(".htm")
-                || lower.endsWith(".txt")) {
+                || lower.endsWith(".txt")
+                || lower.endsWith(".csv") || lower.endsWith(".tsv")) {
             // 文字类来源与 app 里 SourceText 那条一样：先摊成一棵树，再交给同一份排版器
             String text = new String(java.nio.file.Files.readAllBytes(source.toPath()),
                     java.nio.charset.StandardCharsets.UTF_8);
