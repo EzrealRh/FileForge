@@ -16,6 +16,7 @@ import com.fileforge.core.pdf.PageRangeParser
 import com.fileforge.core.pdf.PdfCompressPlan
 import com.fileforge.core.pdf.PdfDoc
 import com.fileforge.core.pdf.PdfLine
+import com.fileforge.core.pdf.PdfMeta
 import com.fileforge.core.pdf.PdfPermission
 import com.fileforge.core.pdf.PdfSecurity
 import com.fileforge.core.pdf.PdfTier
@@ -588,6 +589,75 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
     }
 
     /** 提取文字层。spec 留空取全文；给了范围就逐页抽，免得把不连续的页混成一段。 */
+    /**
+     * PDF 元数据：改写单由 `:core` 那份 `PdfMeta` 算（哪几项要写、哪几项要删、话怎么说），
+     * 这里只负责把它落到 `/Info` 上。
+     *
+     * 带口令的先拦住：加密文件里 `/Info` 与其他对象一起被包在密文里，改完不重算加密
+     * 等于交一份打不开的东西，而重算又要用户把两个密码都填对 —— 不如让他先出明文副本。
+     */
+    fun metadata(item: WorkItem, operation: Operation.PdfMetadata): EngineOutput {
+        val now = System.currentTimeMillis()
+        val patch = PdfMeta.patch(
+            mode = operation.mode,
+            values = operation.values(),
+            keepDates = operation.keepDates,
+            stampNow = operation.stampNow,
+            nowMillis = now,
+        )
+        require(patch.changed) { (patch.notes + "没什么要改的").joinToString(" · ") }
+        val document = PDDocument.load(item.file, MemoryUsageSetting.setupTempFileOnly())
+        try {
+            require(!document.isEncrypted) { "这份 PDF 带口令，先用「去掉密码」出一份明文副本再来改属性" }
+            val info = document.documentInformation ?: com.tom_roush.pdfbox.pdmodel.PDDocumentInformation()
+            val before = PdfMeta.FIELDS.mapNotNull { (key, label) ->
+                value(info, key)?.takeIf { it.isNotBlank() }?.let { label to it }
+            } + PdfMeta.dateLabels().mapNotNull { (key, label) ->
+                value(info, key)?.takeIf { it.isNotBlank() }?.let { label to PdfMeta.readableDate(it) }
+            }
+            patch.removes.forEach { key ->
+                when {
+                    key == "*" -> metadataKeys(info).filterNot { it in patch.keeps }
+                        .forEach { info.setCustomMetadataValue(it, null) }
+                    key == "CreationDate" -> info.setCreationDate(null)
+                    key == "ModDate" -> info.setModificationDate(null)
+                    else -> info.setCustomMetadataValue(key, null)
+                }
+            }
+            patch.writes.forEach { (key, value) -> info.setCustomMetadataValue(key, value) }
+            if (patch.stampNow) {
+                val whenAt = java.util.Calendar.getInstance().apply { timeInMillis = now }
+                info.setModificationDate(whenAt)
+            }
+            document.documentInformation = info
+            val output = workspace.newStagingFile("pdf")
+            document.save(output)
+            val notes = ArrayList(patch.notes)
+            if (patch.removes.isNotEmpty()) {
+                val gone = before.filter { (label, _) -> patch.removes.any { key -> PdfMeta.label(key) == label } }
+                notes += if (gone.isEmpty()) "原本就没有可清的属性"
+                else "清掉了 ${gone.size} 项：${gone.joinToString("、") { (label, old) -> "$label（原来写着「${old.take(24)}」）" }}"
+            }
+            notes += if (patch.stampNow) "修改时间已盖成现在" else ""
+            notes.removeAll { it.isEmpty() }
+            notes += "${document.numberOfPages} 页不变 · 正文与图片没重新编码"
+            return EngineOutput(
+                OutputNaming.tagged(item.name, if (operation.mode == "edit") "改属性" else "清属性", "pdf"),
+                output,
+                notes.joinToString(" · "),
+            )
+        } finally {
+            runCatching { document.close() }
+        }
+    }
+
+    /** 一个键现在的值。标准键与自定义键都从这一处问，免得两边读法不同。 */
+    private fun value(info: com.tom_roush.pdfbox.pdmodel.PDDocumentInformation, key: String): String? =
+        runCatching { info.getCustomMetadataValue(key) }.getOrNull()
+
+    private fun metadataKeys(info: com.tom_roush.pdfbox.pdmodel.PDDocumentInformation): List<String> =
+        runCatching { info.metadataKeys.toList() }.getOrDefault(emptyList())
+
     /**
      * 印成 PDF。
      *

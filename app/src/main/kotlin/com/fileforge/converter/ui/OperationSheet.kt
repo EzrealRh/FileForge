@@ -192,6 +192,15 @@ class Parameters(
     var videoByTarget by mutableStateOf(false)
     var audioTarget by mutableStateOf(AudioTarget.M4a)
     var audioByTarget by mutableStateOf(false)
+    var pdfMetaMode by mutableStateOf("edit")
+    var pdfMetaTitle by mutableStateOf("")
+    var pdfMetaAuthor by mutableStateOf("")
+    var pdfMetaSubject by mutableStateOf("")
+    var pdfMetaKeywords by mutableStateOf("")
+    var pdfMetaCreator by mutableStateOf("")
+    var pdfMetaProducer by mutableStateOf("")
+    var pdfMetaKeepDates by mutableStateOf(false)
+    var pdfMetaStamp by mutableStateOf(false)
     var pdfUserPw by mutableStateOf("")
     var pdfOwnerPw by mutableStateOf("")
     var pdfOpenPw by mutableStateOf("")
@@ -576,6 +585,65 @@ class Parameters(
                 }
                 Summary("源格式按扩展名认，认不出会按内容试；输出一律写 UTF-8（播放器对非 UTF-8 字幕普遍直接显示乱码）。")
                 Summary(subtitleLimitsNote(subtitleTarget))
+            }
+            OperationKind.PdfMetadata -> {
+                Segmented("要做的事", listOf("改写填了的", "清除全部", "只清标准字段"), listOf("edit", "clear", "clear-standard").indexOf(pdfMetaMode)) {
+                    pdfMetaMode = listOf("edit", "clear", "clear-standard")[it]
+                }
+                if (pdfMetaMode == "edit") {
+                    OutlinedTextField(
+                        value = pdfMetaTitle,
+                        onValueChange = { pdfMetaTitle = it },
+                        label = { Text("标题（留空＝不改这一项）") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = pdfMetaAuthor,
+                        onValueChange = { pdfMetaAuthor = it },
+                        label = { Text("作者（留空＝不改这一项）") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = pdfMetaSubject,
+                        onValueChange = { pdfMetaSubject = it },
+                        label = { Text("主题（留空＝不改这一项）") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = pdfMetaKeywords,
+                        onValueChange = { pdfMetaKeywords = it },
+                        label = { Text("关键词（留空＝不改这一项）") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = pdfMetaCreator,
+                        onValueChange = { pdfMetaCreator = it },
+                        label = { Text("制作软件（留空＝不改这一项）") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = pdfMetaProducer,
+                        onValueChange = { pdfMetaProducer = it },
+                        label = { Text("转换工具（留空＝不改这一项）") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Segmented("修改时间", listOf("不动", "盖成现在"), if (pdfMetaStamp) 1 else 0) { pdfMetaStamp = it == 1 }
+                    Summary("空着的那格是\"别动它\"：只想加个标题就别顺手把作者删了。")
+                } else {
+                    Segmented("两个日期", listOf("一起清掉", "留着"), if (pdfMetaKeepDates) 1 else 0) { pdfMetaKeepDates = it == 1 }
+                    Summary(if (pdfMetaMode == "clear")
+                        "标题、作者、主题、关键词、制作软件、转换工具与日期全删，文件里自己加的字段（如 Company）也一起扫掉。"
+                    else
+                        "只删认得的这几项，文件里自己加的字段留着 —— 有人靠它认自己的文件。")
+                }
+                Summary("正文、图片与页数一个字节都不重编：改的只是文件属性那份字典。带口令的先去掉密码再来。")
+                Summary("详情里看得见原属性，改完再对照一次就知道删没删干净。")
             }
             OperationKind.EncryptPdf -> {
                 OutlinedTextField(
@@ -1154,6 +1222,10 @@ class Parameters(
             )
             // 密码原样传，不做 trim：首尾空格可能就是用户密码的一部分
             OperationKind.EncryptPdf -> Operation.EncryptPdf(pdfUserPw, pdfOwnerPw, pdfAllowed)
+            OperationKind.PdfMetadata -> Operation.PdfMetadata(
+                pdfMetaMode, pdfMetaTitle, pdfMetaAuthor, pdfMetaSubject,
+                pdfMetaKeywords, pdfMetaCreator, pdfMetaProducer, pdfMetaKeepDates, pdfMetaStamp,
+            )
             OperationKind.ConvertTextEncoding -> Operation.ConvertTextEncoding(
                 encodingAt(textSource), textTarget, textBom, textEnding,
             )

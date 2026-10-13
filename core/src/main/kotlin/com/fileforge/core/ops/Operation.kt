@@ -197,6 +197,33 @@ sealed interface Operation {
     }
 
     /**
+     * PDF 的元数据：改写或清掉文件属性里那份 `/Info`。
+     *
+     * [mode] 三档：`edit` 只改填了值的那几格（空着＝别动它）；`clear` 连文件自己加的键一起扫掉；
+     * `clear-standard` 只清认得的那八个键、留着自定义的。哪一档对应删哪些、话怎么说，
+     * 由 `:core` 的 `PdfMeta` 判一次，界面与引擎都听它的。
+     */
+    data class PdfMetadata(
+        val mode: String = "edit",
+        val title: String = "",
+        val author: String = "",
+        val subject: String = "",
+        val keywords: String = "",
+        val creator: String = "",
+        val producer: String = "",
+        val keepDates: Boolean = false,
+        val stampNow: Boolean = false,
+    ) : Operation {
+        override val label get() = "PDF 元数据"
+
+        /** 键名按 PDF 里的写法给，`PdfMeta` 认这套名字。 */
+        fun values(): Map<String, String> = linkedMapOf(
+            "Title" to title, "Author" to author, "Subject" to subject,
+            "Keywords" to keywords, "Creator" to creator, "Producer" to producer,
+        )
+    }
+
+    /**
      * 音频转格式 / 从视频里提声音。目标只有两个是安卓真的编得出来、解得开的：
      * M4A(AAC) 和 WAV —— 系统没有 MP3 编码器，所以"转成 mp3"这条做不了，不给选项。
      * 给 targetBytes 就按时长反推码率（见 [com.fileforge.core.audio.AudioPlan]）。

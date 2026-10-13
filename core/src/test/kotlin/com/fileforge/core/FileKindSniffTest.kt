@@ -159,6 +159,15 @@ class FileKindSniffTest {
     }
 
     @Test
+    fun `PDF 拿到元数据这一条而其他类型拿不到`() {
+        val pdf = OperationKind.applicable(setOf(FileKind.Pdf))
+        assertTrue(OperationKind.PdfMetadata in pdf, "PDF 该能看与改文件属性：$pdf")
+        listOf(FileKind.Jpeg, FileKind.Text, FileKind.Xlsx, FileKind.Mp4).forEach { kind ->
+            assertTrue(OperationKind.PdfMetadata !in OperationKind.applicable(setOf(kind)), "$kind 不该拿到 PDF 的属性操作")
+        }
+    }
+
+    @Test
     fun `Office 三种类型各拿自己的操作`() {
         val docx = OperationKind.applicable(setOf(FileKind.Docx))
         assertTrue(OperationKind.OfficeToText in docx, "docx 该能抽文字：$docx")

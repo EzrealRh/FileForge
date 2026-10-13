@@ -23,6 +23,7 @@ enum class OperationKind(val label: String, val hint: String) {
     PdfReorder("PDF 重排页面", "按给定页序另存，可重复可倒序"),
     PdfToImages("PDF 每页导出图片", "页转 JPG / PNG / WebP"),
     EncryptPdf("PDF 加密码", "设打开密码，可再限制打印/复制/修改"),
+    PdfMetadata("PDF 元数据", "清除或改写文件属性里的标题 / 作者 / 主题 / 关键词 / 制作软件 / 日期"),
     DecryptPdf("PDF 去密码", "填对打开密码，产出不带保护的副本"),
     CompressGif("压缩 GIF", "降尺寸、降帧、减色"),
     GifToImages("GIF 转图片", "逐帧导出，或只要首帧"),
@@ -116,7 +117,7 @@ enum class OperationKind(val label: String, val hint: String) {
             ImagesToPdf -> fileKind.isImage
             CompressPdf, SplitPdfBySize, SplitPdfIntoParts, ExtractPdfPages, RemovePdfPages,
             RotatePdfPages, MergePdfs, PdfToText, PdfToImages, AddPageNumbers, PdfWatermark,
-            EncryptPdf, DecryptPdf, PdfToDocx, PdfToHtml, PdfReorder,
+            EncryptPdf, DecryptPdf, PdfMetadata, PdfToDocx, PdfToHtml, PdfReorder,
             -> fileKind == FileKind.Pdf
             CompressGif, GifToImages, GifWatermark -> fileKind == FileKind.Gif
             ImagesToGif -> fileKind.isImage

@@ -17,6 +17,7 @@ import org.apache.pdfbox.cos.COSStream;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
+import org.apache.pdfbox.pdmodel.PDDocumentInformation;
 import org.apache.pdfbox.pdmodel.PDResources;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.pdmodel.common.PDStream;
@@ -56,6 +57,7 @@ import com.fileforge.core.office.Sheet;
 import com.fileforge.core.office.XlsxSheets;
 import com.fileforge.core.pdf.PdfDoc;
 import com.fileforge.core.pdf.PdfLine;
+import com.fileforge.core.pdf.PdfMeta;
 import com.fileforge.core.pdf.PrintPage;
 import com.fileforge.core.pdf.PrintPlan;
 import com.fileforge.core.pdf.PrintPlanner;
@@ -89,6 +91,8 @@ public final class PdfProbe {
             case "security" -> verifySecurity(new File(args[1]));
             case "textlayout" -> verifyTextLayout(new File(args[1]), new File(args[2]));
             case "pdftable" -> writePdfTable(new File(args[1]), new File(args[2]), new File(args[3]));
+            case "pdfmeta" -> applyPdfMeta(new File(args[1]), new File(args[2]), new File(args[3]),
+                    Integer.parseInt(args[4]));   // 来料 输出 cases.tsv 第几号
             case "xlsxpdf", "docpdf" -> writeDocPdf(new File(args[1]), new File(args[2]), new File(args[3]));   // 字体 输入 输出
             case "pdfdoc" -> pdfStructure(new File(args[1]), new File(args[2]));
             default -> throw new IllegalArgumentException("unknown cmd " + args[0]);
@@ -577,6 +581,59 @@ public final class PdfProbe {
             }
         }
         return "";
+    }
+
+    /**
+     * 「PDF 元数据」那条链子的桌面替身：改写单由 :core 那份 {@code PdfMeta.patch} 算，
+     * 写 /Info 用的是 PDFBox（与 app 里同一个 API 面），改完落一份 notes 给判据对照。
+     * 读回来由 MuPDF 与 pdfplumber 两家独立做 —— 写侧与判侧不同源。
+     */
+    private static void applyPdfMeta(File source, File out, File specFile, int index) throws Exception {
+        String line = java.nio.file.Files.readAllLines(specFile.toPath(), java.nio.charset.StandardCharsets.UTF_8).get(index);
+        String[] parts = line.split("\t", -1);
+        java.util.Map<String, String> values = new java.util.LinkedHashMap<>();
+        for (int i = 4; i < parts.length; i++) {
+            if (parts[i].isEmpty()) continue;
+            int at = parts[i].indexOf('=');
+            values.put(parts[i].substring(0, at), parts[i].substring(at + 1));
+        }
+        PdfMeta.Patch patch = PdfMeta.INSTANCE.patch(parts[0], values, "1".equals(parts[1]),
+                "1".equals(parts[2]), parts[3].isEmpty() ? 0L : Long.parseLong(parts[3]));
+        try (PDDocument doc = PDDocument.load(source)) {
+            PDDocumentInformation info = doc.getDocumentInformation();
+            for (String key : patch.getRemoves()) {
+                if ("*".equals(key)) {
+                    // 清"剩下的"要把点名保留的绕过：库那份键清单连日期一起给，不挑就一起删了
+                    for (String each : new ArrayList<String>(info.getMetadataKeys())) {
+                        if (!patch.getKeeps().contains(each)) info.setCustomMetadataValue(each, null);
+                    }
+                } else if ("CreationDate".equals(key)) {
+                    info.setCreationDate(null);
+                } else if ("ModDate".equals(key)) {
+                    info.setModificationDate(null);
+                } else {
+                    info.setCustomMetadataValue(key, null);
+                }
+            }
+            for (kotlin.Pair<String, String> write : patch.getWrites()) {
+                info.setCustomMetadataValue(write.getFirst(), write.getSecond());
+            }
+            if (patch.getStampNow()) {
+                java.util.Calendar when = java.util.Calendar.getInstance();
+                when.setTimeInMillis(parts[3].isEmpty() ? 0L : Long.parseLong(parts[3]));
+                info.setModificationDate(when);
+            }
+            out.getParentFile().mkdirs();
+            doc.save(out);
+            StringBuilder notes = new StringBuilder();
+            for (String note : patch.getNotes()) notes.append(note).append((char) 10);
+            java.nio.file.Files.write(new File(out.getParentFile(),
+                    out.getName().replaceFirst("\\.pdf$", ".notes.txt")).toPath(),
+                    notes.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            System.out.println("pdfmeta " + out.getName() + " 模式=" + parts[0]
+                    + " 写" + patch.getWrites().size() + "项 删" + patch.getRemoves().size() + "项");
+            for (String note : patch.getNotes()) System.out.println("  note " + note);
+        }
     }
 
     /** 只画字体画得出来的那些字，跳过画不出来的并数一笔（与 app 里 onlyDrawable 同一招）。 */

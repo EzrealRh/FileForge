@@ -111,6 +111,9 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
                     }
                 }
             }
+            is Operation.PdfMetadata -> items.forEach { item ->
+                collect(item.name) { listOf(pdf.metadata(item, operation)) }
+            }
             is Operation.EncryptPdf -> items.forEach { item ->
                 collect(item.name) { listOf(pdf.encrypt(item, operation)) }
             }

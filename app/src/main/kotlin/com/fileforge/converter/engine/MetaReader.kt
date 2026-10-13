@@ -230,8 +230,20 @@ class MetaReader {
             if (runCatching { document.documentCatalog.documentOutline?.firstChild != null }.getOrDefault(false)) {
                 add("有书签" to "是")
             }
-            runCatching { document.documentInformation?.title }.getOrNull()?.takeIf { it.isNotBlank() }
-                ?.let { add("文档标题" to it) }
+            // 文件属性里写了什么就照实列什么：别人转发这份 PDF 时，跟着走的就是这些
+            val info = runCatching { document.documentInformation }.getOrNull()
+            com.fileforge.core.pdf.PdfMeta.FIELDS.forEach { (key, label) ->
+                runCatching { info?.getCustomMetadataValue(key) }.getOrNull()?.takeIf { it.isNotBlank() }
+                    ?.let { add(label to it) }
+            }
+            com.fileforge.core.pdf.PdfMeta.dateLabels().forEach { (key, label) ->
+                val whenWritten = runCatching {
+                    if (key == "CreationDate") info?.creationDate else info?.modificationDate
+                }.getOrNull()
+                whenWritten?.let { add(label to com.fileforge.core.pdf.PdfMeta.readableMillis(it.timeInMillis)) }
+            }
+            val custom = runCatching { info?.metadataKeys?.toList().orEmpty() }.getOrDefault(emptyList())
+            if (custom.isNotEmpty()) add("自定义属性" to "${custom.size} 项：${custom.take(4).joinToString("、")}")
         }
     }
 
