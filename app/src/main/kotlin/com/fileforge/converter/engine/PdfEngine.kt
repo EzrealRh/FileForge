@@ -17,6 +17,7 @@ import com.fileforge.core.pdf.PdfCompressPlan
 import com.fileforge.core.pdf.PdfDoc
 import com.fileforge.core.pdf.PdfLine
 import com.fileforge.core.pdf.PdfMeta
+import com.fileforge.core.pdf.PdfFontProbe
 import com.fileforge.core.pdf.PdfPermission
 import com.fileforge.core.pdf.PdfSecurity
 import com.fileforge.core.pdf.PdfTier
@@ -310,7 +311,7 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
         else PageRangeParser.toPageIndices(PageRangeParser.parse(spec), total)
 
     /** 字体可能来自字体集合，底层句柄要活到存盘之后，所以连它一起交给调用方关。 */
-    private class FontHandle(val font: com.tom_roush.pdfbox.pdmodel.font.PDFont, private val owned: List<Closeable>) {
+    private class FontHandle(val font: com.tom_roush.pdfbox.pdmodel.font.PDFont, private val owned: List<Closeable>, val source: String = "") {
         fun close() = owned.forEach { runCatching { it.close() } }
     }
 
@@ -319,20 +320,41 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
      * 其余到系统字体目录里逐个试，判据是"真的能编码这段字"而不是猜字体名。
      */
     private fun fontFor(document: PDDocument, text: String): FontHandle {
-        if (text.all { it.code in 32..126 }) return FontHandle(PDType1Font.HELVETICA, emptyList())
+        // 探针只问"需要字形的字符"能不能画：换行与制表符不进画布，
+        // 拿整段去问会把每个候选字体都判成"没这个字"（真机上就是整次打印失败）
+        val needed = PdfFontProbe.glyphChars(text)
+        if (PdfFontProbe.latinOnly(text)) return FontHandle(PDType1Font.HELVETICA, emptyList(), "Helvetica（内置罗马字）")
         for (path in SYSTEM_FONTS) {
             val file = File(path)
             if (!file.isFile) continue
             val opened = runCatching { openTrueType(file) }.getOrNull() ?: continue
             val (owner, face) = opened
             val font = runCatching { PDType0Font.load(document, face, true) }.getOrNull()
-            if (font != null && runCatching { font.encode(text); true }.getOrDefault(false)) {
-                return FontHandle(font, listOfNotNull(owner, face as Closeable))
+            val fits = font != null && runCatching {
+                font.encode(needed)
+                font.getStringWidth(needed)
+                true
+            }.getOrDefault(false)
+            if (fits) {
+                return FontHandle(font!!, listOfNotNull(owner, face as Closeable), File(path).name)
             }
             runCatching { face.close() }
             runCatching { owner?.close() }
         }
-        throw IllegalArgumentException("这台系统里没找到能显示「$text」的字体，把文字换成英文数字再试")
+        // 系统里挑不出来就用随应用打包的那一份：AOSP / GMS 镜像的中文字体是 CFF 轮廓的 OTC
+        // （NotoSansCJK-Regular.ttc），pdfbox-android 认不了 CFF —— 只靠系统字体就等于
+        // "这台机器上印不出中文"，而桌面替身是直接加载字体文件的，永远走不到这一步
+        val bundled = runCatching {
+            val stream = context.assets.open(BUNDLED_FONT)
+            val font = com.tom_roush.pdfbox.pdmodel.font.PDType0Font.load(document, stream, true)
+            font.encode(needed)
+            font.getStringWidth(needed)
+            font
+        }.getOrNull()
+        if (bundled != null) return FontHandle(bundled, emptyList(), "内置霞鹜文楷（子集）")
+        throw IllegalArgumentException(
+            "这台系统里没找到能显示「${needed.take(24)}」这些字的字体，换个带中文的字体或把文字改成英文数字再试",
+        )
     }
 
     /** .ttc 是字体集合，只能按名字挑一个；单个 ttf/otf 直接解析。返回 (需要一起关的集合, 真正的面)。 */
@@ -738,6 +760,7 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
             val notes = ArrayList(LinkedHashSet(reading.notes + reading.doc.notes))
             if (bullet != "•") notes += "这份字体没有圆点（U+2022），列表的记号用「$bullet」"
             notes += "${plan.pageCount} 页 · ${size.toInt()}pt · ${operation.paper.label} · 表格画成网格"
+            handle?.source?.takeIf { it.isNotEmpty() }?.let { notes += "字体：$it" }
             if (missing[0] > 0) notes += "选中字体没有 ${missing[0]} 个字，这些位置会缺字"
             plan.notes.forEach { notes += it }
             return EngineOutput(OutputNaming.tagged(item.name, "", "pdf"), output, notes.joinToString(" · "))
@@ -1129,6 +1152,9 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
         const val AES_KEY_LENGTH = 128
         const val MAX_IMAGE_PIXELS = 12_000_000L
         val PROCESSABLE = setOf("DeviceRGB", "DeviceGray")
+
+        /** 随应用打包的中文字体（SIL OFL 1.1，子集：ASCII + 常用中文标点 + GB2312 全量）。 */
+        const val BUNDLED_FONT = "fonts/lxgw-wenkai-subset.ttf"
 
         /** 页码用的深色：0.15 灰比纯黑柔和，扫成灰底也还看得清。 */
         const val DARK = 0.15f

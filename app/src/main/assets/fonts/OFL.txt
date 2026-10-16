@@ -1,0 +1,5 @@
+字体：LXGW WenKai（霞鹜文楷），SIL Open Font License 1.1
+上游：https://github.com/lxgw/LxgwWenKai
+本包内为子集化版本（约 7500 字：ASCII、常用中文标点与 GB2312 全量），随应用内置用于打印中文。
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1. This license is available with a FAQ at: https://openfontlicense.org
