@@ -21,15 +21,13 @@ import com.fileforge.converter.data.Workspace
  * 也有 pandoc 与 ElementTree 各独立读同一份文件当裁判）；这里只管按需读文本、落盘、拼说明。
  * 读是**按需**的：一本书的图片能有几百 MB，只取那几份 XHTML。
  */
+/** 一章的 XHTML 长过这个数，多半是把整包当一章读了（或这书本来就是扫描图）。 */
+internal const val MAX_CHAPTER_BYTES = 32L * 1024 * 1024
+
+/** 解压后的总长上限：zip 炸弹的常规防线，超了直说不做。 */
+internal const val MAX_BOOK_BYTES = 512L * 1024 * 1024
+
 class BookEngine(private val workspace: Workspace) {
-
-    private companion object {
-        /** 一章的 XHTML 长过这个数，多半是把整包当一章读了（或这书本来就是扫描图）。 */
-        const val MAX_CHAPTER_BYTES = 32L * 1024 * 1024
-
-        /** 解压后的总长上限：zip 炸弹的常规防线，超了直说不做。 */
-        const val MAX_BOOK_BYTES = 512L * 1024 * 1024
-    }
 
     fun toText(item: WorkItem): EngineOutput = withBook(item) { book, notes ->
         val body = book.chapters.joinToString("\n\n") { chapter ->
@@ -115,24 +113,7 @@ class BookEngine(private val workspace: Workspace) {
     }
 
     /** 打开包、按条目名惰性读出 XHTML，交给 `:core` 判断层排章节。 */
-    private fun <T> withBook(item: WorkItem, block: (EpubBook, ArrayList<String>) -> T): T =
-        FileSlices(item.file).use { slices ->
-            val archive = ZipReader.read(slices, item.file.length())
-            val sizes = archive.entries.sumOf { it.size }
-            require(sizes <= MAX_BOOK_BYTES) {
-                "这本书解压后有 ${sizes / 1024 / 1024} MB，超过 ${MAX_BOOK_BYTES / 1024 / 1024} MB 上限"
-            }
-            val bytes = HashMap<String, ByteArray>()
-            val book = Epub.read(archive.entries.map { entry -> entry.name }) { name ->
-                val entry = archive.entries.firstOrNull { it.name == name } ?: return@read null
-                require(entry.size <= MAX_CHAPTER_BYTES) { "$name 有 ${entry.size / 1024 / 1024} MB，不像一章正文" }
-                bytes.getOrPut(name) { ZipReader.dataOf(entry, slices) }
-            }
-            require(book.chapters.isNotEmpty()) {
-                (book.notes + "按 spine 没排出一章正文来").joinToString(" · ")
-            }
-            block(book, ArrayList())
-        }
+    private fun <T> withBook(item: WorkItem, block: (EpubBook, ArrayList<String>) -> T): T = openBook(item, block)
 
     /**
      * 一章一句"补了几处标签"会有几十行；同一种说法合并成一条并加总。
@@ -163,3 +144,28 @@ class BookEngine(private val workspace: Workspace) {
     private fun writeText(item: WorkItem, body: String, extension: String) =
         workspace.newStagingFile(extension).apply { writeText(body, Charsets.UTF_8) }
 }
+
+/**
+ * 打开一本 EPUB：解压上限、单章上限、按 spine 排不出正文就拒 —— 这些规矩只该有一份。
+ *
+ * 摆成顶层函数是给「印成 PDF / 写成 Word / 写成电子书」那条共用入口（`SourceText`）用的：
+ * 它在 class 外面拿不到 `withBook`，各写一套装载就会出现"一条路读出三章、另一路读出两章"的分歧。
+ */
+internal fun <T> openBook(item: WorkItem, block: (EpubBook, ArrayList<String>) -> T): T =
+    FileSlices(item.file).use { slices ->
+        val archive = ZipReader.read(slices, item.file.length())
+        val sizes = archive.entries.sumOf { it.size }
+        require(sizes <= MAX_BOOK_BYTES) {
+            "这本书解压后有 ${sizes / 1024 / 1024} MB，超过 ${MAX_BOOK_BYTES / 1024 / 1024} MB 上限"
+        }
+        val bytes = HashMap<String, ByteArray>()
+        val book = Epub.read(archive.entries.map { entry -> entry.name }) { name ->
+            val entry = archive.entries.firstOrNull { it.name == name } ?: return@read null
+            require(entry.size <= MAX_CHAPTER_BYTES) { "$name 有 ${entry.size / 1024 / 1024} MB，不像一章正文" }
+            bytes.getOrPut(name) { ZipReader.dataOf(entry, slices) }
+        }
+        require(book.chapters.isNotEmpty()) {
+            (book.notes + "按 spine 没排出一章正文来").joinToString(" · ")
+        }
+        block(book, ArrayList())
+    }

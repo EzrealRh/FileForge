@@ -131,14 +131,23 @@ enum class OperationKind(val label: String, val hint: String) {
             ConvertTextEncoding, ConvertSubtitle -> fileKind.isTextual
             AudioTrim -> fileKind.isAudio || fileKind.isVideo
             // 印成 PDF、写成 Word 与写成电子书走同一条来源判定：docx / pptx / odt / rtf 先把正文抽出来，
+            // 电子书（EPUB）按 spine 排出的章抽成树，表格（xlsx / ods）一张表一节，
             // 网页与 Markdown 按内容认，抽出来 / 认出来的是什么就是什么
-            // xlsx 走文档树：PDF 那边现在画得出网格了（PrintPlanner），一张表在纸上还是横平竖直的
+            // xlsx 与 ods 走文档树：PDF 那边现在画得出网格了（PrintPlanner），一张表在纸上还是横平竖直的
             TextToPdf ->
                 fileKind.isTextual || fileKind == FileKind.Docx || fileKind == FileKind.Pptx ||
-                    fileKind == FileKind.Odt || fileKind == FileKind.Rtf || fileKind == FileKind.Xlsx
-            TextToDocx, TextToEpub, TextToOdt, TextToRtf ->
+                    fileKind == FileKind.Odt || fileKind == FileKind.Rtf || fileKind == FileKind.Xlsx ||
+                    fileKind == FileKind.Epub || fileKind == FileKind.Ods
+            // EPUB 已经有专门的「写成 Word」，不再给一条重复入口；写成电子书对电子书本身也没意义
+            TextToDocx, TextToEpub ->
                 fileKind.isTextual || fileKind == FileKind.Docx || fileKind == FileKind.Pptx ||
-                    fileKind == FileKind.Odt || fileKind == FileKind.Xlsx || fileKind == FileKind.Rtf
+                    fileKind == FileKind.Odt || fileKind == FileKind.Xlsx || fileKind == FileKind.Rtf ||
+                    fileKind == FileKind.Ods
+            // ODT / RTF 那两条对电子书与 ODS 都成立：抽出来的就是同一棵文档树，没有专门的第二条路
+            TextToOdt, TextToRtf ->
+                fileKind.isTextual || fileKind == FileKind.Docx || fileKind == FileKind.Pptx ||
+                    fileKind == FileKind.Odt || fileKind == FileKind.Xlsx || fileKind == FileKind.Rtf ||
+                    fileKind == FileKind.Epub || fileKind == FileKind.Ods
             OfficeToText -> fileKind == FileKind.Docx || fileKind == FileKind.Pptx
             // Word 的结构读法只给 docx：演示文稿那一套记号在别的文件里（见下面 PptxTo* 那条）
             DocxToMarkdown, DocxToHtml -> fileKind == FileKind.Docx

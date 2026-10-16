@@ -39,6 +39,7 @@ import org.apache.pdfbox.pdmodel.encryption.AccessPermission;
 import org.apache.pdfbox.pdmodel.encryption.InvalidPasswordException;
 import org.apache.pdfbox.pdmodel.encryption.StandardProtectionPolicy;
 import com.fileforge.core.doc.Doc;
+import com.fileforge.core.doc.Html;
 import com.fileforge.core.doc.TextDoc;
 import com.fileforge.core.doc.DocPara;
 import com.fileforge.core.doc.DocPart;
@@ -49,6 +50,12 @@ import com.fileforge.core.office.DocxWrite;
 import com.fileforge.core.office.DocxBody;
 import com.fileforge.core.office.DocxRead;
 import com.fileforge.core.office.OdtBody;
+import com.fileforge.core.office.OdsBook;
+import com.fileforge.core.office.OdsRead;
+import com.fileforge.core.office.OdsSheets;
+import com.fileforge.core.book.Epub;
+import com.fileforge.core.book.EpubBook;
+import com.fileforge.core.book.EpubChapter;
 import com.fileforge.core.office.OdtRead;
 import com.fileforge.core.office.PptxSlideBody;
 import com.fileforge.core.office.PptxRead;
@@ -575,6 +582,28 @@ public final class PdfProbe {
                     say.addAll(XlsxSheets.INSTANCE.summary(book.getSheets()));
                     say.addAll(XlsxSheets.INSTANCE.notes(book.getSheets()));
                     say.addAll(book.getReasons());
+                } else if (lower.endsWith(".ods")) {
+                    // ODS 与 app 侧 SourceText 那条一样，拿 :core 那份 OdsSheets 的树（表头听文件的声明）
+                    OdsBook ods = OdsRead.INSTANCE.read(load);
+                    parts = OdsSheets.INSTANCE.parts(ods.getSheets());
+                    say.add("按表格里写的格子排");
+                    say.addAll(OdsSheets.INSTANCE.summary(ods.getSheets()));
+                    say.addAll(ods.getNotes());
+                    say.addAll(OdsSheets.INSTANCE.notes(ods.getSheets()));
+                } else if (lower.endsWith(".epub")) {
+                    // 电子书：按 spine 排出的章，一章一章用网页那套读法摊成树 —— 装载与上限走 :core
+                    List<String> names = new ArrayList<>();
+                    zip.entries().asIterator().forEachRemaining(entry -> names.add(entry.getName()));
+                    EpubBook book = Epub.INSTANCE.read(names, load);
+                    List<DocPart> all = new ArrayList<>();
+                    for (EpubChapter chapter : book.getChapters()) {
+                        Doc one = Html.INSTANCE.toDoc(chapter.getSource());
+                        say.addAll(one.getNotes());
+                        all.addAll(one.getParts());
+                    }
+                    parts = all;
+                    say.add(0, "按电子书自己排的阅读顺序搬（" + parts.size() + " 块）");
+                    say.addAll(1, book.getNotes());
                 } else {
                     throw new IllegalArgumentException("认不出的来源：" + source.getName());
                 }

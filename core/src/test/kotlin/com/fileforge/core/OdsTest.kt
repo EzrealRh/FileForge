@@ -57,6 +57,25 @@ class OdsTest {
         assertEquals(listOf(listOf("项目", "金额"), listOf("房租", "1500")), read.sheets.single().rows)
     }
 
+    /**
+     * 文件里有一张表整张空着，读的时候**留着它**。
+     *
+     * 悄悄丢了就等于用户看不出"文件本来没填"与"我们漏了一张"的差别；留着但各条出路都不排它，
+     * 并由 `OdsSheets.notes` 把名字说出来 —— 这两半合起来才是交代。
+     */
+    @Test
+    fun `一张真空的表也留着，好让下游说得出它的名字`() {
+        val read = body(
+            "<table:table table:name=\"有字的一页\"><table:table-row>" + cell("甲") + cell("乙") + "</table:table-row></table:table>" +
+                "<table:table table:name=\"一张空表\"/>",
+        )
+        assertEquals(listOf("有字的一页", "一张空表"), read.sheets.map { it.name })
+        assertEquals(emptyList<List<String>>(), read.sheets.last().rows)
+        assertEquals(listOf("1 张表是空的（一张空表），没占一节"),
+            com.fileforge.core.office.OdsSheets.notes(read.sheets))
+        assertEquals(2, com.fileforge.core.office.OdsSheets.parts(read.sheets).size, "空的那张不该占一节")
+    }
+
     @Test
     fun `重名的表编号而不是互相盖掉`() {
         val read = body(

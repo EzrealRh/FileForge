@@ -335,6 +335,12 @@ class FileKindSniffTest {
         )
         assertTrue(OperationKind.XlsxToCsv !in ods && OperationKind.OdtToMarkdown !in ods, "别把 xlsx / ODT 那几条给 ODS：$ods")
         assertTrue(OperationKind.UnpackZip !in ods, "认得出是 ODS 就不该只给解压：$ods")
+        // ODS 与 xlsx 同一族：一张表一节的树能直接进排版那几条（印 PDF / 写 Word / 写电子书…）
+        assertTrue(
+            setOf(OperationKind.TextToPdf, OperationKind.TextToDocx, OperationKind.TextToEpub,
+                OperationKind.TextToOdt, OperationKind.TextToRtf).all { it in ods },
+            "ODS 该能进排版那几条：$ods",
+        )
         val csv = OperationKind.applicable(setOf(FileKind.Text))
         assertTrue(OperationKind.CsvToOds in csv, "文本该能写成 ODS：$csv")
         assertTrue(OperationKind.CsvToOds !in OperationKind.applicable(setOf(FileKind.Png)), "图片没有 ODS 可写")
@@ -411,7 +417,7 @@ class FileKindSniffTest {
     }
 
     @Test
-    fun `电子书给三条出路，不给普通 zip 的入口`() {
+    fun `电子书三条抽文字的出路都在，也能进排版那几条，不给普通 zip 的入口`() {
         val epub = OperationKind.applicable(setOf(FileKind.Epub))
         assertTrue(
             setOf(OperationKind.EpubToText, OperationKind.EpubToMarkdown, OperationKind.EpubToDocx)
@@ -422,8 +428,21 @@ class FileKindSniffTest {
         // 技术上它是个 zip，但摆"解压"等于让用户去翻一堆 XHTML —— 三条出路里没有这一条
         assertFalse(OperationKind.UnpackZip in epub, "电子书不该拿到解压按钮：$epub")
         assertTrue(OperationKind.PackZip in epub, "打包对类型不设限")
-        // 与纯文本混选：没有对两边都成立的出路，只留打包
-        assertEquals(listOf(OperationKind.PackZip, OperationKind.PackTar), OperationKind.applicable(setOf(FileKind.Epub, FileKind.Text)))
+        // 电子书也能印成 PDF 与写成 ODT / RTF：抽出来就是一棵文档树，与 docx / odt 同一条路。
+        // 「写成 Word」不给 —— 电子书已经有专门的那条（EpubToDocx），两条并列只会让用户挑一条一样的事
+        assertTrue(
+            setOf(OperationKind.TextToPdf, OperationKind.TextToOdt, OperationKind.TextToRtf)
+                .all { it in epub }, "电子书该能进这三条排版路：$epub",
+        )
+        assertTrue(OperationKind.TextToDocx !in epub, "电子书已有专门的「写成 Word」，别再给一条重复的：$epub")
+        // 与纯文本混选：这几条对两边都成立（各自抽自己的树），换编码与字幕那种只对文本成立的进不来
+        assertEquals(
+            listOf(
+                OperationKind.PackZip, OperationKind.PackTar, OperationKind.TextToPdf, OperationKind.TextToOdt,
+                OperationKind.TextToRtf,
+            ),
+            OperationKind.applicable(setOf(FileKind.Epub, FileKind.Text)),
+        )
     }
 
     @Test

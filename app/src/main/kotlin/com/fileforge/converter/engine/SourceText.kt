@@ -92,6 +92,40 @@ internal object SourceText {
                 listOf("按文件里写的结构排") + read.first.notes + read.second,
             )
         }
+        if (item.kind == FileKind.Ods) {
+            // ODS 也拿同一棵树：每张表一节、表名当小标题，首行算不算表头听文件自己的（读的一刻已定）
+            val book = odsBookOf(item)
+            val parts = com.fileforge.core.office.OdsSheets.parts(book.sheets)
+            val telling = com.fileforge.core.office.OdsSheets.notes(book.sheets)
+            require(parts.isNotEmpty()) {
+                (book.notes + telling + "每张表都是空的，纸上没有可排的东西").joinToString(" · ")
+            }
+            return Reading(
+                Doc(parts, book.notes),
+                com.fileforge.core.doc.HtmlWrite.text(parts),
+                listOf("按表格里写的格子排") + com.fileforge.core.office.OdsSheets.summary(book.sheets) +
+                    book.notes + telling,
+            )
+        }
+        if (item.kind == FileKind.Epub) {
+            // 电子书：按 spine 排出来的章，一章一章用网页那套读法摊成树 ——
+            // 章节标题是文件里写的 h1/h2，不按字号猜；装载走 BookEngine 那唯一的一份 openBook
+            val read = openBook(item) { book, notes ->
+                val parts = ArrayList<com.fileforge.core.doc.DocPart>()
+                book.chapters.forEach { chapter ->
+                    val doc = com.fileforge.core.doc.Html.toDoc(chapter.source)
+                    notes += doc.notes
+                    parts += doc.parts
+                }
+                parts to book.notes
+            }
+            require(read.first.isNotEmpty()) { (read.second + "这本书没有可读的正文").joinToString(" · ") }
+            return Reading(
+                Doc(read.first, read.second),
+                com.fileforge.core.doc.HtmlWrite.text(read.first),
+                listOf("按电子书自己排的阅读顺序搬（${read.first.size} 块）") + read.second,
+            )
+        }
         require(item.file.length() <= MAX_TEXT_BYTES) {
             "这份文本 ${item.file.length() / 1024 / 1024} MB，超过 ${MAX_TEXT_BYTES / 1024 / 1024} MB 上限"
         }

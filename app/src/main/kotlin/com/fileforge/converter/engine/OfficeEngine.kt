@@ -520,24 +520,23 @@ class OfficeEngine(private val workspace: Workspace) {
         notes += "${sheets.size} 张表"
         return workbook(
             item,
-            sheets.map { SheetToWrite(it.name, padToWidth(it.rows)) },
+            sheets.map { SheetToWrite(it.name, com.fileforge.core.office.OdsSheets.padded(it.rows)) },
             notes,
         )
     }
 
-    /** ODS → 网页：每张表一块表格，第一行是表头时写成 `<th>`。 */
+    /**
+     * ODS → 网页：每张表一块表格，第一行是表头时写成 `<th>`。
+     *
+     * 格子怎么补、哪张表算空的，用的是 `:core` 那份 `OdsSheets` —— 与「印成 PDF」「写成 Word」
+     * 拿的是同一棵树，不会一个把空表排成一节、另一个跳过它。
+     */
     fun odsToHtml(item: WorkItem): EngineOutput {
         val read = odsBook(item)
-        val parts = read.sheets.filter { it.rows.isNotEmpty() }
-            .flatMap { sheet ->
-                listOf<DocPart>(
-                    DocParagraph(DocPara(listOf(DocRun(sheet.name)), "Heading2")),
-                    DocTable(sheet.header, padToWidth(sheet.rows)),
-                )
-            }
+        val parts = com.fileforge.core.office.OdsSheets.parts(read.sheets)
         require(parts.isNotEmpty()) { (read.notes + "每张表都是空的").joinToString(" · ") }
         val page = HtmlWrite.page(OutputNaming.stem(item.name), parts, language = "zh")
-        val notes = ArrayList(read.notes + page.notes)
+        val notes = ArrayList(read.notes + page.notes + com.fileforge.core.office.OdsSheets.notes(read.sheets))
         notes.add(0, "${parts.size / 2} 张表")
         val file = workspace.newStagingFile("html").apply { writeText(page.html, Charsets.UTF_8) }
         return EngineOutput(
@@ -566,17 +565,7 @@ class OfficeEngine(private val workspace: Workspace) {
         )
     }
 
-    private fun odsBook(item: WorkItem): com.fileforge.core.office.OdsBook =
-        OoxmlFile(item.file).use { pack ->
-            require(pack.kind == FileKind.Ods) { "这份包里没找到 opendocument.spreadsheet 的 mimetype，它不是 ODS" }
-            OdsRead.read { name -> pack.bytesOf(name) }
-        }
-
-    /** 每行都补到最宽的列数：xlsx 与网页的表格都按整齐的网格排。 */
-    private fun padToWidth(rows: List<List<String>>): List<List<String>> {
-        val width = rows.maxOf { it.size }
-        return rows.map { row -> row + List(width - row.size) { "" } }
-    }
+    private fun odsBook(item: WorkItem): com.fileforge.core.office.OdsBook = odsBookOf(item)
 
     private fun workbook(
         item: WorkItem,
@@ -605,3 +594,15 @@ class OfficeEngine(private val workspace: Workspace) {
     private fun write(extension: String, text: String): File =
         workspace.newStagingFile(extension).apply { writeText(text, Charsets.UTF_8) }
 }
+
+/**
+ * 打开一本 ODS：按包里的 mimetype 认，再交给 `:core` 那份读法。
+ *
+ * 摆成顶层函数是给「印成 PDF / 写成 Word」那条共用入口（`SourceText`）用的 ——
+ * 装载的规矩（mimetype 不对就拒、部件按名字给）只该有一份，不该在两个地方各写一遍。
+ */
+internal fun odsBookOf(item: WorkItem): com.fileforge.core.office.OdsBook =
+    OoxmlFile(item.file).use { pack ->
+        require(pack.kind == FileKind.Ods) { "这份包里没找到 opendocument.spreadsheet 的 mimetype，它不是 ODS" }
+        OdsRead.read { name -> pack.bytesOf(name) }
+    }

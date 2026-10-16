@@ -48,9 +48,11 @@ object OdsRead {
         children(body) { node ->
             val element = node as? Element ?: return@children
             if (localName(element) != "table") return@children
-            val made = table(element, tally) ?: return@children
+            // 真空着的一张表也留着（rows 为空）：把它悄悄丢了，用户就分不清"文件里本来没填"
+            // 与"我们漏了一张"，各条出路的 notes 要按名子说这一张没占一节
+            val made = table(element, tally)
             val name = uniqueName(odsName(element, sheets.size), used)
-            sheets += OdsSheet(name, made.first, made.second)
+            sheets += OdsSheet(name, made?.first ?: false, made?.second ?: emptyList())
         }
         require(sheets.isNotEmpty()) { "这份 ODS 里一张表都没有" }
         val losses = tally.losses()
