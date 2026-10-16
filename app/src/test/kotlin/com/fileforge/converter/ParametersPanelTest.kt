@@ -101,5 +101,10 @@ class ParametersPanelTest {
 
         val forPdf = applicable(setOf(FileKind.Pdf))
         assertTrue(OperationKind.PdfReorder in forPdf)
+        // 纸上的行列还原成表格：只给 PDF，图片与视频上没有"字"可量
+        assertTrue(OperationKind.PdfToCsv in forPdf)
+        assertTrue(OperationKind.PdfToXlsx in forPdf)
+        assertTrue(OperationKind.PdfToCsv !in forImage)
+        assertTrue(OperationKind.PdfToXlsx !in forVideo)
     }
 }

@@ -59,6 +59,10 @@ import com.fileforge.core.office.XlsxSheets;
 import com.fileforge.core.pdf.PdfDoc;
 import com.fileforge.core.pdf.PdfLine;
 import com.fileforge.core.pdf.PdfMeta;
+import com.fileforge.core.pdf.PdfTableDetect;
+import com.fileforge.core.pdf.PdfTableSheets;
+import com.fileforge.core.pdf.PdfWord;
+import com.fileforge.core.pdf.TableSheet;
 import com.fileforge.core.pdf.PrintPage;
 import com.fileforge.core.pdf.PrintPlan;
 import com.fileforge.core.pdf.PrintPlanner;
@@ -93,6 +97,8 @@ public final class PdfProbe {
                     Integer.parseInt(args[4]));   // 来料 输出 cases.tsv 第几号
             case "xlsxpdf", "docpdf" -> writeDocPdf(new File(args[1]), new File(args[2]), new File(args[3]));   // 字体 输入 输出
             case "pdfdoc" -> pdfStructure(new File(args[1]), new File(args[2]));
+            case "pdfwords" -> dumpPdfWords(new File(args[1]), new File(args[2]));
+            case "pdftables" -> readPdfTables(new File(args[1]), new File(args[2]));
             default -> throw new IllegalArgumentException("unknown cmd " + args[0]);
         }
     }
@@ -1374,6 +1380,160 @@ public final class PdfProbe {
             height = 0f;
             right = 0f;
             heavy = false;
+        }
+    }
+
+    /**
+     * 把 writeString 的每一片原样落进 pieces.tsv：片宽、片与上一片的右边距、以及这片之前有没有来过
+     * writeWordSeparator。
+     *
+     * 这是在**量**不是在猜 —— "词"这条线到底该划在多宽的空隙上，得看真纸上相邻片之间隔了多少，
+     * 而不是我定一个看着顺眼的数（阈值来自测量的规矩见 tools/verify_pdf_table.py 那段）。
+     */
+    private static void dumpPdfWords(File pdf, File outDir) throws Exception {
+        outDir.mkdirs();
+        StringBuilder tsv = new StringBuilder();
+        try (PDDocument document = PDDocument.load(pdf)) {
+            for (int index = 0; index < document.getNumberOfPages(); index++) {
+                PieceMeter meter = new PieceMeter(index + 1);
+                meter.setStartPage(index + 1);
+                meter.setEndPage(index + 1);
+                meter.getText(document);
+                for (Piece piece : meter.pieces) {
+                    tsv.append(piece.page).append('\t')
+                        .append(String.format("%.2f", piece.top)).append('\t')
+                        .append(String.format("%.2f", piece.left)).append('\t')
+                        .append(String.format("%.2f", piece.right)).append('\t')
+                        .append(String.format("%.2f", piece.gap)).append('\t')
+                        .append(String.format("%.2f", piece.size)).append('\t')
+                        .append(piece.afterSeparator ? "1" : "0").append('\t')
+                        .append(piece.text.replace("\t", " ").replace("\n", " ")).append('\n');
+                }
+            }
+        }
+        java.nio.file.Files.writeString(new File(outDir, "pieces.tsv").toPath(), tsv.toString());
+        System.out.printf("pdfwords：%s → %s/pieces.tsv%n", pdf.getName(), outDir);
+    }
+
+    /**
+     * 应用那条读路的桌面版：一片当一词（与 app 侧 PdfLineScribe 同一件事），列由 :core 找，
+     * 跨页的同一张表由 :core 接 —— 这里不写任何判断，判据核的就是应用会用的那一套。
+     */
+    private static void readPdfTables(File pdf, File outDir) throws Exception {
+        outDir.mkdirs();
+        List<PdfWord> words = new ArrayList<>();
+        try (PDDocument document = PDDocument.load(pdf)) {
+            for (int index = 0; index < document.getNumberOfPages(); index++) {
+                PieceMeter meter = new PieceMeter(index);
+                meter.setStartPage(index + 1);
+                meter.setEndPage(index + 1);
+                meter.getText(document);
+                for (Piece piece : meter.pieces) {
+                    String text = piece.text.trim();
+                    if (!text.isEmpty() && piece.size > 0f) {
+                        words.add(new PdfWord(text, piece.left, piece.right, piece.top, piece.top + piece.size, index));
+                    }
+                }
+            }
+        }
+        PdfTableDetect.Result detected = PdfTableDetect.INSTANCE.tablesOf(words, 3);
+        PdfTableSheets.Reading read = PdfTableSheets.INSTANCE.from(detected);
+        StringBuilder tsv = new StringBuilder();
+        for (TableSheet sheet : read.getSheets()) {
+            for (List<String> row : sheet.getRows()) {
+                // 格子里的换行写成 \\n：不转义的话一行会被它劈成两行，读的人分不开（排片单那份同此规矩）
+                List<String> escaped = new ArrayList<>();
+                for (String cell : row) {
+                    escaped.add(cell.replace("\n", "\\n"));
+                }
+                tsv.append(sheet.getName()).append('\t').append(String.join("\t", escaped)).append('\n');
+            }
+        }
+        java.nio.file.Files.writeString(new File(outDir, "sheets.tsv").toPath(), tsv.toString());
+        // 列边界单独落一份：判据要拿它去对独立读路（pdfplumber 自己切的词起点），
+        // 而合成工作表之后边界就没了 —— 这里存的是"这一页我们认为列在哪儿"这件事本身
+        StringBuilder cuts = new StringBuilder();
+        for (PdfTableDetect.Detected table : detected.getTables()) {
+            cuts.append(table.getPage() + 1).append('\t')
+                .append(String.format("%.2f", table.getTop())).append('\t')
+                .append(String.format("%.2f", table.getBottom())).append('\t')
+                .append(table.getRows().size()).append('\t')
+                .append(table.getBoundaries().stream()
+                    .map(at -> String.format("%.2f", at)).reduce("", (a, b) -> a.isEmpty() ? b : a + "," + b))
+                .append('\n');
+        }
+        java.nio.file.Files.writeString(new File(outDir, "cuts.tsv").toPath(), cuts.toString());
+        for (String note : read.getNotes()) System.out.println("  note: " + note);
+        int rows = read.getSheets().stream().mapToInt(sheet -> sheet.getRows().size()).sum();
+        System.out.printf("pdftables：%s → %d 张表 · %d 行 · %d 个词，产物在 %s/sheets.tsv%n",
+            pdf.getName(), read.getSheets().size(), rows, words.size(), outDir);
+    }
+
+    static final class Piece {
+        final int page;
+        final float top, left, right, gap, size;
+        final boolean afterSeparator;
+        final String text;
+
+        Piece(int page, float top, float left, float right, float gap, float size, boolean afterSeparator, String text) {
+            this.page = page;
+            this.top = top;
+            this.left = left;
+            this.right = right;
+            this.gap = gap;
+            this.size = size;
+            this.afterSeparator = afterSeparator;
+            this.text = text;
+        }
+    }
+
+    /** 只记录 writeString 给的每一片，不合并、不判断 —— 判断留给 :core，好让桌面与安卓用同一套。 */
+    static final class PieceMeter extends PDFTextStripper {
+
+        final List<Piece> pieces = new ArrayList<>();
+        private final int page;
+        private float lastTop = Float.MAX_VALUE;
+        private float lastRight;
+        private boolean pendingSeparator;
+
+        PieceMeter(int page) throws IOException {
+            this.page = page;
+            setSortByPosition(true);
+        }
+
+        @Override
+        protected void writeString(String text, List<TextPosition> positions) {
+            if (positions.isEmpty()) {
+                return;
+            }
+            float left = Float.MAX_VALUE;
+            float right = 0f;
+            float top = Float.MAX_VALUE;
+            float size = 0f;
+            for (TextPosition position : positions) {
+                left = Math.min(left, position.getXDirAdj());
+                right = Math.max(right, position.getXDirAdj() + position.getWidthDirAdj());
+                top = Math.min(top, position.getYDirAdj());
+                size = Math.max(size, position.getFontSizeInPt());
+            }
+            boolean sameLine = Math.abs(top - lastTop) < 0.5f;
+            float gap = sameLine ? left - lastRight : 0f;
+            pieces.add(new Piece(page, top, left, right, gap, size, pendingSeparator, text));
+            lastTop = top;
+            lastRight = right;
+            pendingSeparator = false;
+        }
+
+        @Override
+        protected void writeWordSeparator() {
+            pendingSeparator = true;
+        }
+
+        @Override
+        protected void writeLineSeparator() {
+            lastTop = Float.MAX_VALUE;
+            lastRight = 0f;
+            pendingSeparator = false;
         }
     }
 }

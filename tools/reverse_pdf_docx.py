@@ -49,8 +49,12 @@ BREAKS = [
      "if (last == '-' && first.isLowerCase()) return previous + next",
      "拉丁文的词形与声明相同"),
     ("量的时候取行内最小字号（混排的那行量小了）", PROBE,
-     "size = Math.max(size, position.getFontSizeInPt());",
-     "size = size == 0f ? position.getFontSizeInPt() : Math.min(size, position.getFontSizeInPt());",
+     # 带上下两句才只指到 LineMeter：PieceMeter（词那层的量法）里有同一行 max 语句，
+     # 单行锚点会从"这一处"变成"两处都有"，反例就跳过了 —— 跳过等于这条判据没牙
+     "size = Math.max(size, position.getFontSizeInPt());\n"
+     "                left = Math.min(left, position.getXDirAdj());",
+     "size = size == 0f ? position.getFontSizeInPt() : Math.min(size, position.getFontSizeInPt());\n"
+     "                left = Math.min(left, position.getXDirAdj());",
      "字号与位置与 pdfminer 独立量的一致"),
 ]
 

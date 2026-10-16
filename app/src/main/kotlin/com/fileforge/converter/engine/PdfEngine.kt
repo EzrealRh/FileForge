@@ -20,7 +20,11 @@ import com.fileforge.core.pdf.PdfMeta
 import com.fileforge.core.pdf.PdfFontProbe
 import com.fileforge.core.pdf.PdfPermission
 import com.fileforge.core.pdf.PdfSecurity
+import com.fileforge.core.pdf.PdfTableDetect
+import com.fileforge.core.pdf.PdfTableSheets
 import com.fileforge.core.pdf.PdfTier
+import com.fileforge.core.pdf.PdfWord
+import com.fileforge.core.pdf.TableSheet
 import com.fileforge.core.pdf.PrintPlanner
 import com.fileforge.core.pdf.SplitPlanner
 import com.fileforge.core.pdf.StampFrame
@@ -940,6 +944,80 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
             lines += scribe.lines
         }
         return Triple(PdfDoc.toDoc(lines), pages.size, lines)
+    }
+
+    /**
+     * PDF → CSV / Excel 共用的那一次读：逐页量词 → 按对齐找列 → 把跨页的同一张表接起来。
+     *
+     * 判断全在 `:core`（`PdfTableDetect` 与 `PdfTableSheets`，那边能脱机单测，也能在桌面上对着
+     * pdfplumber 对答案）；这里只管量与落盘，两个产物因此不会一个说 4 行一个说 5 行。
+     */
+    private fun sheetsOf(document: PDDocument, spec: String): Pair<List<TableSheet>, List<String>> {
+        val total = document.numberOfPages
+        val pages = if (spec.isBlank()) (0 until total).toList()
+        else PageRangeParser.toPageIndices(PageRangeParser.parse(spec), total)
+        val words = ArrayList<PdfWord>()
+        pages.forEach { index ->
+            val scribe = PdfLineScribe(index)
+            scribe.setStartPage(index + 1)
+            scribe.setEndPage(index + 1)
+            scribe.getText(document)
+            words += scribe.words
+        }
+        val read = PdfTableSheets.from(PdfTableDetect.tablesOf(words))
+        return read.sheets to (read.notes + "看了 ${pages.size} 页 · ${words.size} 个词")
+    }
+
+    /** 认不出表时怎么说：把核心那一页一页的交代带上，并给一条能走的路，不说空话。 */
+    private fun noTableMessage(notes: List<String>): String =
+        notes.joinToString(" · ")
+            .ifBlank { "纸上的行没在同一个地方断开，看不出一列一列的样子" } +
+            "；扫描件（字是图片）没有文字层，要留档走「每页导出图片」，要文字走「PDF 提取文字」"
+
+    fun toCsv(item: WorkItem, operation: Operation.PdfToCsv): List<EngineOutput> {
+        val document = loadForReading(item.file)
+        try {
+            val (sheets, notes) = sheetsOf(document, operation.spec)
+            require(sheets.isNotEmpty()) { noTableMessage(notes) }
+            return sheets.map { sheet ->
+                val text = com.fileforge.core.data.Csv.render(sheet.rows)
+                val file = workspace.newStagingFile("csv").apply { writeText(text, Charsets.UTF_8) }
+                EngineOutput(
+                    OutputNaming.tagged(item.name, if (sheets.size == 1) "" else sheet.name, "csv"),
+                    file,
+                    (listOf(
+                        "${sheet.rows.size} 行 × ${sheet.rows.maxOf { it.size }} 列",
+                        "来自第 ${sheet.pages.joinToString("、") { (it + 1).toString() }} 页",
+                    ) + notes).filter { it.isNotBlank() }.joinToString(" · "),
+                )
+            }
+        } finally {
+            runCatching { document.close() }
+        }
+    }
+
+    fun toXlsx(item: WorkItem, operation: Operation.PdfToXlsx): EngineOutput {
+        val document = loadForReading(item.file)
+        try {
+            val (sheets, notes) = sheetsOf(document, operation.spec)
+            require(sheets.isNotEmpty()) { noTableMessage(notes) }
+            val out = com.fileforge.core.office.XlsxWrite.workbook(
+                sheets.map { com.fileforge.core.office.SheetToWrite(it.name, it.rows) },
+                modifiedAt = item.file.lastModified(),
+            )
+            val file = workspace.newStagingFile("xlsx").apply { writeBytes(out.bytes) }
+            val which = sheets.joinToString("、") { sheet ->
+                "${sheet.name}（第 ${sheet.pages.joinToString("+") { (it + 1).toString() }} 页 ${sheet.rows.size} 行）"
+            }
+            return EngineOutput(
+                OutputNaming.tagged(item.name, "Excel", "xlsx"),
+                file,
+                (listOf("${sheets.size} 张表 · ${sheets.sumOf { it.rows.size }} 行", which) + notes)
+                    .filter { it.isNotBlank() }.joinToString(" · "),
+            )
+        } finally {
+            runCatching { document.close() }
+        }
     }
 
     fun imagesToPdf(items: List<WorkItem>, paper: PdfPaper, marginDp: Int): EngineOutput {

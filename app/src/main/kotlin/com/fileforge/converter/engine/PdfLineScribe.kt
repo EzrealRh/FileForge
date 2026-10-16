@@ -1,6 +1,7 @@
 package com.fileforge.converter.engine
 
 import com.fileforge.core.pdf.PdfLine
+import com.fileforge.core.pdf.PdfWord
 import com.tom_roush.pdfbox.pdmodel.PDPage
 import com.tom_roush.pdfbox.pdmodel.font.PDFont
 import com.tom_roush.pdfbox.text.PDFTextStripper
@@ -19,6 +20,15 @@ internal class PdfLineScribe(private val pageNo: Int) : PDFTextStripper() {
 
     val lines = ArrayList<PdfLine>()
 
+    /**
+     * 词级的位置：找列只能用这个。
+     *
+     * 一次 writeString 就是一段"词"（实测本机 PDFBox 对六份表格 PDF 给的 614 片里，
+     * 每一片的边界要么紧挨着上一片、要么之前来过 writeWordSeparator，没有一片是被劈开的字），
+     * 所以这里一片记一片，不再自己做合并 —— 合并的规矩交给 `:core`，桌面与安卓才用同一套。
+     */
+    val words = ArrayList<PdfWord>()
+
     private val text = StringBuilder()
     private var size = 0f
     private var left = Float.MAX_VALUE
@@ -34,13 +44,27 @@ internal class PdfLineScribe(private val pageNo: Int) : PDFTextStripper() {
     override fun writeString(chunk: String, positions: MutableList<TextPosition>) {
         if (positions.isEmpty()) return
         text.append(chunk)
+        // 片自己的边界：那三个累加字段是"整行最左/最上"，拿它当词的位置会把每个词都说成从行首开始
+        var pieceLeft = Float.MAX_VALUE
+        var pieceRight = 0f
+        var pieceTop = Float.MAX_VALUE
+        var pieceSize = 0f
         positions.forEach { position ->
+            pieceLeft = min(pieceLeft, position.xDirAdj)
+            pieceRight = max(pieceRight, position.xDirAdj + position.widthDirAdj)
+            pieceTop = min(pieceTop, position.yDirAdj)
+            pieceSize = max(pieceSize, position.fontSizeInPt)
             size = max(size, position.fontSizeInPt)
             left = min(left, position.xDirAdj)
             top = min(top, position.yDirAdj)
             height = position.pageHeight
             right = max(right, position.xDirAdj + position.widthDirAdj)
             if (isHeavy(position.font)) heavy = true
+        }
+        val piece = chunk.trim()
+        if (piece.isNotEmpty() && pieceSize > 0f) {
+            // 纸上没有"这一行有多高"可用，字号就是最贴近的量：行高取字号，找列的行容差由它推
+            words += PdfWord(piece, pieceLeft, pieceRight, pieceTop, pieceTop + pieceSize, pageNo)
         }
     }
 

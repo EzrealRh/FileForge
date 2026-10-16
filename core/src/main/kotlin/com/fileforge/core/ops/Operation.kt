@@ -332,6 +332,27 @@ sealed interface Operation {
     }
 
     /**
+     * PDF → CSV：把纸上**按列对齐**的行还原成格子，一张表一份 CSV。
+     *
+     * 只认坐标不认语义 —— 列边界是"在多行里都对齐的字起点"，窄过字距的空隙不算列，
+     * 有字跨过去的位置也不算。对不齐的页会直说"没当成表"，不硬凑一份看着齐实则错位的东西。
+     * spec 留空表示整份，多段用页码范围写。
+     */
+    data class PdfToCsv(val spec: String = "") : Operation {
+        override val label get() = "表格转 CSV"
+    }
+
+    /**
+     * PDF → xlsx：与「表格转 CSV」同一套读法，认出来几张表就是几个工作表。
+     *
+     * 跨页连着排的同一张表会接成一张（相邻页、各自那页只有它一张、列数相同才敢接），
+     * 每页顶上重印的表头只留一次。
+     */
+    data class PdfToXlsx(val spec: String = "") : Operation {
+        override val label get() = "写成 Excel 表格"
+    }
+
+    /**
      * 清掉图片里的身份信息（EXIF / GPS / 机型 / 软件 / 注释），像素数据**一字节都不重编码**。
      *
      * 没有参数：要清什么由段的性质决定，见 [com.fileforge.core.meta.ImageMeta]。

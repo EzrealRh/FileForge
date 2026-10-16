@@ -340,6 +340,17 @@ class Parameters(
                 Summary("扫描件（字是图片）没有文字层可推，会直接说明，不出一份空文档。")
                 items.forEach { Summary("${it.name} · ${it.sizeLabel}") }
             }
+            OperationKind.PdfToCsv -> {
+                PageSpecField("留空=整份；也可只要几页，例：1-3,7", "列是按纸上的对齐认的：对不齐的页会直说没当成表，不硬凑")
+                Summary("一格里的几个词用空格并起来；同一页上有两张的分开成两份 CSV。")
+                Summary("扫描件（字是图片）没有文字层可读，会直接说明，不出一份空表。")
+                items.forEach { Summary("${it.name} · ${it.sizeLabel}") }
+            }
+            OperationKind.PdfToXlsx -> {
+                PageSpecField("留空=整份；也可只要几页，例：1-3,7", "认出的表逐张成工作表；相邻页上列数相同的同一张表会接起来")
+                Summary("每页顶上重印的表头只留一次；接不上的一律分开，不猜。")
+                items.forEach { Summary("${it.name} · ${it.sizeLabel}") }
+            }
             OperationKind.PdfToImages -> {
                 Segmented("图片格式", ImageFormat.entries.map { it.label }, imageFormat.ordinal) {
                     imageFormat = ImageFormat.entries[it]
@@ -1175,6 +1186,8 @@ class Parameters(
             OperationKind.RotatePdfPages -> Operation.RotatePdfPages(pageSpec.trim(), ROTATE_OPTIONS[rotateIndex].second)
             OperationKind.PdfToText -> Operation.PdfToText(pageSpec.trim())
             OperationKind.PdfToDocx -> Operation.PdfToDocx(pageSpec.trim())
+            OperationKind.PdfToCsv -> Operation.PdfToCsv(pageSpec.trim())
+            OperationKind.PdfToXlsx -> Operation.PdfToXlsx(pageSpec.trim())
             OperationKind.AddPageNumbers -> Operation.PageNumbers(
                 pageSpec.trim(), numberStyle, SPOTS[numberSpot],
                 firstNumber.roundToInt(), numberSize.roundToInt(),

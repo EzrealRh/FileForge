@@ -18,6 +18,8 @@ enum class OperationKind(val label: String, val hint: String) {
     MergePdfs("合并 PDF", "按选中顺序拼成一份"),
     PdfToText("PDF 提取文字", "输出 txt，可以只要几页"),
     PdfToDocx("PDF 转 Word", "按字号与位置还原标题、列表与段落"),
+    PdfToCsv("PDF 表格转 CSV", "按列对齐的行还原成格子，一表一份"),
+    PdfToXlsx("PDF 写成 Excel", "认出的表逐张成工作表，跨页的接起来"),
     AddPageNumbers("PDF 加页码", "底部或角落，可跳过前几页"),
     PdfWatermark("PDF 加水印", "文字水印，可平铺和调深浅"),
     PdfReorder("PDF 重排页面", "按给定页序另存，可重复可倒序"),
@@ -118,6 +120,7 @@ enum class OperationKind(val label: String, val hint: String) {
             CompressPdf, SplitPdfBySize, SplitPdfIntoParts, ExtractPdfPages, RemovePdfPages,
             RotatePdfPages, MergePdfs, PdfToText, PdfToImages, AddPageNumbers, PdfWatermark,
             EncryptPdf, DecryptPdf, PdfMetadata, PdfToDocx, PdfToHtml, PdfReorder,
+            PdfToCsv, PdfToXlsx,
             -> fileKind == FileKind.Pdf
             CompressGif, GifToImages, GifWatermark -> fileKind == FileKind.Gif
             ImagesToGif -> fileKind.isImage

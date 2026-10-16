@@ -98,6 +98,12 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
             is Operation.PdfToDocx -> items.forEach { item ->
                 collect(item.name) { listOf(pdf.toDocx(item, operation)) }
             }
+            is Operation.PdfToCsv -> items.forEach { item ->
+                collect(item.name) { pdf.toCsv(item, operation) }
+            }
+            is Operation.PdfToXlsx -> items.forEach { item ->
+                collect(item.name) { listOf(pdf.toXlsx(item, operation)) }
+            }
             is Operation.PageNumbers -> items.forEach { item ->
                 collect(item.name) { listOf(pdf.addPageNumbers(item, operation)) }
             }
