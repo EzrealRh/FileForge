@@ -273,15 +273,30 @@ class Workspace(context: Context) {
             .let { if (it == FileKind.Zip) containerKind(file) else it }
     }.getOrDefault(FileKind.Unknown)
 
-    /** 开不了目录、目录读坏了的都算回普通 zip：具体哪里坏，引擎那边会照着文件说。 */
+    /**
+     * 开不了目录、目录读坏了的都算回普通 zip：具体哪里坏，引擎那边会照着文件说。
+     *
+     * 必须把**读部件的那只手**递进 `:core`：ODF（.odt / .ods）的身份只写在包里的 `mimetype` 内容上，
+     * 部件名 `content.xml` 太普通，谁都可能有一个。原来只给名字，判层拿不到 mimetype 就一律算回 zip，
+     * 于是真机上从"文件"应用挑一份 .ods 进来，工作台上只有一排归档操作 —— 明明读得动的格式没了入口。
+     */
     private fun containerKind(file: File): FileKind {
         val slices = runCatching { FileSlices(file) }.getOrNull() ?: return FileKind.Zip
+        val archive = runCatching { ZipReader.read(slices, file.length()) }.getOrNull()
+            ?.also { runCatching { slices.close() } } ?: return FileKind.Zip
         return runCatching {
-            OoxmlParts.kindOf(ZipReader.read(slices, file.length()).entries.map { entry -> entry.name })
+            OoxmlParts.kindOf(archive.entries.map { entry -> entry.name }) { name ->
+                val entry = archive.entries.firstOrNull { it.name == name } ?: return@kindOf null
+                require(entry.size <= MIMETYPE_LOOKS_AT) { "$name 太大，不像身份证据" }
+                ZipReader.dataOf(entry, slices)
+            }
         }.getOrDefault(FileKind.Zip).also { runCatching { slices.close() } }
     }
 
     companion object {
+        /** 只为认格式而读的部件上限：`mimetype` 几十字节、`manifest.xml` 也就几 KB，超了不是身份证据。 */
+        private const val MIMETYPE_LOOKS_AT = 64L * 1024
+
         fun displayNameOf(resolver: ContentResolver, uri: Uri): String {
             if (uri.scheme == "file") return uri.lastPathSegment?.substringAfterLast('/') ?: "file.bin"
             val cursor = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)

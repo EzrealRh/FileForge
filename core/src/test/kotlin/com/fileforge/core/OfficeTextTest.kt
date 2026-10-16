@@ -241,4 +241,41 @@ class OfficeTextTest {
         val withBom = ("\uFEFF" + """<w:document><w:p><w:r><w:t>带BOM</w:t></w:r></w:p></w:document>""").toByteArray()
         assertEquals("带BOM\n", OfficeText.docx(withBom).text)
     }
+
+    /**
+     * ODF 的身份只写在包里的 `mimetype` **内容**上，部件名 `content.xml` 谁都可能有一个。
+     *
+     * 真机上吃过这一记：从"文件"应用挑一份 .ods 进来，判层只拿到名字，于是算回普通压缩包，
+     * 工作台上只剩归档那几条 —— 明明读得动的格式没了入口。判层认得出，前提是把读部件那只手递进来。
+     */
+    @Test
+    fun `ODF 要读到 mimetype 的内容才认得，光给名字算回 zip`() {
+        val names = listOf("mimetype", "META-INF/manifest.xml", "content.xml", "styles.xml")
+        assertEquals(FileKind.Zip, OoxmlParts.kindOf(names), "没给读部件的手，不该猜")
+        assertEquals(FileKind.Zip, OoxmlParts.kindOf(names) { null }, "部件读不出来也一样算回 zip")
+        assertEquals(
+            FileKind.Ods,
+            OoxmlParts.kindOf(names) { name ->
+                if (name == "mimetype") "application/vnd.oasis.opendocument.spreadsheet".toByteArray() else null
+            },
+        )
+        assertEquals(
+            FileKind.Odt,
+            OoxmlParts.kindOf(names) { name ->
+                if (name == "mimetype") "application/vnd.oasis.opendocument.text".toByteArray() else null
+            },
+        )
+        // 有的包 mimetype 读不到（被压过或改名）：manifest 里那条 full-path="/" 的 media-type 是兜底
+        assertEquals(
+            FileKind.Ods,
+            OoxmlParts.kindOf(names) { name ->
+                if (name != "META-INF/manifest.xml") return@kindOf null
+                ("<?xml version=\"1.0\" encoding=\"UTF-8\"?>" +
+                    "<manifest:manifest xmlns:manifest=\"urn:oasis:names:tc:opendocument:xmlns:manifest:1.0\">" +
+                    "<manifest:file-entry manifest:full-path=\"/\" " +
+                    "manifest:media-type=\"application/vnd.oasis.opendocument.spreadsheet\"/>" +
+                    "</manifest:manifest>").toByteArray()
+            },
+        )
+    }
 }
