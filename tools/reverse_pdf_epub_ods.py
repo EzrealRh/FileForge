@@ -29,10 +29,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.join(HERE, "..")
 EPUB = os.path.join(ROOT, "core", "src", "main", "kotlin", "com", "fileforge", "core", "book", "Epub.kt")
 SHEETS = os.path.join(ROOT, "core", "src", "main", "kotlin", "com", "fileforge", "core", "office", "OdsSheets.kt")
+WORKSPACE = os.path.join(ROOT, "app", "src", "main", "kotlin", "com", "fileforge", "converter", "data", "Workspace.kt")
 BUILD = os.path.join(ROOT, "core", "build", "epubods")
 ENV = dict(os.environ, GRADLE_USER_HOME="D:/gradle-home")
 
 REBUILD = "GRADLE_USER_HOME=D:/gradle-home ./gradlew --offline :core:jar -q"
+REBUILD_APP = "GRADLE_USER_HOME=D:/gradle-home ./gradlew --offline :app:testDebugUnitTest --tests '*ContainerSniffTest*' --rerun -q"
+APPXML = os.path.join(ROOT, "app", "build", "test-results", "testDebugUnitTest",
+                      "TEST-com.fileforge.converter.ContainerSniffTest.xml")
 VERIFY = ["python", "tools/verify_pdf_epub_ods.py"]
 
 CASES = [
@@ -67,6 +71,14 @@ CASES = [
         "改成": "out += DocTable(false, padded(sheet.rows))",
     },
     {
+        # 真机上就这么错过一次：目录读完就 close，读部件全抛，被 runCatching 咽成 zip，
+        # 界面上只剩归档那几条 —— 桌面判据从文件直接进判层，看不见这一层
+        "该红": "真夹具 ledgerods 判成 ODS", "名字": "读完目录就把手关了 closeslices", "文件": WORKSPACE,
+        "跑法": "appjvm", "重编": "app",
+        "原样": "            ZipReader.dataOf(entry, slices)",
+        "改成": "            runCatching { slices.close(); ZipReader.dataOf(entry, slices) }.getOrNull()",
+    },
+    {
         "该红": "12b ODS", "名字": "空表不吭声 silentempty", "文件": SHEETS,
         "原样": '        return if (empty.isEmpty()) emptyList()\n        else listOf("${empty.size} 张表是空的（${empty.joinToString("、") { it.name }}），没占一节")',
         "改成": "        return emptyList()",
@@ -91,6 +103,24 @@ def rebuilt() -> tuple:
     out = (run.stdout or b"").decode("utf-8", "replace") + (run.stderr or b"").decode("utf-8", "replace")
     lines = [line for line in out.splitlines() if line.startswith("e: ") or "FAILED" in line]
     return run.returncode != 0, " / ".join(lines[:3]) or "退出码 %s" % run.returncode
+
+
+def app_referee() -> tuple:
+    """应用侧那条链子的裁判：跑 :app 的 ContainerSniffTest，按测试名点名要红的那一条。
+
+    为什么不用桌面判据：桌面判据是**从文件直接进判层**，绕过了导入分类那两步 ——
+    "读完目录就把手关掉"这种降级在桌面上完全看不出来（真机上 ODS 就是这么只剩归档入口的）。
+    """
+    if os.path.exists(APPXML):
+        os.remove(APPXML)          # 旧结果会让这一轮"没跑"说成"跑过了"
+    run = subprocess.run(["bash", "-c", REBUILD_APP], cwd=ROOT, capture_output=True, env=ENV)
+    failed = []
+    if os.path.exists(APPXML):
+        import xml.etree.ElementTree as ET
+        for case in ET.parse(APPXML).getroot().iter("testcase"):
+            if case.find("failure") is not None or case.find("error") is not None:
+                failed.append(case.get("name") or "")
+    return failed, bool(failed), " / ".join(failed[:3]) or "退出码 %s，没测试红" % run.returncode
 
 
 def verifier() -> tuple:
@@ -126,8 +156,14 @@ def main() -> int:
             wipe()
             with io.open(path, "w", encoding="utf-8", newline="\n") as handle:
                 handle.write(source.replace(case["原样"], case["改成"], 1))
-            broken, clue = rebuilt()
-            reds, finished, out = verifier()
+            if case.get("重编") == "app":
+                broken, clue = False, ""        # 那一轮的"重编 + 判据"是同一件事：跑 :app 的测试
+            else:
+                broken, clue = rebuilt()
+            if case.get("跑法") == "appjvm":
+                reds, finished, out = app_referee()
+            else:
+                reds, finished, out = verifier()
             with io.open(path, "w", encoding="utf-8", newline="\n") as handle:
                 handle.write(source)
             if sha1_of(path) != digests[path]:

@@ -13,7 +13,8 @@ AOSP / GMS 镜像的中文字体是 `NotoSansCJK-Regular.ttc`，**CFF(OTTO) 轮�
 
  1  源码里 `BUNDLED_FONT` 声明的那个路径，在最终 APK 里**真有这个条目**（改一行常量就会红）
  2  它是 TrueType 轮廓（sfnt version 0x00010000）—— CFF 的 pdfbox-android 用不了，装了等于没装
- 3   cmap 覆盖：可打印 ASCII、中文标点、圆点 U+2022，外加从 GB2312 里抽样的 200 个汉字一个都不缺
+ 3   cmap 覆盖：可打印 ASCII、Latin-1 补充（重音字母与 ° ± µ © ® 那片，软字号除外）、中文标点、圆点，
+     外加从 GB2312 里抽样的 200 个汉字一个都不缺
  4  SIL 许可文本随包（`assets/fonts/OFL.txt`）—— OFL 字体可以再分发，条件是许可原文一起走
 """
 from __future__ import annotations
@@ -38,6 +39,10 @@ from verify_odt_read import check, results  # noqa: E402
 
 ENGINE = os.path.join(ROOT, "app", "src", "main", "kotlin", "com", "fileforge", "converter", "engine", "PdfEngine.kt")
 PUNCT = "，。、；：？！（）《》【】“”‘’—…··・``•"
+# Latin-1 补充（除软字号：源字体里没这个字形，写进承诺就是一条永远咬着的红）——
+# 带重音字母的人名、° ± µ © ® 这类符号在中文稿里很常见，缺了就只能在产物里缺字。
+# 这一串是**承诺**：tools/make_pdf_font_subset.py 从同一处取，改覆盖只改这里。
+LATIN1 = [chr(code) for code in range(0xA0, 0x100) if code != 0x00AD]
 
 
 def gb2312_hanzi():
@@ -107,18 +112,19 @@ def main() -> int:
     except Exception as error:  # noqa: BLE001 —— 读不动要变成点名的红，不能让 traceback 带走整轮
         why = "fontTools 读不动：%s" % str(error)[:120]
     latin = [chr(c) for c in range(0x21, 0x7F) if c not in cmap]
+    accent = [ch for ch in LATIN1 if ord(ch) not in cmap]
     punct = [ch for ch in PUNCT if ord(ch) not in cmap]
     # 抽样只能从**声明覆盖的那一层**里抽：这份子集承诺的是 GB2312 全量，
     # 从整个 CJK 区段（两万多字）里抽是把判据的口径写大了
     rng = random.Random(20261016)
     han = rng.sample(gb2312_hanzi(), 200)
     miss_han = [ch for ch in han if ord(ch) not in cmap]
-    counts = "包内=%d 仓库=%d 同=%s；缺 拉丁 %d/标点 %d/汉字 %d；码点 %d%s" % (
+    counts = "包内=%d 仓库=%d 同=%s；缺 拉丁 %d/重音 %d/标点 %d/汉字 %d；码点 %d%s" % (
         len(blob), os.path.getsize(disk) if os.path.isfile(disk) else -1, same,
-        len(latin), len(punct), len(miss_han), len(cmap), ("；" + why) if why else "")
-    check(3, "内置字体的字够日常中文用：包内与仓库那份是同一份、拉丁/中文标点/圆点、从 GB2312 抽 200 个汉字",
-          bool(blob) and same and not latin and not punct and not miss_han and len(cmap) >= 7000,
-          counts + "；例：" + "".join((latin + punct + miss_han)[:12]))
+        len(latin), len(accent), len(punct), len(miss_han), len(cmap), ("；" + why) if why else "")
+    check(3, "内置字体的字够日常中文用：包内与仓库那份是同一份、拉丁/重音字母与符号/中文标点/圆点、从 GB2312 抽 200 个汉字",
+          bool(blob) and same and not latin and not accent and not punct and not miss_han and len(cmap) >= 7000,
+          counts + "；例：" + "".join((latin + accent + punct + miss_han)[:12]))
 
     ofl = [n for n in book.namelist() if n.startswith("assets/fonts/") and n.lower().endswith(".txt")]
     text = book.read(ofl[0]).decode("utf-8", "replace").lower() if ofl else ""

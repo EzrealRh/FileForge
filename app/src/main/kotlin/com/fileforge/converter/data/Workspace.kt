@@ -262,41 +262,11 @@ class Workspace(context: Context) {
 
     fun usedSpace(): Long = list().sumOf { it.size }
 
-    private fun sniff(file: File): FileKind = runCatching {
-        // 512 不是随手取的：tar 的 ustar 那几个字节落在第 257 位上，只看 64 字节永远认不出
-        val header = ByteArray(512)
-        file.inputStream().use { stream ->
-            val read = stream.read(header)
-            if (read in 0 until header.size) header.copyOf(read) else header
-        }.let { FileTypeSniffer.sniff(it) }
-            // OOXML 与 EPUB 的身份证据都在包里的部件名上，头 64 字节看不出来：是 zip 就再开一次目录看一眼
-            .let { if (it == FileKind.Zip) containerKind(file) else it }
-    }.getOrDefault(FileKind.Unknown)
+    private fun sniff(file: File): FileKind = sniffedKindOf(file)
 
-    /**
-     * 开不了目录、目录读坏了的都算回普通 zip：具体哪里坏，引擎那边会照着文件说。
-     *
-     * 必须把**读部件的那只手**递进 `:core`：ODF（.odt / .ods）的身份只写在包里的 `mimetype` 内容上，
-     * 部件名 `content.xml` 太普通，谁都可能有一个。原来只给名字，判层拿不到 mimetype 就一律算回 zip，
-     * 于是真机上从"文件"应用挑一份 .ods 进来，工作台上只有一排归档操作 —— 明明读得动的格式没了入口。
-     */
-    private fun containerKind(file: File): FileKind {
-        val slices = runCatching { FileSlices(file) }.getOrNull() ?: return FileKind.Zip
-        val archive = runCatching { ZipReader.read(slices, file.length()) }.getOrNull()
-            ?.also { runCatching { slices.close() } } ?: return FileKind.Zip
-        return runCatching {
-            OoxmlParts.kindOf(archive.entries.map { entry -> entry.name }) { name ->
-                val entry = archive.entries.firstOrNull { it.name == name } ?: return@kindOf null
-                require(entry.size <= MIMETYPE_LOOKS_AT) { "$name 太大，不像身份证据" }
-                ZipReader.dataOf(entry, slices)
-            }
-        }.getOrDefault(FileKind.Zip).also { runCatching { slices.close() } }
-    }
-
+    // 判层的整串在文件末尾的 sniffedKindOf / containerKindOf：必须把"读部件的那只手"递进 :core，
+    // ODF 的身份只写在包里的 mimetype 内容上，只给部件名一律算回 zip —— 真机上就是这么丢了整族入口的。
     companion object {
-        /** 只为认格式而读的部件上限：`mimetype` 几十字节、`manifest.xml` 也就几 KB，超了不是身份证据。 */
-        private const val MIMETYPE_LOOKS_AT = 64L * 1024
-
         fun displayNameOf(resolver: ContentResolver, uri: Uri): String {
             if (uri.scheme == "file") return uri.lastPathSegment?.substringAfterLast('/') ?: "file.bin"
             val cursor = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
@@ -306,4 +276,37 @@ class Workspace(context: Context) {
             }
         }
     }
+}
+
+/** 只为认格式而读的部件上限：`mimetype` 几十字节、`manifest.xml` 也就几 KB，超了不会是身份证据。 */
+private const val MIMETYPE_LOOKS_AT = 64L * 1024
+
+/**
+ * 导入与装载都走这一串：头 512 字节判层（tar 的 `ustar` 落在第 257 字节，只看 64 字节永远认不出），
+ * 判成 zip 再开一次目录看一眼 —— OOXML 与 EPUB 的证据在部件名上，ODF 的在 `mimetype` 的内容上。
+ *
+ * 摆成顶层函数是给单测用的：真机上"ODS 被当压缩包"那一类错，只有走这一整串才现得出来。
+ */
+internal fun sniffedKindOf(file: File): FileKind = runCatching {
+    val header = ByteArray(512)
+    file.inputStream().use { stream ->
+        val read = stream.read(header)
+        if (read in 0 until header.size) header.copyOf(read) else header
+    }.let { FileTypeSniffer.sniff(it) }
+        .let { if (it == FileKind.Zip) containerKindOf(file) else it }
+}.getOrDefault(FileKind.Unknown)
+
+/** 开不了目录、目录读坏了的都算回普通 zip：具体哪里坏，引擎那边会照着文件说。 */
+internal fun containerKindOf(file: File): FileKind {
+    val slices = runCatching { FileSlices(file) }.getOrNull() ?: return FileKind.Zip
+    return runCatching {
+        val archive = ZipReader.read(slices, file.length())
+        OoxmlParts.kindOf(archive.entries.map { entry -> entry.name }) { name ->
+            val entry = archive.entries.firstOrNull { it.name == name } ?: return@kindOf null
+            require(entry.size <= MIMETYPE_LOOKS_AT) { "$name 太大，不像身份证据" }
+            // 读内容必须在 slices 还开着的时候：有一版读完目录就 close 了，这一句全部抛，
+            // 被上面那个 runCatching 咽成 zip —— 界面上只剩归档几条，而详情里写着"ZIP 压缩包"
+            ZipReader.dataOf(entry, slices)
+        }
+    }.getOrDefault(FileKind.Zip).also { runCatching { slices.close() } }
 }

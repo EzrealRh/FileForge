@@ -351,9 +351,18 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
         val bundled = runCatching {
             val stream = context.assets.open(BUNDLED_FONT)
             val font = com.tom_roush.pdfbox.pdmodel.font.PDType0Font.load(document, stream, true)
-            font.encode(needed)
-            font.getStringWidth(needed)
-            font
+            if (runCatching { font.encode(needed); font.getStringWidth(needed); true }.getOrDefault(false)) {
+                font
+            } else {
+                // 覆盖不全**也用它**：子集承诺的是 ASCII + Latin-1 + 中文标点 + GB2312，
+                // 软字号、emoji 与 GB2312 之外的生僻字照样画不出。为一两个符号让整次打印失败是本末倒置 ——
+                // 画不出的由 onlyDrawable 那层逐字跳过、并且数给用户看
+                // （Ç 曾在子集外面，真机上「印成 PDF」就这么被一个符号整份顶掉过）
+                val drawable = needed.count { ch ->
+                    runCatching { font.encode(ch.toString()); true }.getOrDefault(false)
+                }
+                if (drawable > 0) font else null
+            }
         }.getOrNull()
         if (bundled != null) return FontHandle(bundled, emptyList(), "内置霞鹜文楷（子集）")
         throw IllegalArgumentException(
@@ -1231,7 +1240,8 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
         const val MAX_IMAGE_PIXELS = 12_000_000L
         val PROCESSABLE = setOf("DeviceRGB", "DeviceGray")
 
-        /** 随应用打包的中文字体（SIL OFL 1.1，子集：ASCII + 常用中文标点 + GB2312 全量）。 */
+        /** 随应用打包的中文字体（SIL OFL 1.1，子集：ASCII + Latin-1 补充 + 常用中文标点 + GB2312 全量，
+         *  覆盖由 tools/verify_pdf_font.py 承诺、tools/make_pdf_font_subset.py 照着切）。 */
         const val BUNDLED_FONT = "fonts/lxgw-wenkai-subset.ttf"
 
         /** 页码用的深色：0.15 灰比纯黑柔和，扫成灰底也还看得清。 */
