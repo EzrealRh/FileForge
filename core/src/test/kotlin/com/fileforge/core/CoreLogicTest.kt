@@ -372,6 +372,22 @@ class CrossConversionCatalogTest {
     }
 
     @Test
+    fun `转方向与裁边给静态图，动图与图标不给`() {
+        val still = OperationKind.applicable(setOf(FileKind.Png))
+        for (kind in listOf(OperationKind.RotateImage, OperationKind.FlipImage, OperationKind.CropImage)) {
+            assertTrue(kind in still, "$kind 应该能用在 PNG 上")
+        }
+        // GIF 的每一帧都要转才不歪，逐帧那条还没做；图标走的是专门通路
+        val gif = OperationKind.applicable(setOf(FileKind.Gif))
+        assertFalse(OperationKind.RotateImage in gif)
+        assertFalse(OperationKind.CropImage in gif)
+        assertFalse(OperationKind.FlipImage in OperationKind.applicable(setOf(FileKind.Ico)))
+        // 混选一张 PDF 就把这三条拿掉：批量跑起来必然有一半失败，不如不给入口
+        val mixed = OperationKind.applicable(setOf(FileKind.Png, FileKind.Pdf))
+        assertFalse(OperationKind.RotateImage in mixed)
+    }
+
+    @Test
     fun `GIF 与 PDF 混选时只剩两条打包`() {
         // GIF 和 PDF 没有共同的转换操作；活下来的只有两条打包 —— 把不相干的两类一起装进一个包本来就是压缩包的用途
         // 本来就是压缩包的用途，所以它不属于"半可用按钮"

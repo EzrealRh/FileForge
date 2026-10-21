@@ -1,6 +1,7 @@
 package com.fileforge.converter.engine
 
 import android.content.Context
+import com.fileforge.core.image.Flip
 import com.fileforge.core.model.BatchLineage
 import com.fileforge.core.ops.Operation
 import com.fileforge.converter.data.WorkItem
@@ -59,6 +60,29 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
                 val logo = operation.logoFrom?.let { name -> workspace.list().firstOrNull { it.name == name } }?.file
                 items.forEach { item ->
                     collect(item.name) { listOf(images.watermark(item, operation, logo, ::staging)) }
+                }
+            }
+            is Operation.RotateImage -> items.forEach { item ->
+                collect(item.name) { listOf(images.transform(item, operation.degrees, Flip.None, null, null, "旋转 ${operation.degrees}°", ::staging)) }
+            }
+            is Operation.FlipImage -> items.forEach { item ->
+                val flip = when (operation.mode) {
+                    1 -> Flip.Vertical
+                    2 -> Flip.Both
+                    else -> Flip.Horizontal
+                }
+                collect(item.name) { listOf(images.transform(item, 0, flip, null, null, "翻转", ::staging)) }
+            }
+            is Operation.CropImage -> items.forEach { item ->
+                collect(item.name) {
+                    listOf(
+                        images.transform(
+                            item, 0, Flip.None,
+                            operation.rect.trim().takeIf { text -> text.isNotEmpty() },
+                            operation.aspect.trim().takeIf { text -> text.isNotEmpty() },
+                            "裁边", ::staging,
+                        ),
+                    )
                 }
             }
             is Operation.GifWatermark -> items.forEach { item ->

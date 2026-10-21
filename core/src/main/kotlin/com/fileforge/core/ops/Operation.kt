@@ -79,6 +79,27 @@ sealed interface Operation {
         override val label get() = "GIF 加水印"
     }
 
+    /** 图片转方向：**顺时针为正**（与 `Matrix.postRotate` 同一条）。90 的整倍数只搬像素，
+     *  任意角度扩画布到装得下整张图，四角空出来的部分由输出格式决定（PNG 留透明、JPG 填白）。 */
+    data class RotateImage(val degrees: Int = 90) : Operation {
+        override val label get() = "旋转 $degrees°"
+    }
+
+    /** 图片镜像：0 左右、1 上下、2 两个都翻。 */
+    data class FlipImage(val mode: Int = 0) : Operation {
+        override val label get() = when (mode) {
+            1 -> "上下翻转"
+            2 -> "左右再上下翻转"
+            else -> "左右翻转"
+        }
+    }
+
+    /** 图片裁边：[rect] 写「左,上,宽,高」（四段都带 % 就按源图边长折算），[aspect] 写「16:9」那样居中内接；
+     *  两个都给了按 [rect]，产物说明里会说出来。 */
+    data class CropImage(val rect: String = "", val aspect: String = "") : Operation {
+        override val label get() = if (rect.isBlank() && aspect.isNotBlank()) "按 $aspect 裁" else "裁边"
+    }
+
     /** 按目标体积分割，尾部不足一份的剩余页单独成文件。 */
     data class SplitPdfBySize(val targetBytes: Long) : Operation {
         override val label get() = "按 ${targetLabel(targetBytes)} 分割"

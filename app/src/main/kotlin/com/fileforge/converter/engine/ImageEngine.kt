@@ -6,6 +6,8 @@ import android.graphics.Matrix
 import android.os.Build
 import com.fileforge.core.data.Ico
 import com.fileforge.core.data.IcoImage
+import com.fileforge.core.image.Flip
+import com.fileforge.core.image.ImageGeometry
 import com.fileforge.core.meta.ImageMeta
 import com.fileforge.core.model.FileKind
 import com.fileforge.core.naming.OutputNaming
@@ -32,9 +34,7 @@ class ImageEngine {
         BitmapFactory.decodeFile(file.absolutePath, bounds)
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) throw IllegalArgumentException("这张图解不开")
 
-        val longest = max(bounds.outWidth, bounds.outHeight)
-        var sample = 1
-        while (longest / sample > DECODE_CEILING) sample *= 2
+        val sample = sampleFor(bounds.outWidth, bounds.outHeight)
         val options = BitmapFactory.Options().apply {
             inSampleSize = sample
             inPreferredConfig = Bitmap.Config.ARGB_8888
@@ -60,6 +60,28 @@ class ImageEngine {
         val ok = bitmap.compress(compressFormat(format), quality.coerceIn(1, 100), stream)
         if (!ok) throw IllegalStateException("${format.label} 编码失败")
         return stream.toByteArray()
+    }
+
+    /** 长边按 2 的幂降到 [DECODE_CEILING] 以内：解码与"降过采样"那句话读的都是这一处。 */
+    private fun sampleFor(width: Int, height: Int): Int {
+        val longest = max(width, height)
+        var sample = 1
+        while (longest / sample > DECODE_CEILING) sample *= 2
+        return sample
+    }
+
+    /**
+     * 有没有**真的**半透明像素。`Bitmap.hasAlpha()` 只说这张图带不带通道 ——
+     * ARGB_8888 的画布（包括刚创建、内容全实的那种）一律为真，拿它判"要不要填白"会把
+     * 转 90° 的 JPG 也说成"空出来的地方填白"。桌面替身判的也是逐像素，这里与之同一口径。
+     */
+    private fun hasTranslucent(bitmap: Bitmap): Boolean {
+        val row = IntArray(bitmap.width)
+        for (y in 0 until bitmap.height) {
+            bitmap.getPixels(row, 0, bitmap.width, 0, y, bitmap.width, 1)
+            for (pixel in row) if (pixel ushr 24 != 0xFF) return true
+        }
+        return false
     }
 
     /**
@@ -264,6 +286,107 @@ class ImageEngine {
             staging(operation.format.extension).apply { writeBytes(best) },
             "${SizeInput.format(best.size.toLong())} ≤ 目标 ${SizeInput.format(target)}",
         )
+    }
+
+    /**
+     * 改方向与边界：旋转 / 翻转 / 裁边三条出路都从这一步走。
+     *
+     * **算**在 `:core` 的 [ImageGeometry]（画布多大、裁哪块、按什么顺序），这里只**画**：
+     * 用一份矩阵把「关于自身中心镜像 → 关于中心旋转 → 平移到扩大的画布」串起来，
+     * 落在 `plan.outWidth × plan.outHeight` 这块画布上 —— 画布尺寸取自判层而不是让安卓自己推算，
+     * 否则说明里那句"出来是 112×94"与纸上的数可能各说各话。
+     *
+     * 坐标基准是**解码后、EXIF 转正后**的那张图：用户看着什么样子就按什么写坐标。
+     * 大图解码时会按 2 的幂降采样（[DECODE_CEILING]），这件事一定说出来，不然"我裁的是 1000 宽"对不上。
+     */
+    fun transform(
+        item: WorkItem,
+        degrees: Int,
+        flip: Flip,
+        cropSpec: String?,
+        aspectSpec: String?,
+        tag: String,
+        staging: (String) -> File,
+    ): EngineOutput {
+        val declared = declaredSize(item.file)
+        val bitmap = decode(item.file)
+        val decodedWidth = bitmap.width
+        val decodedHeight = bitmap.height
+        val plan = ImageGeometry.plan(decodedWidth, decodedHeight, degrees.toFloat(), flip, cropSpec, aspectSpec)
+        val drawn = drawPlan(bitmap, plan)
+        if (drawn !== bitmap) bitmap.recycle()
+        if (drawn.width != plan.outWidth || drawn.height != plan.outHeight) {
+            val actual = "${drawn.width}×${drawn.height}"
+            drawn.recycle()
+            throw IllegalStateException("画出来是 $actual，与算好的 ${plan.outWidth}×${plan.outHeight} 不一致")
+        }
+
+        val format = when (item.kind) {
+            FileKind.Png -> ImageFormat.Png
+            FileKind.WebP -> ImageFormat.WebP
+            else -> ImageFormat.Jpeg
+        }
+        // JPG 没有透明通道：安卓把透明像素编成**黑**，而主流做法是填白 —— 这里自己先铺一层白
+        val needsWhite = format == ImageFormat.Jpeg && hasTranslucent(drawn)
+        val painted = if (needsWhite) flattenOnWhite(drawn) else drawn
+        val bytes = encode(painted, format, 92)
+        if (painted !== drawn) painted.recycle()
+        drawn.recycle()
+
+        val notes = ArrayList<String>()
+        // 只按"解码时真降过采样"说，不能拿声明尺寸与原图不同就当降采样 —— EXIF 转正会把宽高换边
+        if (sampleFor(declared.first, declared.second) > 1) {
+            notes += "源图 ${declared.first}×${declared.second}，解码时按 2 的幂收到 ${decodedWidth}×${decodedHeight}，坐标按收到之后的这张算"
+        }
+        val exif = exifDegrees(item.file)
+        if (exif != 0) notes += "源里带着 EXIF 方向（转正要转 ${exif}°），已按转正后的样子再动，成品不再带方向标记"
+        notes += plan.notes
+        ImageGeometry.transparentFallback(needsWhite)?.let { notes += it }
+        return EngineOutput(
+            OutputNaming.tagged(item.name, tag, format.extension),
+            staging(format.extension).apply { writeBytes(bytes) },
+            notes.joinToString(" · "),
+        )
+    }
+
+    /** 判层给的那一步画出来：先按块裁，再用一份矩阵镜像 + 旋转 + 平移进扩大的画布。 */
+    private fun drawPlan(source: Bitmap, plan: ImageGeometry.Plan): Bitmap {
+        val cropped = plan.crop?.let {
+            Bitmap.createBitmap(source, it.left, it.top, it.width, it.height)
+        } ?: source
+        if (plan.degrees == 0f && plan.flip == Flip.None) return cropped
+        val width = cropped.width
+        val height = cropped.height
+        val horizontal = if (plan.flip == Flip.Horizontal || plan.flip == Flip.Both) -1f else 1f
+        val vertical = if (plan.flip == Flip.Vertical || plan.flip == Flip.Both) -1f else 1f
+        val matrix = Matrix().apply {
+            postScale(horizontal, vertical, width / 2f, height / 2f)
+            postRotate(plan.degrees, width / 2f, height / 2f)
+            postTranslate((plan.outWidth - width) / 2f, (plan.outHeight - height) / 2f)
+        }
+        // 整倍数那一格像素只是搬家，开插值反而可能改边角那一个点的值；任意角的斜边不滤就是锯齿。
+        // 桌面替身那层对任意角用的是双线性，这里跟它同一口径。
+        val paint = android.graphics.Paint().apply { isFilterBitmap = !plan.quarterTurn }
+        val drawn = Bitmap.createBitmap(plan.outWidth, plan.outHeight, Bitmap.Config.ARGB_8888)
+        android.graphics.Canvas(drawn).drawBitmap(cropped, matrix, paint)
+        if (cropped !== source) cropped.recycle()
+        return drawn
+    }
+
+    /** 透明像素铺到白底上（JPG 那条路）：内容一个像素都不动，只是背后先涂白。 */
+    private fun flattenOnWhite(source: Bitmap): Bitmap {
+        val flat = Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(flat)
+        canvas.drawColor(android.graphics.Color.WHITE)
+        canvas.drawBitmap(source, 0f, 0f, null)
+        return flat
+    }
+
+    /** 文件里声明的宽高（不带像素解码）：用来交代"解码时降过采样"。 */
+    private fun declaredSize(file: File): Pair<Int, Int> {
+        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(file.absolutePath, options)
+        return options.outWidth to options.outHeight
     }
 
     /**

@@ -7,6 +7,9 @@ enum class OperationKind(val label: String, val hint: String) {
     ConvertImage("图片格式转换", "JPG / PNG / WebP 互转"),
     CompressImage("压缩图片", "按质量或目标体积"),
     ImageWatermark("图片加文字水印", "文字或 Logo 图，单处或平铺"),
+    RotateImage("图片旋转", "90 的整倍数只搬像素，任意角度扩画布不切角"),
+    FlipImage("图片翻转", "左右 / 上下 / 两个都翻"),
+    CropImage("图片裁边", "按像素或百分比给一块，或按宽高比居中裁"),
     GifWatermark("GIF 加水印", "文字水印盖到每一帧"),
     ImagesToPdf("图片合成 PDF", "一张一页"),
     CompressPdf("压缩 PDF", "内嵌图片降采样重编，文字不动"),
@@ -111,7 +114,7 @@ enum class OperationKind(val label: String, val hint: String) {
         }
 
         private fun compatible(kind: OperationKind, fileKind: FileKind): Boolean = when (kind) {
-            ConvertImage, CompressImage, ImageWatermark ->
+            ConvertImage, CompressImage, ImageWatermark, RotateImage, FlipImage, CropImage ->
                 fileKind.isImage && fileKind != FileKind.Gif && fileKind != FileKind.Ico
             // 图标要走专门通路：解码成位图后一次出多个尺寸；普通格式转换只会给一张
             ImageToIco -> fileKind.isImage && fileKind != FileKind.Gif && fileKind != FileKind.Ico

@@ -268,6 +268,11 @@ class Parameters(
     var imageWatermarkTiled by mutableStateOf(false)
     var imageWatermarkOpacity by mutableStateOf(35f)
     var imageWatermarkTilt by mutableStateOf(0f)
+    var imageRotateDegrees by mutableStateOf(90f)
+    var imageRotatePreset by mutableStateOf(0)
+    var imageFlipMode by mutableStateOf(0)
+    var cropRectText by mutableStateOf("")
+    var cropAspectText by mutableStateOf("")
 
     @Composable
     fun Content() {
@@ -287,6 +292,34 @@ class Parameters(
                 IntSlider("质量", quality, 30f..100f, { "%.0f".format(it) }) { quality = it }
                 IntSlider("最长边不超过", maxEdge, 0f..4096f, ::edgeLabel, step = 64f) { maxEdge = it }
                 Summary("原图合计 ${sizeOf(items)}，压完会逐个给出实际大小")
+            }
+            OperationKind.RotateImage -> {
+                Segmented(
+                    "往右转多少",
+                    listOf("90°", "180°", "270°", "自己给角度"),
+                    imageRotatePreset,
+                ) { index ->
+                    imageRotatePreset = index
+                    if (index < 3) imageRotateDegrees = (index + 1) * 90f
+                }
+                if (imageRotatePreset == 3) {
+                    IntSlider("角度（往右为正）", imageRotateDegrees, -180f..180f, { "%.0f°".format(it) }, step = 1f) {
+                        imageRotateDegrees = it
+                    }
+                }
+                Summary("90 的整倍数只把像素搬位，不重采样；其他角度会把画布扩到装得下整张图，四角空出来的地方 PNG 留透明、JPG 填白。")
+                items.forEach { Summary("${it.name} · ${it.sizeLabel}") }
+            }
+            OperationKind.FlipImage -> {
+                Segmented("怎么翻", listOf("左右镜像", "上下镜像", "左右再上下"), imageFlipMode) { imageFlipMode = it }
+                Summary("镜像不改尺寸，也不重采样 —— 一个像素都不动，只是换了摆放方向。")
+                items.forEach { Summary("${it.name} · ${it.sizeLabel}") }
+            }
+            OperationKind.CropImage -> {
+                SpecField("裁哪块（左,上,宽,高）", cropRectText, "写 40,20,300,200；按百分比就给四段都带 %，例 10%,10%,80%,80%") { cropRectText = it }
+                SpecField("或按宽高比居中裁", cropAspectText, "例 1:1、4:3、16:9、3:2；两个都填了按上面那块裁") { cropAspectText = it }
+                Summary("坐标按你看到的样子算：EXIF 里带着方向的横拍图，先转正再谈坐标。")
+                items.forEach { Summary("${it.name} · ${it.sizeLabel}") }
             }
             OperationKind.ImagesToPdf -> {
                 Segmented("纸张", PdfPaper.entries.map { it.label }, paper.ordinal) { paper = PdfPaper.entries[it] }
@@ -1156,6 +1189,12 @@ class Parameters(
         }
         if (kind == OperationKind.EncryptPdf) PdfSecurity.validate(pdfUserPw, pdfOwnerPw, pdfAllowed)?.let { return it }
         if (kind == OperationKind.ImageToIco && icoSizes().isEmpty()) return "尺寸要写 1~${Ico.MAX_SIDE} 之间的数，逗号分隔"
+        if (kind == OperationKind.CropImage && cropRectText.isBlank() && cropAspectText.isBlank()) {
+            return "裁哪块要写点什么：「左,上,宽,高」，或一个宽高比（比如 1:1）"
+        }
+        if (kind == OperationKind.RotateImage && imageRotatePreset == 3 && imageRotateDegrees == 0f) {
+            return "自己给角度时别写 0，那等于没转"
+        }
         if (startSecondText.isNotBlank() && startSecondText.toFloatOrNull() == null) return "开始秒数不是数字"
         if (durationSecondText.isNotBlank() && durationSecondText.toFloatOrNull() == null) return "取多少秒不是数字"
         return null
@@ -1176,6 +1215,9 @@ class Parameters(
                 if (targetSizeText.isBlank()) null else targetBytes,
             )
             OperationKind.ImagesToPdf -> Operation.ImagesToPdf(paper, margin.roundToInt())
+            OperationKind.RotateImage -> Operation.RotateImage(imageRotateDegrees.roundToInt())
+            OperationKind.FlipImage -> Operation.FlipImage(imageFlipMode)
+            OperationKind.CropImage -> Operation.CropImage(cropRectText.trim(), cropAspectText.trim())
             OperationKind.SplitPdfBySize -> Operation.SplitPdfBySize(targetBytes ?: SizeInput.MEGA * 10)
             OperationKind.SplitPdfIntoParts -> Operation.SplitPdfIntoParts(parts.roundToInt())
             OperationKind.CompressPdf -> Operation.CompressPdf(
@@ -1428,6 +1470,19 @@ private fun NumberField(label: String, value: String, onChange: (String) -> Unit
 @Composable
 private fun SizeField(label: String, value: String, onChange: (String) -> Unit) {
     NumberField(label, value, onChange)
+}
+
+/** 自由文本的一行输入（裁边那种「40,20,300,200」或「16:9」，数字键盘会把逗号与冒号吃掉，所以不用 NumberField）。 */
+@Composable
+private fun SpecField(label: String, value: String, support: String, onChange: (String) -> Unit) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onChange,
+        label = { Text(label) },
+        singleLine = true,
+        supportingText = { Text(support) },
+        modifier = Modifier.fillMaxWidth(),
+    )
 }
 
 @Composable
