@@ -39,6 +39,9 @@ enum class OperationKind(val label: String, val hint: String) {
     VideoTrim("视频截取片段", "选起止时间，不重编码秒出"),
     ConvertAudio("音频转格式", "MP3 / FLAC / OGG 转 M4A 或 WAV"),
     AudioTrim("音频截取", "选起止时间，WAV 无损 / M4A 重编"),
+    AudioVolume("音频调音量", "0% 静音，100% 原样；输出 WAV 无损"),
+    AudioDenoise("音频降噪", "一阶高通 + 噪声门，轻/中/强"),
+    AudioMerge("合并音频", "按选中顺序接成一条，采样率与声道要一致"),
     ConvertTextEncoding("文本转编码", "GBK / UTF-8 / Big5 互转，顺带统一换行"),
     ConvertSubtitle("字幕转格式", "SRT / VTT / LRC / ASS 互转"),
     ExtractAudio("提取音频", "把视频里的声音拿出来"),
@@ -67,6 +70,18 @@ enum class OperationKind(val label: String, val hint: String) {
     TextToDocx("文本转 Word", "带记号的按 Markdown / 网页排，列表是 Word 自己的编号"),
     TextToEpub("文本转 EPUB", "按一级标题切章，出一份阅读器能打开的电子书"),
     YamlToJson("YAML 转 JSON", "yes 与 1:30 这类值保持文字，不被当成真假与秒数"),
+    TomlToJson("TOML 转 JSON", "表与数组表摊成对象；日期时间保持原文"),
+    JsonToToml("JSON 转 TOML", "对象写成表、对象数组写成数组表；null 摆不下会直说"),
+    TomlToYaml("TOML 转 YAML", "与 TOML 转 JSON 同一棵树"),
+    YamlToToml("YAML 转 TOML", "对象写成表；null 摆不下会直说"),
+    TomlToCsv("TOML 转 CSV", "对象数组摊成表，一表一份"),
+    TomlToXlsx("TOML 写成 Excel", "摊表用的是 TOML 转 CSV 同一套判据"),
+    IniToJson("INI 转 JSON", "节变成对象；值一律是文字"),
+    JsonToIni("JSON 转 INI", "一层对象写成节；数组与嵌套表摆不下会直说"),
+    IniToYaml("INI 转 YAML", "与 INI 转 JSON 同一棵树"),
+    YamlToIni("YAML 转 INI", "一层对象写成节；数组与嵌套表摆不下会直说"),
+    TomlToIni("TOML 转 INI", "表写成节；数组与内联表摆不下会点名"),
+    IniToToml("INI 转 TOML", "节写成表；全局键收进 global 表并说明"),
     JsonToYaml("JSON 转 YAML", "块式输出；该加引号的加引号，别人读回去是同一个值"),
     YamlToCsv("YAML 转 CSV", "对象数组摊成表，会丢什么都先说明"),
     CsvToYaml("CSV 转 YAML", "一行一个对象；默认不猜类型，007 不会变成 7"),
@@ -87,6 +102,11 @@ enum class OperationKind(val label: String, val hint: String) {
     YamlToXlsx("YAML 转 Excel", "摊表用的是 YAML 转 CSV 同一套判据"),
     CsvToHtml("CSV 转网页表格", "一份带 charset 的完整页面，浏览器直接打开"),
     PdfToHtml("PDF 转网页", "结构与转 Word 同源，落成 HTML"),
+    InsertBlankPages("PDF 插入空白页", "在指定页后插一张白页，0 表示最前面"),
+    CropPdfPages("PDF 裁页边", "四边各裁掉多少 pt，内容不重排"),
+    ExtractPdfImages("PDF 提取图片", "把页面里引用的位图逐张导出"),
+    SplitPdfByOutline("PDF 按书签拆分", "按一级目录各成一份，名字用书签名"),
+    PdfToEpub("PDF 转 EPUB", "同一棵结构树落成电子书"),
     OdtToText("ODT 提取文字", "按 OpenDocument 的结构抽正文，丢了什么逐条写明"),
     OdtToMarkdown("ODT 转 Markdown", "层级、列表、表格与链接按文件里写的读出来，不靠猜"),
     OdtToHtml("ODT 转网页", "同一棵读回来的树，落成浏览器直接打开的 HTML"),
@@ -114,8 +134,10 @@ enum class OperationKind(val label: String, val hint: String) {
         }
 
         private fun compatible(kind: OperationKind, fileKind: FileKind): Boolean = when (kind) {
-            ConvertImage, CompressImage, ImageWatermark, RotateImage, FlipImage, CropImage ->
+            ConvertImage, CompressImage, ImageWatermark ->
                 fileKind.isImage && fileKind != FileKind.Gif && fileKind != FileKind.Ico
+            // 方向与裁边按"一张图"算：GIF 逐帧套同一份计划，ICO 每个尺寸各算一次
+            RotateImage, FlipImage, CropImage -> fileKind.isImage
             // 图标要走专门通路：解码成位图后一次出多个尺寸；普通格式转换只会给一张
             ImageToIco -> fileKind.isImage && fileKind != FileKind.Gif && fileKind != FileKind.Ico
             IcoToImages -> fileKind == FileKind.Ico
@@ -123,7 +145,8 @@ enum class OperationKind(val label: String, val hint: String) {
             CompressPdf, SplitPdfBySize, SplitPdfIntoParts, ExtractPdfPages, RemovePdfPages,
             RotatePdfPages, MergePdfs, PdfToText, PdfToImages, AddPageNumbers, PdfWatermark,
             EncryptPdf, DecryptPdf, PdfMetadata, PdfToDocx, PdfToHtml, PdfReorder,
-            PdfToCsv, PdfToXlsx,
+            PdfToCsv, PdfToXlsx, InsertBlankPages, CropPdfPages, ExtractPdfImages, SplitPdfByOutline,
+            PdfToEpub,
             -> fileKind == FileKind.Pdf
             CompressGif, GifToImages, GifWatermark -> fileKind == FileKind.Gif
             ImagesToGif -> fileKind.isImage
@@ -133,6 +156,7 @@ enum class OperationKind(val label: String, val hint: String) {
             // 两种都只认"这是个文本文件"，具体是哪种字幕交给解析器判
             ConvertTextEncoding, ConvertSubtitle -> fileKind.isTextual
             AudioTrim -> fileKind.isAudio || fileKind.isVideo
+            AudioVolume, AudioDenoise, AudioMerge -> fileKind.isAudio || fileKind.isVideo
             // 印成 PDF、写成 Word 与写成电子书走同一条来源判定：docx / pptx / odt / rtf 先把正文抽出来，
             // 电子书（EPUB）按 spine 排出的章抽成树，表格（xlsx / ods）一张表一节，
             // 网页与 Markdown 按内容认，抽出来 / 认出来的是什么就是什么
@@ -181,7 +205,9 @@ enum class OperationKind(val label: String, val hint: String) {
             // 纯文本里没有任何记号时"转 HTML"没意义，引擎会拒而不是硬出一页。
             // .html 也算这一族：很多人把网页存成 .txt，反向那两条（抽文字 / 转 MD）本来就要给它
             FormatJson, JsonToCsv, CsvToJson, XmlToJson, JsonToXml, XmlToCsv, XmlToXlsx, MdToHtml, MdToText,
-            YamlToJson, JsonToYaml, YamlToCsv, CsvToYaml, XmlToYaml, YamlToXml, CsvToXml -> fileKind.isTextual
+            YamlToJson, JsonToYaml, YamlToCsv, CsvToYaml, XmlToYaml, YamlToXml, CsvToXml,
+            TomlToJson, JsonToToml, TomlToYaml, YamlToToml, TomlToCsv, TomlToXlsx, TomlToIni,
+            IniToJson, JsonToIni, IniToYaml, YamlToIni, IniToToml -> fileKind.isTextual
             // 网页那两条反过来也宽松：类型说 Text 但内容满是标签的文件照样能抽，
             // 真没有 HTML 标记时引擎会直说"这不是网页"，不硬出一份少了尖括号的文件
             HtmlToText, HtmlToMarkdown -> fileKind.isTextual

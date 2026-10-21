@@ -75,6 +75,8 @@ data class EngineOutput(val name: String, val file: File, val note: String? = nu
 
 class PdfEngine(private val context: Context, private val workspace: Workspace) {
 
+    private val images = ImageEngine()
+
     /**
      * 按目标体积分割。体积必须实测——一页能引用的共享资源在不同分组里大小不同
      * （实测：4 页共用一张图的文档拆成两半，每半约 55% 而不是 50%），
@@ -933,6 +935,208 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
                 OutputNaming.tagged(item.name, "网页", "html"),
                 file,
                 notes.filter { it.isNotBlank() }.joinToString(" · "),
+            )
+        } finally {
+            runCatching { document.close() }
+        }
+    }
+
+    /**
+     * 插白页：0 表示最前面；从后往前插，前面要用的页号就不会被自己插乱。
+     * 纸张取相邻那一页的 MediaBox，插在正文中间的空白页不会比正文大一圈。
+     */
+    fun insertBlankPages(item: WorkItem, afterSpec: String): EngineOutput {
+        val source = loadForReading(item.file)
+        try {
+            val total = source.numberOfPages
+            require(total > 0) { "这份 PDF 一页都没有" }
+            val spots = insertSpots(afterSpec, total)
+            require(spots.isNotEmpty()) { "要插在哪几页后？写 1,3-5；0 表示最前面" }
+            val output = workspace.newStagingFile("pdf")
+            // 不能对新建页直接 insertAfter：这份 PDF 的页没有 /Parent，PDFBox 会判 orphan。
+            // 与拆分/合并同一条路：按顺序 importPage 进新文档（它自己会把页加进去），
+            // 在指定位置补一张同尺寸白页；**别再 addPage 一次**，否则每页都会翻倍。
+            val target = PDDocument(scratchSetting())
+            try {
+                target.documentInformation = source.documentInformation
+                if (0 in spots) target.addPage(PDPage(source.getPage(0).mediaBox))
+                for (index in 0 until total) {
+                    val from = source.getPage(index)
+                    val to = target.importPage(from)
+                    from.resources?.let { to.resources = it }
+                    if (index + 1 in spots) target.addPage(PDPage(from.mediaBox))
+                }
+                target.save(output)
+            } finally {
+                runCatching { target.close() }
+            }
+            val where = spots.joinToString("、") { if (it == 0) "最前面" else "第 $it 页后" }
+            return EngineOutput(
+                OutputNaming.tagged(item.name, "插${spots.size}张白页", "pdf"),
+                output,
+                "在 $where 各插一张，$total→${total + spots.size} 页 · 页按新文件重排，书签目录不搬",
+            )
+        } finally {
+            runCatching { source.close() }
+        }
+    }
+
+    private fun insertSpots(spec: String, total: Int): List<Int> {
+        val spots = sortedSetOf<Int>()
+        spec.split(Regex("[\\s,，、;；]+")).filter { it.isNotBlank() }.forEach { part ->
+            val match = Regex("^(\\d+)(?:-(\\d+))?$").matchEntire(part)
+                ?: throw IllegalArgumentException("「$part」不是页码；写 1,3-5，0 表示最前面")
+            val from = match.groupValues[1].toInt()
+            val to = match.groupValues[2].ifBlank { match.groupValues[1] }.toInt()
+            require(from in 0..total && to in 0..total) {
+                "页码要在 0..$total 之间（0 表示最前面），「$part」超了"
+            }
+            spots += minOf(from, to)..maxOf(from, to)
+        }
+        return spots.toList()
+    }
+
+    /** 裁页边：MediaBox 与 CropBox 一起收；内容坐标不动，只是可视范围小了。 */
+    fun cropPages(item: WorkItem, marginPt: Int): EngineOutput {
+        require(marginPt in 1..500) { "四边各裁 1~500 pt" }
+        val document = loadForReading(item.file)
+        try {
+            document.pages.forEach { page ->
+                val box = page.mediaBox
+                require(box.width - 2 * marginPt >= 10 && box.height - 2 * marginPt >= 10) {
+                    "裁掉 $marginPt pt 后剩下的页面太小（原页 ${box.width}×${box.height} pt）"
+                }
+                val rect = PDRectangle(
+                    box.lowerLeftX + marginPt,
+                    box.lowerLeftY + marginPt,
+                    box.width - 2 * marginPt,
+                    box.height - 2 * marginPt,
+                )
+                page.mediaBox = rect
+                page.cropBox = rect
+            }
+            val output = workspace.newStagingFile("pdf")
+            document.save(output)
+            return EngineOutput(
+                OutputNaming.tagged(item.name, "裁边", "pdf"),
+                output,
+                "${document.numberOfPages} 页四边各收 $marginPt pt（内容不重排）",
+            )
+        } finally {
+            runCatching { document.close() }
+        }
+    }
+
+    /** 提取页面里引用的位图；同一张图被多页引用时按对象去重。 */
+    fun extractImages(item: WorkItem, operation: Operation.ExtractPdfImages): List<EngineOutput> {
+        val document = loadForReading(item.file)
+        val outputs = ArrayList<EngineOutput>()
+        try {
+            val seen = HashSet<String>()
+            for (pageIndex in 0 until document.numberOfPages) {
+                val resources = document.getPage(pageIndex).resources ?: continue
+                for (name in resources.xObjectNames) {
+                    val objectImage = runCatching { resources.getXObject(name) }.getOrNull()
+                    if (objectImage !is PDImageXObject) continue
+                    val width = objectImage.width
+                    val height = objectImage.height
+                    if (minOf(width, height) < operation.minEdge) continue
+                    val bitmap = runCatching { objectImage.image }.getOrNull() ?: continue
+                    val key = "${width}x$height:${System.identityHashCode(objectImage.cosObject)}"
+                    if (!seen.add(key)) {
+                        bitmap.recycle()
+                        continue
+                    }
+                    val bytes = images.encode(bitmap, operation.format, operation.quality)
+                    bitmap.recycle()
+                    outputs += EngineOutput(
+                        OutputNaming.tagged(item.name, "图${outputs.size + 1}", operation.format.extension),
+                        workspace.newStagingFile(operation.format.extension).apply { writeBytes(bytes) },
+                        if (outputs.isEmpty()) "${width}×$height（第 ${pageIndex + 1} 页起）" else null,
+                    )
+                }
+            }
+            require(outputs.isNotEmpty()) {
+                "这份 PDF 里没找到可提取的内嵌位图（整页扫描图或纯矢量）；要整页画面就走「每页导出图片」"
+            }
+            return outputs
+        } finally {
+            runCatching { document.close() }
+        }
+    }
+
+    /** 按一级书签拆；第一个书签之前的页单独成一份「开篇」。 */
+    fun splitByOutline(item: WorkItem): List<EngineOutput> {
+        val source = loadForReading(item.file)
+        try {
+            val outline = source.documentCatalog.documentOutline
+                ?: throw IllegalArgumentException("这份 PDF 没有书签目录；按页拆可以用「拆成 N 份」或「按体积分割」")
+            val marks = ArrayList<Pair<String, Int>>()
+            var node = outline.firstChild
+            while (node != null) {
+                val page = runCatching { node.findDestinationPage(source) }.getOrNull()
+                if (page != null) {
+                    val index = source.pages.indexOf(page)
+                    if (index >= 0) {
+                        val title = node.title?.trim()?.takeIf { it.isNotEmpty() } ?: "第 ${index + 1} 页"
+                        marks += title to index
+                    }
+                }
+                node = node.nextSibling
+            }
+            require(marks.isNotEmpty()) { "书签里没有能落到具体页的条目" }
+            val total = source.numberOfPages
+            val starts = marks.sortedBy { it.second }.distinctBy { it.second }
+            val groups = ArrayList<Triple<String, Int, Int>>()
+            if (starts.first().second > 0) groups += Triple("开篇", 0, starts.first().second)
+            starts.forEachIndexed { index, (title, start) ->
+                val end = starts.getOrNull(index + 1)?.second ?: total
+                if (start < end) groups += Triple(title, start, end)
+            }
+            require(groups.isNotEmpty()) { "书签只指到最后一页之后，拆不出内容" }
+            return groups.map { (title, start, end) ->
+                val output = workspace.newStagingFile("pdf")
+                copyPages(source, (start until end).toList(), output)
+                EngineOutput(
+                    OutputNaming.tagged(item.name, safeTag(title) + "_第${start + 1}-${end}页", "pdf"),
+                    output,
+                    "《$title》 第 ${start + 1}-$end 页（共 ${end - start} 页）",
+                )
+            }
+        } finally {
+            runCatching { source.close() }
+        }
+    }
+
+    private fun safeTag(title: String): String =
+        title.replace(Regex("[\\\\/:*?\"<>|\\s]+"), "_").take(24).ifBlank { "节" }
+
+    /** PDF → EPUB：与转 Word / 网页共用同一棵结构树，只是落成电子书。 */
+    fun toEpub(item: WorkItem, operation: Operation.PdfToEpub): EngineOutput {
+        val document = loadForReading(item.file)
+        try {
+            val (doc, pages, _) = structureOf(document, "")
+            require(doc.parts.isNotEmpty()) {
+                doc.notes.joinToString(" · ").ifBlank { "这份 PDF 没抽出可用的文字" } +
+                    "；扫描件要留档就走「每页导出图片」"
+            }
+            val title = operation.title.ifBlank { OutputNaming.stem(item.name) }
+            val author = operation.author.ifBlank { null }
+            val chapters = com.fileforge.core.book.EpubWrite.chaptersOf(doc, OutputNaming.stem(item.name))
+            val language = com.fileforge.core.book.EpubWrite.languageOf(doc)
+            val out = com.fileforge.core.book.EpubWrite.book(
+                title = title,
+                author = author,
+                pages = chapters,
+                language = language,
+                identifier = com.fileforge.core.book.EpubWrite.identifierFor(title + item.name),
+                modifiedAt = item.file.lastModified(),
+            )
+            return EngineOutput(
+                OutputNaming.tagged(item.name, "", "epub"),
+                workspace.newStagingFile("epub").apply { writeBytes(out.bytes) },
+                "《$title》 · ${chapters.size} 章 · $pages 页 · 语言标 $language · " +
+                    (doc.notes + out.notes).joinToString(" · "),
             )
         } finally {
             runCatching { document.close() }

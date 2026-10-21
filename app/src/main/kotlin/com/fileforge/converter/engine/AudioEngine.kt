@@ -8,7 +8,9 @@ import android.media.MediaFormat
 import android.media.MediaMuxer
 import com.fileforge.core.audio.AudioPlan
 import com.fileforge.core.audio.AudioTarget
+import com.fileforge.core.audio.Pcm16
 import com.fileforge.core.audio.WavHeader
+import com.fileforge.core.naming.OutputNaming
 import com.fileforge.core.ops.Operation
 import com.fileforge.core.util.SizeInput
 import com.fileforge.core.util.TimeInput
@@ -155,6 +157,98 @@ class AudioEngine(private val workspace: Workspace) {
                 output,
                 "$span · $how · ${SizeInput.format(output.length())}",
             )
+        } finally {
+            runCatching { extractor.release() }
+        }
+    }
+
+    /**
+     * 调音量：先解成 WAV，再在 16 位 PCM 上按百分比缩放，最后落回 WAV。
+     * 不走有损编码：音量是线性运算，再编一次 AAC 只会多一代损失。
+     */
+    fun volume(item: WorkItem, percent: Int, onProgress: (Int) -> Unit = {}): EngineOutput {
+        val temp = decodeToTempWav(item, onProgress)
+        try {
+            val pcm = Pcm16.fromWav(temp.readBytes())
+            val out = pcm.gain(percent)
+            val bytes = out.toWav()
+            val file = workspace.newStagingFile("wav").apply { writeBytes(bytes) }
+            return EngineOutput(
+                OutputNaming.tagged(item.name, "音量$percent", "wav"),
+                file,
+                "$percent% · ${pcm.sampleRate}Hz/${pcm.channels} 声道 · ${seconds(out)} 秒 · 输出 WAV 无损",
+            )
+        } finally {
+            runCatching { temp.delete() }
+        }
+    }
+
+    /** 轻降噪：高通 + 噪声门，都做在 16 位 PCM 上；门限宁可少削，不把尾音整段吃掉。 */
+    fun denoise(item: WorkItem, level: Int, onProgress: (Int) -> Unit = {}): EngineOutput {
+        val temp = decodeToTempWav(item, onProgress)
+        try {
+            val pcm = Pcm16.fromWav(temp.readBytes())
+            val out = pcm.denoise(level)
+            val bytes = out.toWav()
+            val file = workspace.newStagingFile("wav").apply { writeBytes(bytes) }
+            val levelLabel = listOf("轻", "中", "强").getOrElse(level - 1) { "轻" }
+            return EngineOutput(
+                OutputNaming.tagged(item.name, "降噪$levelLabel", "wav"),
+                file,
+                "降噪 $levelLabel · ${pcm.sampleRate}Hz/${pcm.channels} 声道 · ${seconds(out)} 秒 · 输出 WAV 无损",
+            )
+        } finally {
+            runCatching { temp.delete() }
+        }
+    }
+
+    /** 合并：按选中顺序解码成 PCM 再首尾相接；采样率/声道不一致会点名，不偷偷重采样。 */
+    fun merge(items: List<WorkItem>, onProgress: (Int) -> Unit = {}): EngineOutput {
+        require(items.isNotEmpty()) { "没有音频可合并" }
+        val temps = ArrayList<File>()
+        try {
+            val parts = items.mapIndexed { index, item ->
+                val temp = decodeToTempWav(item) { percent -> onProgress((index * 100 + percent) / items.size) }
+                temps += temp
+                Pcm16.fromWav(temp.readBytes())
+            }
+            val merged = Pcm16.concat(parts)
+            val bytes = merged.toWav()
+            val file = workspace.newStagingFile("wav").apply { writeBytes(bytes) }
+            val detail = if (parts.size == 1) "只有一份，等于转成 WAV" else "${items.size} 份依次接成一条"
+            return EngineOutput(
+                OutputNaming.tagged(items.first().name, "合并${items.size}份", "wav"),
+                file,
+                "$detail · ${merged.sampleRate}Hz/${merged.channels} 声道 · ${seconds(merged)} 秒",
+            )
+        } finally {
+            temps.forEach { runCatching { it.delete() } }
+        }
+    }
+
+    private fun seconds(pcm: Pcm16): String = "%.1f".format(pcm.frames.toDouble() / pcm.sampleRate)
+
+    /** 任何一条音轨 → 临时 WAV（16 位整数）；非 16 位的解码输出由 Pcm16 直说。 */
+    private fun decodeToTempWav(item: WorkItem, onProgress: (Int) -> Unit): File {
+        val extractor = MediaExtractor()
+        try {
+            extractor.setDataSource(item.file.absolutePath)
+            val mimes = (0 until extractor.trackCount).map { index ->
+                runCatching { extractor.getTrackFormat(index).getString(MediaFormat.KEY_MIME) }.getOrNull()
+            }
+            val track = AudioPlan.pickAudioTrack(mimes)
+            require(track >= 0) {
+                if (item.kind.isVideo) "这个视频里没有音轨" else "读不出音轨，这个文件可能不是音频"
+            }
+            val mime = mimes[track] ?: error("音轨没有格式描述")
+            require(AudioPlan.decodableMime(mime)) { "系统里没有 $mime 的解码器，这条音轨处理不了" }
+            extractor.selectTrack(track)
+            val format = extractor.getTrackFormat(track)
+            val durationUs = format.long(MediaFormat.KEY_DURATION) ?: 0L
+            val output = workspace.newStagingFile("wav")
+            decodeToWav(extractor, format, mime, output, durationUs, onProgress)
+            require(output.length() > WavHeader.SIZE) { "这条音轨里一个样本都没有" }
+            return output
         } finally {
             runCatching { extractor.release() }
         }

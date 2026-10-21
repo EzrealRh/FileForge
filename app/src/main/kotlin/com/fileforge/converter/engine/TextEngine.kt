@@ -1,7 +1,11 @@
 package com.fileforge.converter.engine
 
 import com.fileforge.core.data.Csv
+import com.fileforge.core.data.Ini
+import com.fileforge.core.data.IniException
 import com.fileforge.core.data.TableBridge
+import com.fileforge.core.data.Toml
+import com.fileforge.core.data.TomlException
 import com.fileforge.core.data.Xml
 import com.fileforge.core.data.XmlTable
 import com.fileforge.core.data.Yaml
@@ -11,6 +15,7 @@ import com.fileforge.core.doc.DocTable
 import com.fileforge.core.doc.HtmlWrite
 import com.fileforge.core.json.Json
 import com.fileforge.core.json.JsonException
+import com.fileforge.core.json.JsonObject
 import com.fileforge.core.json.JsonRender
 import com.fileforge.core.naming.OutputNaming
 import com.fileforge.core.ops.Operation
@@ -182,6 +187,158 @@ class TextEngine(private val workspace: Workspace) {
     }
 
     /** YAML → CSV：先落成那棵共用的树，再走「JSON 转 CSV」同一套摊平判据。 */
+    /** TOML / INI 的门面：读、写都交给 `:core`，这里只负责落盘与把交代拼好。 */
+    private fun parseToml(item: WorkItem): Json {
+        val text = readText(item).trim()
+        require(text.isNotEmpty()) { "这份文件是空的" }
+        return try {
+            Toml.parse(text)
+        } catch (bad: TomlException) {
+            throw IllegalArgumentException("这不是合法 TOML：${bad.message}")
+        }
+    }
+
+    private fun parseIni(item: WorkItem): Json {
+        val text = readText(item).trim()
+        require(text.isNotEmpty()) { "这份文件是空的" }
+        return try {
+            Ini.parse(text)
+        } catch (bad: IniException) {
+            throw IllegalArgumentException("这不是合法 INI：${bad.message}")
+        }
+    }
+
+    private fun entriesOf(tree: Json): Int = tree.arrayValue.size.takeIf { it > 0 } ?: tree.members.size
+
+    fun tomlToJson(item: WorkItem, operation: Operation.TomlToJson): EngineOutput {
+        val tree = parseToml(item)
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "", "json"),
+            writeText(item, JsonRender.render(tree, indent = operation.indent), "json"),
+            "顶层 ${entriesOf(tree)} 项 · 日期时间保持原文 · 表与数组表都摊成对象",
+        )
+    }
+
+    fun jsonToToml(item: WorkItem): EngineOutput {
+        val json = parseJson(item)
+        val text = Toml.write(json)
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "", "toml"),
+            writeText(item, text, "toml"),
+            "顶层 ${entriesOf(json)} 项 · 对象写成表、对象数组写成数组表 · null 没有对应写法所以会直说",
+        )
+    }
+
+    fun tomlToYaml(item: WorkItem, operation: Operation.TomlToYaml): EngineOutput {
+        val tree = parseToml(item)
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "", "yaml"),
+            writeText(item, Yaml.write(tree, operation.indent), "yaml"),
+            "顶层 ${entriesOf(tree)} 项 · 与 TOML 转 JSON 同一棵树 · 日期时间是文字",
+        )
+    }
+
+    fun yamlToToml(item: WorkItem): EngineOutput {
+        val (tree, notes) = parseYaml(item)
+        val text = Toml.write(tree)
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "", "toml"),
+            writeText(item, text, "toml"),
+            (listOf("顶层 ${entriesOf(tree)} 项") + notes + "null 没有对应写法所以会直说").joinToString(" · "),
+        )
+    }
+
+    fun tomlToCsv(item: WorkItem, operation: Operation.TomlToCsv): EngineOutput {
+        val tree = parseToml(item)
+        val tableTree = tableCandidate(tree)
+        TableBridge.reasonWhyNotTable(tableTree)?.let { throw IllegalArgumentException("转不成表：$it") }
+        val table = TableBridge.toTable(tableTree) ?: throw IllegalArgumentException("转不成表：这份 TOML 的形状没认出来")
+        val text = Csv.render(table.records, operation.delimiter, operation.ending, operation.quoteAll)
+        val lines = ArrayList<String>()
+        if (tableTree !== tree) lines += "把唯一的那张数组表当成了整张表"
+        lines += "${table.rows.size} 行 × ${table.columns.size} 列"
+        TableBridge.losses(tableTree).forEach { lines += "转过去会丢$it" }
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "", "csv"),
+            writeText(item, text, "csv"),
+            lines.joinToString(" · "),
+        )
+    }
+
+    /** `[[rows]]` 这种 TOML 的顶层就是一张表里放一个数组表：摊表时把那个数组拿出来当整张表。 */
+    private fun tableCandidate(tree: Json): Json {
+        if (tree.members.size != 1) return tree
+        val only = tree.members.values.first()
+        return if (only.arrayValue.isNotEmpty() && only.arrayValue.all { it is JsonObject }) only else tree
+    }
+
+    fun iniToJson(item: WorkItem, operation: Operation.IniToJson): EngineOutput {
+        val tree = parseIni(item)
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "", "json"),
+            writeText(item, JsonRender.render(tree, indent = operation.indent), "json"),
+            "顶层 ${entriesOf(tree)} 节 · 值一律是文字（不猜数字与真假）· 全局键放在空键里",
+        )
+    }
+
+    fun jsonToIni(item: WorkItem): EngineOutput {
+        val json = parseJson(item)
+        val text = Ini.write(json)
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "", "ini"),
+            writeText(item, text, "ini"),
+            "一层对象写成节 · 数组、内联表与 null 摆不下会点名",
+        )
+    }
+
+    fun iniToYaml(item: WorkItem, operation: Operation.IniToYaml): EngineOutput {
+        val tree = parseIni(item)
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "", "yaml"),
+            writeText(item, Yaml.write(tree, operation.indent), "yaml"),
+            "顶层 ${entriesOf(tree)} 节 · 与 INI 转 JSON 同一棵树 · 值一律是文字",
+        )
+    }
+
+    fun yamlToIni(item: WorkItem): EngineOutput {
+        val (tree, notes) = parseYaml(item)
+        val text = Ini.write(tree)
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "", "ini"),
+            writeText(item, text, "ini"),
+            (listOf("顶层 ${entriesOf(tree)} 项") + notes + "数组与嵌套表摆不下会点名").joinToString(" · "),
+        )
+    }
+
+    fun tomlToIni(item: WorkItem): EngineOutput {
+        val tree = parseToml(item)
+        val text = Ini.write(tree)
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "", "ini"),
+            writeText(item, text, "ini"),
+            "表写成节 · 数组与内联表摆不下会点名",
+        )
+    }
+
+    fun iniToToml(item: WorkItem): EngineOutput {
+        var tree = parseIni(item)
+        val notes = ArrayList<String>()
+        val globals = tree.members[""]
+        if (globals is JsonObject) {
+            val merged = LinkedHashMap<String, Json>()
+            merged["global"] = globals
+            tree.members.filterKeys { it.isNotEmpty() }.forEach { (key, value) -> merged[key] = value }
+            tree = JsonObject(merged)
+            notes += "文件里没有节的全局键收进了 [global] 表"
+        }
+        val text = Toml.write(tree)
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "", "toml"),
+            writeText(item, text, "toml"),
+            (listOf("节写成表") + notes).joinToString(" · "),
+        )
+    }
+
     fun yamlToCsv(item: WorkItem, operation: Operation.YamlToCsv): EngineOutput {
         val (tree, notes) = parseYaml(item)
         TableBridge.reasonWhyNotTable(tree)?.let { throw IllegalArgumentException("转不成表：$it") }

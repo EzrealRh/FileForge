@@ -7,6 +7,8 @@ import com.fileforge.core.gif.GifDecoder
 import com.fileforge.core.gif.GifEncoder
 import com.fileforge.core.gif.GifFrame
 import com.fileforge.core.gif.GifImage
+import com.fileforge.core.image.Flip
+import com.fileforge.core.image.ImageGeometry
 import com.fileforge.core.naming.OutputNaming
 import com.fileforge.core.ops.Operation
 import com.fileforge.core.util.SizeInput
@@ -55,9 +57,46 @@ class GifEngine(private val workspace: Workspace, private val images: ImageEngin
         )
     }
 
+    /**
+     * 整段 GIF 改方向或裁边：**每一帧都按同一份判层计划画**，帧延时与循环次数原样留着。
+     * 坐标按解出来的整张画布算（源坐标），与静态图那条同一个口径；任意角度的空角留透明。
+     */
+    fun transform(
+        item: WorkItem,
+        degrees: Int,
+        flip: Flip,
+        cropSpec: String?,
+        aspectSpec: String?,
+        tag: String,
+    ): EngineOutput {
+        val source = GifDecoder.decode(item.file.readBytes(), pixelBudget = PIXEL_BUDGET)
+        val plan = ImageGeometry.plan(source.width, source.height, degrees.toFloat(), flip, cropSpec, aspectSpec)
+        val total = plan.outWidth.toLong() * plan.outHeight * source.frames.size
+        require(total <= PIXEL_BUDGET) {
+            "转完是 ${plan.outWidth}×${plan.outHeight} × ${source.frames.size} 帧，超出内存上限；先压缩或裁小一点再转"
+        }
+        val frames = source.frames.map { frame ->
+            val bitmap = Bitmap.createBitmap(frame.argb, source.width, source.height, Bitmap.Config.ARGB_8888)
+            val drawn = images.drawPlan(bitmap, plan)
+            val pixels = IntArray(drawn.width * drawn.height)
+            drawn.getPixels(pixels, 0, drawn.width, 0, 0, drawn.width, drawn.height)
+            if (drawn !== bitmap) drawn.recycle()
+            bitmap.recycle()
+            GifFrame(pixels, frame.delayCs)
+        }
+        val bytes = GifEncoder(plan.outWidth, plan.outHeight, source.loopCount, 256).encode(frames)
+        val notes = ArrayList<String>()
+        if (source.truncated) notes += "帧太多，只处理了前 ${source.frames.size} 帧"
+        notes += plan.notes
+        return EngineOutput(
+            OutputNaming.tagged(item.name, tag, "gif"),
+            workspace.newStagingFile("gif").apply { writeBytes(bytes) },
+            notes.joinToString(" · "),
+        )
+    }
+
     /** GIF 加文字水印：每一帧都盖同一份（落位/平铺/透明度与图片水印一致），重编码回 GIF。 */
-    fun watermark(item: WorkItem, operation: Operation.GifWatermark): EngineOutput {
-        val text = operation.text.trim()
+    fun watermark(item: WorkItem, operation: Operation.GifWatermark): EngineOutput {        val text = operation.text.trim()
         require(text.isNotEmpty()) { "先写要盖的水印文字" }
         val source = GifDecoder.decode(item.file.readBytes(), pixelBudget = PIXEL_BUDGET)
         source.frames.forEach { frame ->

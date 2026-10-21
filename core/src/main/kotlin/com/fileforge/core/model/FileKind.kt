@@ -4,7 +4,7 @@ import com.fileforge.core.doc.Html
 
 /** 文件真实类型，只看头部魔数，不信扩展名。 */
 enum class FileKind {
-    Pdf, Png, Jpeg, Gif, WebP, Bmp, Heic, Avif, Mp4, WebM, Mkv, QuickTime,
+    Pdf, Png, Jpeg, Tiff, Gif, WebP, Bmp, Heic, Avif, Mp4, WebM, Mkv, QuickTime,
     Mp3, Aac, M4a, Flac, Ogg, Wav,
     Zip, Ico, Docx, Xlsx, Pptx, Odt, Ods, Epub, Tar, Gzip, Rtf, Text, Html, Unknown;
 
@@ -23,6 +23,7 @@ enum class FileKind {
         Pdf -> "application/pdf"
         Png -> "image/png"
         Jpeg -> "image/jpeg"
+        Tiff -> "image/tiff"
         Gif -> "image/gif"
         Ico -> "image/x-icon"
         WebP -> "image/webp"
@@ -62,6 +63,7 @@ enum class FileKind {
         Pdf -> "PDF"
         Png -> "PNG"
         Jpeg -> "JPEG"
+        Tiff -> "TIFF"
         Gif -> "GIF"
         Ico -> "ICO"
         WebP -> "WebP"
@@ -94,7 +96,7 @@ enum class FileKind {
     }
 
     companion object {
-        val IMAGE_KINDS = setOf(Png, Jpeg, Gif, WebP, Bmp, Heic, Avif, Ico)
+        val IMAGE_KINDS = setOf(Png, Jpeg, Tiff, Gif, WebP, Bmp, Heic, Avif, Ico)
         val VIDEO_KINDS = setOf(Mp4, WebM, Mkv, QuickTime)
 
         /**
@@ -125,6 +127,9 @@ object FileTypeSniffer {
             isAscii(0, "%PDF") -> FileKind.Pdf
             u(0) == 0x89 && isAscii(1, "PNG") -> FileKind.Png
             u(0) == 0xFF && u(1) == 0xD8 && u(2) == 0xFF -> FileKind.Jpeg
+            // TIFF 的两种字节序：II + 42 或 MM + 42
+            (u(0) == 0x49 && u(1) == 0x49 && u(2) == 42 && u(3) == 0) ||
+                (u(0) == 0x4D && u(1) == 0x4D && u(2) == 0 && u(3) == 42) -> FileKind.Tiff
             isAscii(0, "GIF8") -> FileKind.Gif
             // ICO：保留字 0、类型 1(图标)/2(光标)，条目数不为 0。只认前四条约束——
             // 光看 00 00 01 00 会撞上别的二进制头，所以再加一条"数据都落在文件内"

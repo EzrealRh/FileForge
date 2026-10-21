@@ -204,6 +204,12 @@ class Parameters(
     var pdfUserPw by mutableStateOf("")
     var pdfOwnerPw by mutableStateOf("")
     var pdfOpenPw by mutableStateOf("")
+    var pdfBlankSpec by mutableStateOf("1")
+    var pdfCropMargin by mutableStateOf(24f)
+    var pdfImageFormat by mutableStateOf(ImageFormat.Png)
+    var pdfImageMinEdge by mutableStateOf(0f)
+    var pdfEpubTitle by mutableStateOf("")
+    var pdfEpubAuthor by mutableStateOf("")
 
     /** 勾选项 = 还允许的权限。默认只留"允许打印"，其余三项关着。 */
     var pdfAllowed by mutableStateOf(setOf(PdfPermission.Print))
@@ -246,6 +252,8 @@ class Parameters(
     var trimSpecText by mutableStateOf("")
     var audioTrimTarget by mutableStateOf(AudioTarget.Wav)
     var audioTrimSpecText by mutableStateOf("")
+    var audioVolumePercent by mutableStateOf(150f)
+    var audioDenoiseLevel by mutableStateOf(1)
     var pdfReorderSpec by mutableStateOf("")
     var imageWatermarkLogo by mutableStateOf<String?>(null)
     var imageWatermarkSize by mutableStateOf(100f)
@@ -389,7 +397,7 @@ class Parameters(
                     imageFormat = ImageFormat.entries[it]
                 }
                 IntSlider("清晰度", pdfScale, 1f..4f, { "%.0f 倍".format(it) }) { pdfScale = it }
-                if (imageFormat != ImageFormat.Png) {
+                if (imageFormat == ImageFormat.Jpeg || imageFormat == ImageFormat.WebP) {
                     IntSlider("质量", quality, 40f..100f, { "%.0f".format(it) }) { quality = it }
                 }
             }
@@ -431,6 +439,18 @@ class Parameters(
                 )
                 Summary("AAC 选 M4A 时原样搬运秒出；其他编码会解了重编，WAV 是无损落盘；多段按顺序拼成一条")
             }
+            OperationKind.AudioVolume -> {
+                IntSlider("音量", audioVolumePercent, 0f..300f, { "%.0f%%".format(it) }) { audioVolumePercent = it }
+                Summary("输出 WAV 无损；0% 是静音，超过 100% 会放大，超出 16 位范围的峰值削平而不是爆音。")
+            }
+            OperationKind.AudioDenoise -> {
+                Segmented("力度", listOf("轻", "中", "强"), audioDenoiseLevel - 1) { audioDenoiseLevel = it + 1 }
+                Summary("一阶高通 + 噪声门：削掉直流与很轻的底噪；门限保守，可能少吃一点气声，不会整段吞掉。")
+            }
+            OperationKind.AudioMerge -> {
+                Summary("按选中顺序首尾相接，输出 WAV 无损。")
+                Summary("采样率与声道不一致会点名，不在背后偷偷重采样 —— 那会改变时长。")
+            }
             OperationKind.PdfReorder -> {
                 OutlinedTextField(
                     value = pdfReorderSpec,
@@ -447,7 +467,7 @@ class Parameters(
                 Segmented("图片格式", ImageFormat.entries.map { it.label }, imageFormat.ordinal) {
                     imageFormat = ImageFormat.entries[it]
                 }
-                if (imageFormat != ImageFormat.Png) {
+                if (imageFormat == ImageFormat.Jpeg || imageFormat == ImageFormat.WebP) {
                     IntSlider("质量", quality, 40f..100f, { "%.0f".format(it) }) { quality = it }
                 }
                 Summary("PNG 会保住 GIF 的透明边；逐帧导出时一张一帧，帧多就出得多")
@@ -462,7 +482,7 @@ class Parameters(
                     imageFormat = ImageFormat.entries[it]
                 }
                 NumberField("第几秒（空=第一帧）", startSecondText) { startSecondText = it }
-                if (imageFormat != ImageFormat.Png) {
+                if (imageFormat == ImageFormat.Jpeg || imageFormat == ImageFormat.WebP) {
                     IntSlider("质量", quality, 40f..100f, { "%.0f".format(it) }) { quality = it }
                 }
                 IntSlider("最长边不超过", maxEdge, 0f..1920f, ::edgeLabel, step = 64f) { maxEdge = it }
@@ -784,6 +804,35 @@ class Parameters(
                 Summary("要的是对象数组（或「键映射到对象」的形状）：第一行是列名，一条一项一行。")
                 Summary("嵌套的对象与数组会压成一格文字，字段数不齐时缺的地方留空 —— 与「JSON 转 CSV」同一本账。")
             }
+            OperationKind.TomlToJson, OperationKind.IniToJson -> {
+                IntSlider("缩进宽度", jsonIndent, 1f..8f, { "$it 空格" }) { jsonIndent = it }
+                Summary("TOML 的表与数组表、INI 的节都摊成对象；日期时间与 INI 的值一律保持文字。")
+                Summary("TOML 的 null 没有对应写法（TOML 里根本没有 null），写回时会直说。")
+            }
+            OperationKind.TomlToYaml, OperationKind.IniToYaml -> {
+                IntSlider("缩进宽度", jsonIndent, 1f..8f, { "$it 空格" }) { jsonIndent = it }
+                Summary("与转到 JSON 是同一棵树，只是落成块式 YAML；该加引号的值都加了。")
+            }
+            OperationKind.TomlToCsv -> {
+                PickerRow("分隔符", Delimiter.entries.map { it.label }, Delimiter.entries.indexOf(csvDelimiter)) {
+                    csvDelimiter = Delimiter.entries[it]
+                }
+                Segmented("换行", LineEnding.entries.map { it.label }, LineEnding.entries.indexOf(csvEnding)) {
+                    csvEnding = LineEnding.entries[it]
+                }
+                Segmented("引号", listOf("必要处才加", "每格都加"), if (csvQuoteAll) 1 else 0) { csvQuoteAll = it == 1 }
+                Summary("要的是对象数组（或「键映射到对象」的形状）：第一行是列名，一条一项一行。")
+            }
+            OperationKind.JsonToToml, OperationKind.YamlToToml,
+            OperationKind.JsonToIni, OperationKind.YamlToIni,
+            OperationKind.TomlToIni, OperationKind.IniToToml -> {
+                Summary("对象写成表/节，一层层往下摆；数组与内联表在 INI 里摆不下时会点名是哪一格，不悄悄丢。")
+                Summary("TOML 没有 null；这份数据里有 null 就直说，不编一个空字符串顶替。")
+            }
+            OperationKind.TomlToXlsx -> {
+                Summary("摊表用的是「TOML 转 CSV」同一套判据：要对象数组，第一行是列名，两条路的行列一致。")
+                Summary("格子类型只按字面判：1.50 与 007 保持文字。")
+            }
             OperationKind.CsvToYaml -> {
                 Segmented("首行", listOf("当普通数据行", "当列名"), if (csvHeader) 1 else 0) { csvHeader = it == 1 }
                 IntSlider("缩进宽度", jsonIndent, 1f..8f, { "$it 空格" }) { jsonIndent = it }
@@ -939,6 +988,50 @@ class Parameters(
                 Summary("出一份带 charset 的完整网页，浏览器直接打开；标题、段落、列表、表格照结构排。")
                 Summary("跨页重复的页眉页脚不搬进行文；行尾的断词连字符拼回去时去掉。")
                 Summary("PDF 里的行只有字与位置，没有「这是个链接」这件事 —— 超链接与图片搬不过来。")
+                items.forEach { Summary("${it.name} · ${it.sizeLabel}") }
+            }
+            OperationKind.InsertBlankPages -> {
+                SpecField("插在哪几页后", pdfBlankSpec, "例 1,3-5；0 表示最前面") { pdfBlankSpec = it }
+                Summary("每处插一张白页，纸张照相邻页；从后往前插，页号不会自己插乱。")
+                items.forEach { Summary("${it.name} · ${it.sizeLabel}") }
+            }
+            OperationKind.CropPdfPages -> {
+                IntSlider("四边各裁多少 pt", pdfCropMargin, 1f..300f, { "%.0f pt".format(it) }) { pdfCropMargin = it }
+                Summary("MediaBox 与 CropBox 一起收：内容坐标不动，只是可视范围小了；裁得太狠会直接拒。")
+                items.forEach { Summary("${it.name} · ${it.sizeLabel}") }
+            }
+            OperationKind.ExtractPdfImages -> {
+                Segmented("导出格式", ImageFormat.entries.map { it.label }, pdfImageFormat.ordinal) {
+                    pdfImageFormat = ImageFormat.entries[it]
+                }
+                IntSlider("短边小于多少像素就跳过", pdfImageMinEdge, 0f..512f, { "%.0f".format(it) }, step = 16f) {
+                    pdfImageMinEdge = it
+                }
+                Summary("把页面里引用的位图逐张导出，同一张图被多页引用只出一份；整页扫描图不在这一条里。")
+                items.forEach { Summary("${it.name} · ${it.sizeLabel}") }
+            }
+            OperationKind.SplitPdfByOutline -> {
+                Summary("按**一级书签**各成一份，文件名用书签名；第一个书签之前的页单独成一份「开篇」。")
+                Summary("没有书签、或书签指不到具体页时会直说，不硬拆。")
+                items.forEach { Summary("${it.name} · ${it.sizeLabel}") }
+            }
+            OperationKind.PdfToEpub -> {
+                OutlinedTextField(
+                    value = pdfEpubTitle,
+                    onValueChange = { pdfEpubTitle = it },
+                    label = { Text("书名（留空用文件名）") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = pdfEpubAuthor,
+                    onValueChange = { pdfEpubAuthor = it },
+                    label = { Text("作者（留空就不写）") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Summary("与「PDF 转 Word」读同一棵结构树：标题层级、列表、表格都留着，落成阅读器能打开的电子书。")
+                Summary("PDF 里的图片搬不过来（那棵树只带字与结构）；扫描件会直说抽不出正文。")
                 items.forEach { Summary("${it.name} · ${it.sizeLabel}") }
             }
             OperationKind.CsvToHtml -> {
@@ -1181,6 +1274,9 @@ class Parameters(
             return "先写要截的段，比如 5-12,30-41 或 1:05-2:30；段给反了也读不出来"
         }
         if (kind == OperationKind.PdfReorder && pdfReorderSpec.isBlank()) return "先写新的页序，比如 3,1,2"
+        if (kind == OperationKind.InsertBlankPages && pdfBlankSpec.isBlank()) {
+            return "先写插在哪几页后，比如 1,3-5；0 表示最前面"
+        }
         if (kind == OperationKind.AudioTrim && TimeInput.parseRanges(audioTrimSpecText).isEmpty()) {
             return "先写要截的段，比如 5-12,30-41 或 1:05-2:30；段给反了也读不出来"
         }
@@ -1267,6 +1363,9 @@ class Parameters(
             )
             OperationKind.VideoTrim -> Operation.VideoTrim(trimSpecText)
             OperationKind.AudioTrim -> Operation.AudioTrim(audioTrimTarget, audioTrimSpecText)
+            OperationKind.AudioVolume -> Operation.AudioVolume(audioVolumePercent.roundToInt())
+            OperationKind.AudioDenoise -> Operation.AudioDenoise(audioDenoiseLevel)
+            OperationKind.AudioMerge -> Operation.AudioMerge
             OperationKind.PdfReorder -> Operation.PdfReorder(pdfReorderSpec)
             OperationKind.CompressVideo -> Operation.CompressVideo(
                 videoFormat, bitrate.roundToInt(), 0, 96,
@@ -1302,6 +1401,18 @@ class Parameters(
             OperationKind.YamlToJson -> Operation.YamlToJson(jsonIndent.roundToInt())
             OperationKind.JsonToYaml -> Operation.JsonToYaml(jsonIndent.roundToInt())
             OperationKind.YamlToCsv -> Operation.YamlToCsv(csvDelimiter, csvEnding, csvQuoteAll)
+            OperationKind.TomlToJson -> Operation.TomlToJson(jsonIndent.roundToInt())
+            OperationKind.JsonToToml -> Operation.JsonToToml
+            OperationKind.TomlToYaml -> Operation.TomlToYaml(jsonIndent.roundToInt())
+            OperationKind.YamlToToml -> Operation.YamlToToml
+            OperationKind.TomlToCsv -> Operation.TomlToCsv(csvDelimiter, csvEnding, csvQuoteAll)
+            OperationKind.TomlToXlsx -> Operation.TomlToXlsx
+            OperationKind.IniToJson -> Operation.IniToJson(jsonIndent.roundToInt())
+            OperationKind.JsonToIni -> Operation.JsonToIni
+            OperationKind.IniToYaml -> Operation.IniToYaml(jsonIndent.roundToInt())
+            OperationKind.YamlToIni -> Operation.YamlToIni
+            OperationKind.TomlToIni -> Operation.TomlToIni
+            OperationKind.IniToToml -> Operation.IniToToml
             OperationKind.CsvToYaml -> Operation.CsvToYaml(csvHeader, jsonIndent.roundToInt())
             OperationKind.JsonToXml -> Operation.JsonToXml(xmlRoot.trim(), jsonIndent.roundToInt())
             OperationKind.XmlToYaml -> Operation.XmlToYaml(jsonIndent.roundToInt())
@@ -1328,6 +1439,11 @@ class Parameters(
             OperationKind.RtfToHtml -> Operation.RtfToHtml
             OperationKind.RtfToDocx -> Operation.RtfToDocx
             OperationKind.PdfToHtml -> Operation.PdfToHtml(pageSpec.trim(), htmlTitle.trim())
+            OperationKind.InsertBlankPages -> Operation.InsertBlankPages(pdfBlankSpec.trim())
+            OperationKind.CropPdfPages -> Operation.CropPdfPages(pdfCropMargin.roundToInt())
+            OperationKind.ExtractPdfImages -> Operation.ExtractPdfImages(pdfImageMinEdge.roundToInt(), pdfImageFormat, 92)
+            OperationKind.SplitPdfByOutline -> Operation.SplitPdfByOutline
+            OperationKind.PdfToEpub -> Operation.PdfToEpub(pdfEpubTitle.trim(), pdfEpubAuthor.trim())
             OperationKind.TextToPdf -> Operation.TextToPdf(
                 textSize.roundToInt(), paper, textMargin.roundToInt(), textLeading, textIndent, textNumber,
             )

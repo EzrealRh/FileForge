@@ -29,6 +29,8 @@ class FileKindSniffTest {
         assertEquals(FileKind.Jpeg, FileTypeSniffer.sniff(h(0 to listOf(0xFF, 0xD8, 0xFF, 0xE0))))
         assertEquals(FileKind.Gif, FileTypeSniffer.sniff(h(0 to s("GIF89a"))))
         assertEquals(FileKind.Bmp, FileTypeSniffer.sniff(h(0 to s("BM"))))
+        assertEquals(FileKind.Tiff, FileTypeSniffer.sniff(h(0 to listOf(0x49, 0x49, 42, 0))))
+        assertEquals(FileKind.Tiff, FileTypeSniffer.sniff(h(0 to listOf(0x4D, 0x4D, 0, 42))))
         assertEquals(FileKind.WebP, FileTypeSniffer.sniff(h(0 to s("RIFF"), 8 to s("WEBP"))))
         assertEquals(FileKind.WebM, FileTypeSniffer.sniff(h(0 to listOf(0x1A, 0x45, 0xDF, 0xA3), 20 to s("webm"))))
         assertEquals(FileKind.Mkv, FileTypeSniffer.sniff(h(0 to listOf(0x1A, 0x45, 0xDF, 0xA3), 20 to s("matroska"))))
@@ -110,9 +112,12 @@ class FileKindSniffTest {
         // 混进来就是点了必崩的按钮。两条打包（zip 与 tar.gz）是例外 —— 打包对任何类型都成立。
         listOf(FileKind.Mp3, FileKind.Aac, FileKind.M4a, FileKind.Flac, FileKind.Ogg, FileKind.Wav).forEach {
             assertEquals(
-                listOf(OperationKind.ConvertAudio, OperationKind.AudioTrim, OperationKind.PackZip, OperationKind.PackTar),
+                listOf(
+                    OperationKind.ConvertAudio, OperationKind.AudioTrim, OperationKind.AudioVolume,
+                    OperationKind.AudioDenoise, OperationKind.AudioMerge, OperationKind.PackZip, OperationKind.PackTar,
+                ),
                 OperationKind.applicable(setOf(it)),
-                "$it 只该给音频转换、截取和打包",
+                "$it 只该给音频转换、截取、调音量、降噪、合并和打包",
             )
         }
     }

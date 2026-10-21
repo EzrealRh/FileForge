@@ -13,6 +13,8 @@ enum class ImageFormat(val extension: String, val label: String) {
     Jpeg("jpg", "JPG"),
     Png("png", "PNG"),
     WebP("webp", "WebP"),
+    Bmp("bmp", "BMP"),
+    Tiff("tiff", "TIFF"),
 }
 
 enum class VideoFormat(val extension: String, val label: String) {
@@ -193,6 +195,21 @@ sealed interface Operation {
         val spec: String,
     ) : Operation {
         override val label get() = "截取音频"
+    }
+
+    /** 调音量：解码成 PCM 后按百分比缩放，落成 WAV（无损，不经过有损编码）。 */
+    data class AudioVolume(val percent: Int = 150) : Operation {
+        override val label get() = "音量 $percent%"
+    }
+
+    /** 轻降噪：一阶高通 + 噪声门；1 轻 / 2 中 / 3 强。 */
+    data class AudioDenoise(val level: Int = 1) : Operation {
+        override val label get() = "降噪（${listOf("轻", "中", "强").getOrElse(level - 1) { "轻" }}）"
+    }
+
+    /** 按选中顺序把几份音频接成一条；采样率与声道不一致会点名，不在背后重采样。 */
+    data object AudioMerge : Operation {
+        override val label get() = "合并音频"
     }
 
     /** PDF 按给定页序重排另存：spec 形如 3,1,2 或 5-8,1 —— 顺序随意、可重复、可倒序。 */
@@ -616,6 +633,64 @@ sealed interface Operation {
     }
 
     /**
+     * TOML / INI 与现有数据族互转。TOML 的日期时间没有 JSON 类型，一律保持原文当文字；
+     * INI 的值本来就是文字，也不猜数字与真假（与 configparser 默认一致）。
+     */
+    data class TomlToJson(val indent: Int = 2) : Operation {
+        override val label get() = "转为 JSON"
+    }
+
+    data object JsonToToml : Operation {
+        override val label get() = "转为 TOML"
+    }
+
+    data class TomlToYaml(val indent: Int = 2) : Operation {
+        override val label get() = "转为 YAML"
+    }
+
+    data object YamlToToml : Operation {
+        override val label get() = "转为 TOML"
+    }
+
+    data class TomlToCsv(
+        val delimiter: Delimiter = Delimiter.Comma,
+        val ending: LineEnding = LineEnding.Lf,
+        val quoteAll: Boolean = false,
+    ) : Operation {
+        override val label get() = "转为 CSV 表格"
+    }
+
+    data object TomlToXlsx : Operation {
+        override val label get() = "写成 Excel 表格"
+    }
+
+    data class IniToJson(val indent: Int = 2) : Operation {
+        override val label get() = "转为 JSON"
+    }
+
+    data object JsonToIni : Operation {
+        override val label get() = "转为 INI"
+    }
+
+    data class IniToYaml(val indent: Int = 2) : Operation {
+        override val label get() = "转为 YAML"
+    }
+
+    data object YamlToIni : Operation {
+        override val label get() = "转为 INI"
+    }
+
+    /** TOML → INI：数组与内联表摆不下，会点名是哪一格。 */
+    data object TomlToIni : Operation {
+        override val label get() = "转为 INI"
+    }
+
+    /** INI → TOML：节变成表；文件里有全局键时收进一张 `global` 表并说明。 */
+    data object IniToToml : Operation {
+        override val label get() = "转为 TOML"
+    }
+
+    /**
      * 文本 / Markdown / 网页写成 .docx，进 Word / WPS 打得开、能继续编辑。
      *
      * 按内容挑路（见 [com.fileforge.core.doc.TextDoc]）：带标签的按网页排，带记号的按 Markdown 排，
@@ -701,6 +776,35 @@ sealed interface Operation {
     /** PDF → 网页：结构与「PDF 转 Word」同源（同一批量行、同一个还原层），落成 HTML。 */
     data class PdfToHtml(val spec: String = "", val title: String = "") : Operation {
         override val label get() = "转为网页" + if (spec.isNotBlank()) "（$spec）" else ""
+    }
+
+    /** 在指定页后插一张白页：0 表示最前面；纸张照相邻页。范围可以写成 `1,3-5`。 */
+    data class InsertBlankPages(val afterSpec: String) : Operation {
+        override val label get() = "插入空白页"
+    }
+
+    /** 四边各裁掉多少 pt：MediaBox 与 CropBox 一起收，内容不重排。 */
+    data class CropPdfPages(val marginPt: Int) : Operation {
+        override val label get() = "四边各裁 $marginPt pt"
+    }
+
+    /** 把页面里引用的位图导出；短边小于 [minEdge] 的跳过。 */
+    data class ExtractPdfImages(
+        val minEdge: Int = 0,
+        val format: ImageFormat = ImageFormat.Png,
+        val quality: Int = 92,
+    ) : Operation {
+        override val label get() = "提取图片（${format.label}）"
+    }
+
+    /** 按一级书签拆分：每个书签起到下一个书签前一份。 */
+    data object SplitPdfByOutline : Operation {
+        override val label get() = "按书签拆分"
+    }
+
+    /** PDF → EPUB：与转 Word / 网页共用同一棵读回来的结构树。 */
+    data class PdfToEpub(val title: String = "", val author: String = "") : Operation {
+        override val label get() = "转为电子书"
     }
 
     /**

@@ -372,16 +372,21 @@ class CrossConversionCatalogTest {
     }
 
     @Test
-    fun `转方向与裁边给静态图，动图与图标不给`() {
+    fun `转方向与裁边覆盖静态图、GIF 与 ICO，格式转换仍不给动图图标`() {
         val still = OperationKind.applicable(setOf(FileKind.Png))
         for (kind in listOf(OperationKind.RotateImage, OperationKind.FlipImage, OperationKind.CropImage)) {
             assertTrue(kind in still, "$kind 应该能用在 PNG 上")
         }
-        // GIF 的每一帧都要转才不歪，逐帧那条还没做；图标走的是专门通路
+        // GIF 逐帧套同一份计划；ICO 每个尺寸各算一次。格式转换/压缩/水印仍不给这两类
         val gif = OperationKind.applicable(setOf(FileKind.Gif))
-        assertFalse(OperationKind.RotateImage in gif)
-        assertFalse(OperationKind.CropImage in gif)
-        assertFalse(OperationKind.FlipImage in OperationKind.applicable(setOf(FileKind.Ico)))
+        for (kind in listOf(OperationKind.RotateImage, OperationKind.FlipImage, OperationKind.CropImage)) {
+            assertTrue(kind in gif, "$kind 现在应该能用在 GIF 上")
+        }
+        assertFalse(OperationKind.ConvertImage in gif)
+        assertFalse(OperationKind.CompressImage in gif)
+        val ico = OperationKind.applicable(setOf(FileKind.Ico))
+        assertTrue(OperationKind.RotateImage in ico)
+        assertFalse(OperationKind.ConvertImage in ico)
         // 混选一张 PDF 就把这三条拿掉：批量跑起来必然有一半失败，不如不给入口
         val mixed = OperationKind.applicable(setOf(FileKind.Png, FileKind.Pdf))
         assertFalse(OperationKind.RotateImage in mixed)

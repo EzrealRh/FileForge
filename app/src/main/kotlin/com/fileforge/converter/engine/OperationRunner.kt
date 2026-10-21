@@ -3,6 +3,7 @@ package com.fileforge.converter.engine
 import android.content.Context
 import com.fileforge.core.image.Flip
 import com.fileforge.core.model.BatchLineage
+import com.fileforge.core.model.FileKind
 import com.fileforge.core.ops.Operation
 import com.fileforge.converter.data.WorkItem
 import com.fileforge.converter.data.Workspace
@@ -63,7 +64,16 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
                 }
             }
             is Operation.RotateImage -> items.forEach { item ->
-                collect(item.name) { listOf(images.transform(item, operation.degrees, Flip.None, null, null, "旋转 ${operation.degrees}°", ::staging)) }
+                val tag = "旋转 ${operation.degrees}°"
+                collect(item.name) {
+                    listOf(
+                        when (item.kind) {
+                            FileKind.Gif -> gifs.transform(item, operation.degrees, Flip.None, null, null, tag)
+                            FileKind.Ico -> images.transformIco(item, operation.degrees, Flip.None, null, null, tag, ::staging)
+                            else -> images.transform(item, operation.degrees, Flip.None, null, null, tag, ::staging)
+                        },
+                    )
+                }
             }
             is Operation.FlipImage -> items.forEach { item ->
                 val flip = when (operation.mode) {
@@ -71,17 +81,26 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
                     2 -> Flip.Both
                     else -> Flip.Horizontal
                 }
-                collect(item.name) { listOf(images.transform(item, 0, flip, null, null, "翻转", ::staging)) }
-            }
-            is Operation.CropImage -> items.forEach { item ->
                 collect(item.name) {
                     listOf(
-                        images.transform(
-                            item, 0, Flip.None,
-                            operation.rect.trim().takeIf { text -> text.isNotEmpty() },
-                            operation.aspect.trim().takeIf { text -> text.isNotEmpty() },
-                            "裁边", ::staging,
-                        ),
+                        when (item.kind) {
+                            FileKind.Gif -> gifs.transform(item, 0, flip, null, null, "翻转")
+                            FileKind.Ico -> images.transformIco(item, 0, flip, null, null, "翻转", ::staging)
+                            else -> images.transform(item, 0, flip, null, null, "翻转", ::staging)
+                        },
+                    )
+                }
+            }
+            is Operation.CropImage -> items.forEach { item ->
+                val rect = operation.rect.trim().takeIf { text -> text.isNotEmpty() }
+                val aspect = operation.aspect.trim().takeIf { text -> text.isNotEmpty() }
+                collect(item.name) {
+                    listOf(
+                        when (item.kind) {
+                            FileKind.Gif -> gifs.transform(item, 0, Flip.None, rect, aspect, "裁边")
+                            FileKind.Ico -> images.transformIco(item, 0, Flip.None, rect, aspect, "裁边", ::staging)
+                            else -> images.transform(item, 0, Flip.None, rect, aspect, "裁边", ::staging)
+                        },
                     )
                 }
             }
@@ -176,6 +195,19 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
                 collect(item.name) {
                     listOf(audio.trim(item, operation) { percent -> onProgress(percent, item.name) })
                 }
+            }
+            is Operation.AudioVolume -> items.forEach { item ->
+                collect(item.name) {
+                    listOf(audio.volume(item, operation.percent) { percent -> onProgress(percent, item.name) })
+                }
+            }
+            is Operation.AudioDenoise -> items.forEach { item ->
+                collect(item.name) {
+                    listOf(audio.denoise(item, operation.level) { percent -> onProgress(percent, item.name) })
+                }
+            }
+            is Operation.AudioMerge -> collect("${items.size} 份音频") {
+                listOf(audio.merge(items) { percent -> onProgress(percent, "合并音频") })
             }
             is Operation.PdfReorder -> items.forEach { item ->
                 collect(item.name) { listOf(pdf.reorder(item, operation.spec)) }
@@ -317,6 +349,42 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
             is Operation.YamlToXlsx -> items.forEach { item ->
                 collect(item.name) { listOf(office.yamlToXlsx(item)) }
             }
+            is Operation.TomlToJson -> items.forEach { item ->
+                collect(item.name) { listOf(text.tomlToJson(item, operation)) }
+            }
+            is Operation.JsonToToml -> items.forEach { item ->
+                collect(item.name) { listOf(text.jsonToToml(item)) }
+            }
+            is Operation.TomlToYaml -> items.forEach { item ->
+                collect(item.name) { listOf(text.tomlToYaml(item, operation)) }
+            }
+            is Operation.YamlToToml -> items.forEach { item ->
+                collect(item.name) { listOf(text.yamlToToml(item)) }
+            }
+            is Operation.TomlToCsv -> items.forEach { item ->
+                collect(item.name) { listOf(text.tomlToCsv(item, operation)) }
+            }
+            is Operation.TomlToXlsx -> items.forEach { item ->
+                collect(item.name) { listOf(office.tomlToXlsx(item)) }
+            }
+            is Operation.IniToJson -> items.forEach { item ->
+                collect(item.name) { listOf(text.iniToJson(item, operation)) }
+            }
+            is Operation.JsonToIni -> items.forEach { item ->
+                collect(item.name) { listOf(text.jsonToIni(item)) }
+            }
+            is Operation.IniToYaml -> items.forEach { item ->
+                collect(item.name) { listOf(text.iniToYaml(item, operation)) }
+            }
+            is Operation.YamlToIni -> items.forEach { item ->
+                collect(item.name) { listOf(text.yamlToIni(item)) }
+            }
+            is Operation.TomlToIni -> items.forEach { item ->
+                collect(item.name) { listOf(text.tomlToIni(item)) }
+            }
+            is Operation.IniToToml -> items.forEach { item ->
+                collect(item.name) { listOf(text.iniToToml(item)) }
+            }
             is Operation.DocxToMarkdown -> items.forEach { item ->
                 collect(item.name) { listOf(office.docxToMarkdown(item)) }
             }
@@ -376,6 +444,21 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
             }
             is Operation.PdfToHtml -> items.forEach { item ->
                 collect(item.name) { listOf(pdf.toHtml(item, operation)) }
+            }
+            is Operation.InsertBlankPages -> items.forEach { item ->
+                collect(item.name) { listOf(pdf.insertBlankPages(item, operation.afterSpec)) }
+            }
+            is Operation.CropPdfPages -> items.forEach { item ->
+                collect(item.name) { listOf(pdf.cropPages(item, operation.marginPt)) }
+            }
+            is Operation.ExtractPdfImages -> items.forEach { item ->
+                collect(item.name) { pdf.extractImages(item, operation) }
+            }
+            is Operation.SplitPdfByOutline -> items.forEach { item ->
+                collect(item.name) { pdf.splitByOutline(item) }
+            }
+            is Operation.PdfToEpub -> items.forEach { item ->
+                collect(item.name) { listOf(pdf.toEpub(item, operation)) }
             }
         }
 

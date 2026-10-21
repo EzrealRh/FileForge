@@ -5,6 +5,9 @@ import com.fileforge.converter.data.Workspace
 import com.fileforge.core.data.Csv
 import com.fileforge.core.data.Delimiter
 import com.fileforge.core.data.TableBridge
+import com.fileforge.core.data.Toml
+import com.fileforge.core.data.TomlException
+import com.fileforge.core.text.TextCodecs
 import com.fileforge.core.data.Xml
 import com.fileforge.core.data.XmlTable
 import com.fileforge.core.doc.Html
@@ -200,6 +203,26 @@ class OfficeEngine(private val workspace: Workspace) {
         TableBridge.reasonWhyNotTable(tree)?.let { throw IllegalArgumentException("转不成表：$it") }
         val table = TableBridge.toTable(tree) ?: throw IllegalArgumentException("转不成表：这份 YAML 的形状没认出来")
         val lines = ArrayList(notes)
+        lines += TableBridge.flatteningNotes(tree)
+        lines += "第一行是列名"
+        return workbook(item, listOf(SheetToWrite(OutputNaming.stem(item.name), table.records)), lines)
+    }
+
+    /** TOML → xlsx：与 YAML→Excel 共用同一套摊平判据（对象数组变成行）。 */
+    fun tomlToXlsx(item: WorkItem): EngineOutput {
+        val text = TextCodecs.decodeForConversion(read(item), null).text
+        val tree = try {
+            Toml.parse(text)
+        } catch (bad: TomlException) {
+            throw IllegalArgumentException("这不是合法 TOML：${bad.message}")
+        }
+        val tableTree = if (tree.members.size == 1) {
+            val only = tree.members.values.first()
+            if (only.arrayValue.isNotEmpty() && only.arrayValue.all { it is com.fileforge.core.json.JsonObject }) only else tree
+        } else tree
+        TableBridge.reasonWhyNotTable(tableTree)?.let { throw IllegalArgumentException("转不成表：$it") }
+        val table = TableBridge.toTable(tableTree) ?: throw IllegalArgumentException("转不成表：这份 TOML 的形状没认出来")
+        val lines = ArrayList<String>()
         lines += TableBridge.flatteningNotes(tree)
         lines += "第一行是列名"
         return workbook(item, listOf(SheetToWrite(OutputNaming.stem(item.name), table.records)), lines)

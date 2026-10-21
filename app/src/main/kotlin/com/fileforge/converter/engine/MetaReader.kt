@@ -312,6 +312,7 @@ class MetaReader {
         FileKind.QuickTime -> "MOV 视频"
         FileKind.Png -> "PNG 图片"
         FileKind.Jpeg -> "JPEG 图片"
+        FileKind.Tiff -> "TIFF 图片"
         FileKind.Bmp -> "BMP 图片"
         FileKind.Zip -> "ZIP 压缩包"
         FileKind.Tar -> "TAR 归档"

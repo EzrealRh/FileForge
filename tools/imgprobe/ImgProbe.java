@@ -1,6 +1,7 @@
 import com.fileforge.core.image.Flip;
 import com.fileforge.core.image.ImageGeometry;
 import com.fileforge.core.image.PixelRect;
+import com.fileforge.core.image.RasterFormats;
 
 import javax.imageio.ImageIO;
 import java.awt.Color;
@@ -20,6 +21,8 @@ import java.util.List;
  * 所以这里刻意不自己写一套尺寸计算，plan 的全部内容都从 :core 拿，输出的宽高与说明都必须是它给的。
  *
  *   用法：./tools/imgprobe/run.sh transform <源图> <出图> <度数> <翻法0-3> <裁「l,t,w,h」或 -> <比例「16:9」或 ->
+ *   另有两个小命令：raster <源图> <出.bmp|出.tiff>（走 :core 的 RasterFormats 编码）、
+ *                   tiffread <源.tiff> <出.png>（走 :core 的解码器）
  *   出图格式按扩展名判（.jpg 会先把透明铺白，与应用那条一致）。
  */
 public class ImgProbe {
@@ -38,6 +41,28 @@ public class ImgProbe {
     }
 
     private static void run(String[] args) throws Exception {
+        if (args.length >= 3 && args[0].equals("raster")) {
+            BufferedImage source = ImageIO.read(new File(args[1]));
+            if (source == null) throw new IllegalArgumentException("这份图 Java2D 打不开：" + args[1]);
+            int width = source.getWidth();
+            int height = source.getHeight();
+            int[] argb = source.getRGB(0, 0, width, height, null, 0, width);
+            byte[] bytes = args[2].toLowerCase().endsWith(".bmp")
+                    ? RasterFormats.INSTANCE.encodeBmp(width, height, argb)
+                    : RasterFormats.INSTANCE.encodeTiff(width, height, argb);
+            java.nio.file.Files.write(new File(args[2]).toPath(), bytes);
+            System.out.println("写出 " + width + "x" + height + "，" + bytes.length + " 字节");
+            return;
+        }
+        if (args.length >= 3 && args[0].equals("tiffread")) {
+            RasterFormats.Raster raster = RasterFormats.INSTANCE.decodeTiff(
+                    java.nio.file.Files.readAllBytes(new File(args[1]).toPath()));
+            BufferedImage image = new BufferedImage(raster.getWidth(), raster.getHeight(), BufferedImage.TYPE_INT_ARGB);
+            image.setRGB(0, 0, raster.getWidth(), raster.getHeight(), raster.getArgb(), 0, raster.getWidth());
+            ImageIO.write(image, "png", new File(args[2]));
+            System.out.println("解出 " + raster.getWidth() + "x" + raster.getHeight());
+            return;
+        }
         if (args.length < 6 || !args[0].equals("transform")) {
             System.err.println("用法：run.sh transform <源图> <出图> <度数> <翻法0-3> <裁|-> <比例|->");
             System.exit(2);

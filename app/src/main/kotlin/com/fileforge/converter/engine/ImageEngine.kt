@@ -8,6 +8,7 @@ import com.fileforge.core.data.Ico
 import com.fileforge.core.data.IcoImage
 import com.fileforge.core.image.Flip
 import com.fileforge.core.image.ImageGeometry
+import com.fileforge.core.image.RasterFormats
 import com.fileforge.core.meta.ImageMeta
 import com.fileforge.core.model.FileKind
 import com.fileforge.core.naming.OutputNaming
@@ -30,6 +31,10 @@ private val SPOT_LABELS = listOf("居中", "右下", "左下", "右上", "左上
 class ImageEngine {
 
     fun decode(file: File): Bitmap {
+        if (looksLikeTiff(file)) {
+            val raster = RasterFormats.decodeTiff(file.readBytes())
+            return Bitmap.createBitmap(raster.argb, raster.width, raster.height, Bitmap.Config.ARGB_8888)
+        }
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(file.absolutePath, bounds)
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) throw IllegalArgumentException("这张图解不开")
@@ -56,10 +61,29 @@ class ImageEngine {
     }
 
     fun encode(bitmap: Bitmap, format: ImageFormat, quality: Int): ByteArray {
+        when (format) {
+            ImageFormat.Bmp -> return RasterFormats.encodeBmp(bitmap.width, bitmap.height, pixelsOf(bitmap))
+            ImageFormat.Tiff -> return RasterFormats.encodeTiff(bitmap.width, bitmap.height, pixelsOf(bitmap))
+            else -> Unit
+        }
         val stream = ByteArrayOutputStream(1 shl 16)
         val ok = bitmap.compress(compressFormat(format), quality.coerceIn(1, 100), stream)
         if (!ok) throw IllegalStateException("${format.label} 编码失败")
         return stream.toByteArray()
+    }
+
+    private fun pixelsOf(bitmap: Bitmap): IntArray =
+        IntArray(bitmap.width * bitmap.height).also {
+            bitmap.getPixels(it, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+        }
+
+    private fun looksLikeTiff(file: File): Boolean {
+        if (file.length() < 4) return false
+        val head = file.inputStream().use { input -> ByteArray(4).also { input.read(it) } }
+        return (head[0].toInt() and 0xFF) == 0x49 && (head[1].toInt() and 0xFF) == 0x49 &&
+            (head[2].toInt() and 0xFF) == 42 && head[3].toInt() == 0 ||
+            (head[0].toInt() and 0xFF) == 0x4D && (head[1].toInt() and 0xFF) == 0x4D &&
+            head[2].toInt() == 0 && (head[3].toInt() and 0xFF) == 42
     }
 
     /** 长边按 2 的幂降到 [DECODE_CEILING] 以内：解码与"降过采样"那句话读的都是这一处。 */
@@ -349,8 +373,50 @@ class ImageEngine {
         )
     }
 
+    /**
+     * 图标改方向或裁边：目录里每个尺寸各按自己的大小算一次计划，改完仍按 DIB 写回。
+     * 图标一格最大 256，任意角度转完可能装不下 —— 那种直接说清楚，不偷偷缩小。
+     */
+    fun transformIco(
+        item: WorkItem,
+        degrees: Int,
+        flip: Flip,
+        cropSpec: String?,
+        aspectSpec: String?,
+        tag: String,
+        staging: (String) -> File,
+    ): EngineOutput {
+        val frames = Ico.read(item.file.readBytes())
+        require(frames.isNotEmpty()) { "这个图标里没有画面" }
+        var firstNotes: List<String> = emptyList()
+        val out = frames.mapIndexed { index, image ->
+            val bitmap = image.png?.let {
+                BitmapFactory.decodeByteArray(it, 0, it.size)
+                    ?: throw IllegalArgumentException("图标里第 ${index + 1} 张内嵌 PNG 解不开")
+            } ?: Bitmap.createBitmap(image.argb, image.width, image.height, Bitmap.Config.ARGB_8888)
+            val plan = ImageGeometry.plan(bitmap.width, bitmap.height, degrees.toFloat(), flip, cropSpec, aspectSpec)
+            require(plan.outWidth <= Ico.MAX_SIDE && plan.outHeight <= Ico.MAX_SIDE) {
+                "图标最大 ${Ico.MAX_SIDE}×${Ico.MAX_SIDE}：第 ${index + 1} 张 ${bitmap.width}×${bitmap.height} " +
+                    "转完是 ${plan.outWidth}×${plan.outHeight}，装不进 ICO"
+            }
+            if (index == 0) firstNotes = plan.notes
+            val drawn = drawPlan(bitmap, plan)
+            val pixels = IntArray(drawn.width * drawn.height)
+            drawn.getPixels(pixels, 0, drawn.width, 0, 0, drawn.width, drawn.height)
+            if (drawn !== bitmap) drawn.recycle()
+            bitmap.recycle()
+            IcoImage(plan.outWidth, plan.outHeight, pixels)
+        }
+        val bytes = Ico.write(out)
+        return EngineOutput(
+            OutputNaming.tagged(item.name, tag, "ico"),
+            staging("ico").apply { writeBytes(bytes) },
+            "${out.size} 个尺寸（${out.joinToString("、") { "${it.width}×${it.height}" }}）· ${firstNotes.joinToString(" · ")}",
+        )
+    }
+
     /** 判层给的那一步画出来：先按块裁，再用一份矩阵镜像 + 旋转 + 平移进扩大的画布。 */
-    private fun drawPlan(source: Bitmap, plan: ImageGeometry.Plan): Bitmap {
+    fun drawPlan(source: Bitmap, plan: ImageGeometry.Plan): Bitmap {
         val cropped = plan.crop?.let {
             Bitmap.createBitmap(source, it.left, it.top, it.width, it.height)
         } ?: source
@@ -382,8 +448,9 @@ class ImageEngine {
         return flat
     }
 
-    /** 文件里声明的宽高（不带像素解码）：用来交代"解码时降过采样"。 */
+    /** 文件里声明的宽高（不带像素解码）：用来交代"解码时降过采样"。TIFF 走自家解码器，不降采样。 */
     private fun declaredSize(file: File): Pair<Int, Int> {
+        if (looksLikeTiff(file)) return 0 to 0
         val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(file.absolutePath, options)
         return options.outWidth to options.outHeight
@@ -518,6 +585,8 @@ class ImageEngine {
             @Suppress("DEPRECATION")
             Bitmap.CompressFormat.WEBP
         }
+        ImageFormat.Bmp, ImageFormat.Tiff ->
+            throw IllegalArgumentException("${format.label} 走自家编码器，不该进 Bitmap.compress")
     }
 
     /** JPEG 里的 EXIF 方向要转成真实像素，否则横拍竖存。 */
