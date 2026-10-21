@@ -190,6 +190,7 @@ class Parameters(
     var firstFrameOnly by mutableStateOf(false)
     var videoFormat by mutableStateOf(VideoFormat.Mp4)
     var videoByTarget by mutableStateOf(false)
+    var videoConvertFormat by mutableStateOf(VideoFormat.Mp4)
     var audioTarget by mutableStateOf(AudioTarget.M4a)
     var audioByTarget by mutableStateOf(false)
     var pdfMetaMode by mutableStateOf("edit")
@@ -424,6 +425,17 @@ class Parameters(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Summary("画面按关键帧对齐原样搬运，不重编码，几秒出片；多段按顺序拼成一条，音轨同窗截取，封装跟源走")
+            }
+            OperationKind.ConvertVideo -> {
+                Segmented("目标封装", VideoFormat.entries.map { it.label }, videoConvertFormat.ordinal) {
+                    videoConvertFormat = VideoFormat.entries[it]
+                }
+                Summary("重新编码，不是原样换封装；码率照源的给，不为了转格式再砍一刀画质。")
+                Summary("WebM 那条不带音轨（封装收不下源音轨）；要声音就选 MP4。")
+            }
+            OperationKind.VideoMerge -> {
+                Summary("按选中顺序首尾相接，画面与音轨都原样搬，不重编码。")
+                Summary("视频编码、分辨率、方向与音轨配置要一致；不一致会点名是第几段，先统一转格式再合并。")
             }
             OperationKind.AudioTrim -> {
                 Segmented("输出格式", AudioTarget.entries.map { it.label }, audioTrimTarget.ordinal) {
@@ -1265,6 +1277,7 @@ class Parameters(
         if (kind == OperationKind.ExtractPdfPages && pageSpec.isBlank()) return "先写要取哪些页"
         if (kind == OperationKind.RemovePdfPages && pageSpec.isBlank()) return "先写要删哪些页"
         if (kind == OperationKind.MergePdfs && items.size < 2) return "合并 PDF 至少选两个文件"
+        if (kind == OperationKind.VideoMerge && items.size < 2) return "合并视频至少选两段"
         if (kind == OperationKind.PdfWatermark && watermarkText.isBlank()) return "先写要盖的水印文字"
         if (kind == OperationKind.ImageWatermark && imageWatermarkText.isBlank() && imageWatermarkLogo == null) {
             return "先写要盖的水印文字，或选一张 Logo 图"
@@ -1371,6 +1384,8 @@ class Parameters(
                 videoFormat, bitrate.roundToInt(), 0, 96,
                 if (videoByTarget) targetBytes else null,
             )
+            OperationKind.ConvertVideo -> Operation.ConvertVideo(videoConvertFormat)
+            OperationKind.VideoMerge -> Operation.VideoMerge
             OperationKind.ConvertAudio, OperationKind.ExtractAudio -> Operation.AudioConvert(
                 audioTarget, if (audioByTarget) targetBytes else null,
             )

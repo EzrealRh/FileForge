@@ -189,6 +189,16 @@ sealed interface Operation {
         override val label get() = "截取片段"
     }
 
+    /** 视频转容器：MP4 ↔ WebM，重新编码；不是原样换封装（那要编码参数完全一致）。 */
+    data class ConvertVideo(val format: VideoFormat = VideoFormat.Mp4) : Operation {
+        override val label get() = "转成 ${format.label}"
+    }
+
+    /** 按选中顺序拼接几段视频；编码、分辨率与音轨配置要一致，否则直说。 */
+    data object VideoMerge : Operation {
+        override val label get() = "合并视频"
+    }
+
     /** 音频截取：[target] 选 WAV（无损搬运）或 M4A（重编）；[spec] 多段起止（止留空到片尾），段间合并。 */
     data class AudioTrim(
         val target: AudioTarget = AudioTarget.Wav,

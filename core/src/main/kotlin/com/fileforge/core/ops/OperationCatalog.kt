@@ -36,6 +36,8 @@ enum class OperationKind(val label: String, val hint: String) {
     VideoToGif("视频转 GIF", "支持 MP4 / WebM"),
     VideoToImage("视频抽帧成图片", "指定秒数取那一帧，做封面"),
     CompressVideo("压缩视频", "硬件转码，可按目标体积反推码率"),
+    ConvertVideo("视频转格式", "MP4 与 WebM 互转；重新编码，不是换容器"),
+    VideoMerge("合并视频", "按选中顺序拼接；编码与分辨率要一致"),
     VideoTrim("视频截取片段", "选起止时间，不重编码秒出"),
     ConvertAudio("音频转格式", "MP3 / FLAC / OGG 转 M4A 或 WAV"),
     AudioTrim("音频截取", "选起止时间，WAV 无损 / M4A 重编"),
@@ -151,7 +153,7 @@ enum class OperationKind(val label: String, val hint: String) {
             CompressGif, GifToImages, GifWatermark -> fileKind == FileKind.Gif
             ImagesToGif -> fileKind.isImage
             VideoToGif, VideoToImage, VideoTrim -> fileKind.isVideo
-            CompressVideo -> fileKind.isVideo
+            CompressVideo, ConvertVideo, VideoMerge -> fileKind.isVideo
             ConvertAudio -> fileKind.isAudio
             // 两种都只认"这是个文本文件"，具体是哪种字幕交给解析器判
             ConvertTextEncoding, ConvertSubtitle -> fileKind.isTextual

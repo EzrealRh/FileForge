@@ -445,6 +445,151 @@ class VideoEngine(private val workspace: Workspace, private val images: ImageEng
         }
     }
 
+    /** 转成另一种容器：走压缩那条硬件转码路，码率照源的给，不为了"转格式"把画质再砍一刀。 */
+    suspend fun convert(item: WorkItem, operation: Operation.ConvertVideo, onProgress: (Int) -> Unit): EngineOutput {
+        val sourceKbps = runCatching {
+            val extractor = MediaExtractor()
+            try {
+                extractor.setDataSource(item.file.absolutePath)
+                val track = extractor.selectFirst("video/")
+                if (track < 0) null else extractor.getTrackFormat(track).integer(MediaFormat.KEY_BIT_RATE)?.div(1000)
+            } finally {
+                runCatching { extractor.release() }
+            }
+        }.getOrNull()
+        val kbps = (sourceKbps ?: 8000).coerceIn(1500, 20_000)
+        val compressed = compress(
+            item,
+            Operation.CompressVideo(
+                format = operation.format,
+                videoBitrateKbps = kbps,
+                maxEdge = 0,
+                audioBitrateKbps = 128,
+                targetBytes = null,
+            ),
+            onProgress,
+        )
+        val extra = if (operation.format == VideoFormat.WebM) " · WebM 不带音轨" else ""
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "转${operation.format.label}", operation.format.extension),
+            compressed.file,
+            "转码重编（不是原样换容器，按 $kbps kbps）$extra · ${compressed.note.orEmpty()}",
+        )
+    }
+
+    /** 按选中顺序拼接：编码/分辨率/方向/音轨配置都一致才做；一段一段原样搬，不重编码。 */
+    fun merge(items: List<WorkItem>, staging: (String) -> File): EngineOutput {
+        require(items.isNotEmpty()) { "没有视频可合并" }
+        val parts = items.mapIndexed { index, item -> inspectMergePart(item, index) }
+        val first = parts.first()
+        parts.forEachIndexed { index, part ->
+            val label = "第 ${index + 1} 段"
+            require(part.videoFormat.string(MediaFormat.KEY_MIME) == first.videoFormat.string(MediaFormat.KEY_MIME)) {
+                "$label 的视频编码是 ${part.videoFormat.string(MediaFormat.KEY_MIME)}，与第一段 ${first.videoFormat.string(MediaFormat.KEY_MIME)} 不一致；先统一转格式"
+            }
+            require(
+                part.videoFormat.integer(MediaFormat.KEY_WIDTH) == first.videoFormat.integer(MediaFormat.KEY_WIDTH) &&
+                    part.videoFormat.integer(MediaFormat.KEY_HEIGHT) == first.videoFormat.integer(MediaFormat.KEY_HEIGHT),
+            ) { "$label 的分辨率与第一段不一致" }
+            require(rotationOf(part.item) == rotationOf(first.item)) { "$label 的方向标记与第一段不一致" }
+            require((part.audioTrack >= 0) == (first.audioTrack >= 0)) {
+                "$label ${if (part.audioTrack >= 0) "有" else "没有"}音轨，与第一段不一致"
+            }
+            if (first.audioFormat != null) {
+                val audio = part.audioFormat
+                require(audio != null &&
+                    audio.string(MediaFormat.KEY_MIME) == first.audioFormat.string(MediaFormat.KEY_MIME) &&
+                    audio.integer(MediaFormat.KEY_SAMPLE_RATE) == first.audioFormat.integer(MediaFormat.KEY_SAMPLE_RATE) &&
+                    audio.integer(MediaFormat.KEY_CHANNEL_COUNT) == first.audioFormat.integer(MediaFormat.KEY_CHANNEL_COUNT)
+                ) { "$label 的音轨编码/采样率/声道与第一段不一致" }
+            }
+        }
+
+        val output = staging("mp4")
+        var muxer: MediaMuxer? = null
+        try {
+            val mux = MediaMuxer(output.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+            muxer = mux
+            rotationOf(items.first()).takeIf { it != 0 }?.let { mux.setOrientationHint(it) }
+            val sinkVideo = mux.addTrack(first.videoFormat)
+            val sinkAudio = first.audioFormat?.let { mux.addTrack(it) } ?: -1
+            mux.start()
+            val buffer = ByteBuffer.allocateDirect(16 * 1024 * 1024)
+            val info = MediaCodec.BufferInfo()
+            var shift = 0L
+            var videoWritten = 0
+            parts.forEach { part ->
+                val extractor = MediaExtractor()
+                try {
+                    extractor.setDataSource(part.item.file.absolutePath)
+                    var lastPts = 0L
+                    fun copy(track: Int, sink: Int, countVideo: Boolean) {
+                        extractor.unselectTrack(track)
+                        extractor.selectTrack(track)
+                        while (true) {
+                            val size = extractor.sampleSize
+                            val pts = extractor.sampleTime
+                            if (extractor.readSampleData(buffer, 0) < 0) break
+                            info.set(0, size.toInt(), (pts + shift).coerceAtLeast(0L), extractor.sampleFlags)
+                            mux.writeSampleData(sink, buffer, info)
+                            lastPts = max(lastPts, pts)
+                            if (countVideo) videoWritten++
+                            extractor.advance()
+                        }
+                    }
+                    copy(part.videoTrack, sinkVideo, true)
+                    if (sinkAudio >= 0 && part.audioTrack >= 0) copy(part.audioTrack, sinkAudio, false)
+                    shift += part.durationUs.takeIf { it > 0 } ?: (lastPts + 33_000)
+                } finally {
+                    runCatching { extractor.release() }
+                }
+            }
+            require(videoWritten > 0) { "一段画面都没写进去" }
+            mux.stop()
+            return EngineOutput(
+                OutputNaming.tagged(items.first().name, "合并${parts.size}段", "mp4"),
+                output,
+                "${parts.size} 段 · 约 ${"%.1f".format(shift / 1_000_000.0)} 秒 · 原样搬运不重编码" +
+                    if (sinkAudio < 0) " · 音轨没带上" else "",
+            )
+        } catch (error: Exception) {
+            runCatching { output.delete() }
+            throw IllegalStateException("合并不了：${error.message ?: error.javaClass.simpleName}", error)
+        } finally {
+            runCatching { muxer?.release() }
+        }
+    }
+
+    private class MergePart(
+        val item: WorkItem,
+        val videoTrack: Int,
+        val audioTrack: Int,
+        val videoFormat: MediaFormat,
+        val audioFormat: MediaFormat?,
+        val durationUs: Long,
+    )
+
+    private fun inspectMergePart(item: WorkItem, index: Int): MergePart {
+        val extractor = MediaExtractor()
+        try {
+            extractor.setDataSource(item.file.absolutePath)
+            var video = -1
+            var audio = -1
+            for (track in 0 until extractor.trackCount) {
+                val mime = extractor.getTrackFormat(track).string(MediaFormat.KEY_MIME) ?: continue
+                if (mime.startsWith("video/") && video < 0) video = track
+                if (mime.startsWith("audio/") && audio < 0) audio = track
+            }
+            require(video >= 0) { "第 ${index + 1} 段没有画面" }
+            val videoFormat = extractor.getTrackFormat(video)
+            val audioFormat = if (audio >= 0) extractor.getTrackFormat(audio) else null
+            return MergePart(item, video, audio, videoFormat, audioFormat,
+                videoFormat.long(MediaFormat.KEY_DURATION) ?: 0L)
+        } finally {
+            runCatching { extractor.release() }
+        }
+    }
+
     /** 「5-12,30-41」「1:05-2:30」多段起止 → 微秒区间；止留空表示到片尾。段给反了（止 ≤ 起）直接丢掉。 */
     private fun parseRanges(spec: String): List<Pair<Long, Long>> =
         TimeInput.parseRanges(spec).map { (start, end) ->

@@ -45,6 +45,7 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
                 .onSuccess { outputs += it }
                 .onFailure { error ->
                     if (error is kotlinx.coroutines.CancellationException) throw error
+                    android.util.Log.e("FileForge", "operation failed: $label", error)
                     failures += label to (error.message ?: error.javaClass.simpleName)
                 }
         }
@@ -187,6 +188,14 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
                 collect(item.name) {
                     listOf(video.compress(item, operation) { percent, -> onProgress(percent, item.name) })
                 }
+            }
+            is Operation.ConvertVideo -> items.forEach { item ->
+                collect(item.name) {
+                    listOf(video.convert(item, operation) { percent -> onProgress(percent, item.name) })
+                }
+            }
+            is Operation.VideoMerge -> collect("${items.size} 段视频") {
+                listOf(video.merge(items, ::staging))
             }
             is Operation.VideoTrim -> items.forEach { item ->
                 collect(item.name) { listOf(video.trim(item, operation, ::staging)) }
