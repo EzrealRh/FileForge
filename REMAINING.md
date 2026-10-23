@@ -5,7 +5,7 @@
 
 ## P0
 
-- **发 0.57.0 Release**：`D:/fflogs/make_release_0570.py` + `notes-0570.md`，发完用 `check_release_0570.py` 回读远端 sha256 与 dex 里的「解压 7z」；更新 `LOCAL-PATHS.md` 到 `gate68`。
+- **回读 0.57.0 远端资产**：用 `D:/fflogs/check_release_0570.py` 核 sha256 与 dex 里的「解压 7z」；更新 `LOCAL-PATHS.md` 到 `gate68`。
 - **OCR（图片 / 扫描 PDF 提字）**：依赖已确认可取 —— `com.google.mlkit:text-recognition-chinese:16.0.1`（2 MB AAR，内置中文 Hani 与拉丁模型，离线）。
   要做：`OcrEngine`（`Tasks.await` 调 ML Kit）+ `ImageOcr` / `PdfOcr`（`PdfRenderer` 逐页渲染）+ 目录/界面/入口；
   真机用「中文文字图片」与「图片型 PDF」各验一次，确认输出文字与页分隔。
