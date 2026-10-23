@@ -195,7 +195,7 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
                 }
             }
             is Operation.VideoMerge -> collect("${items.size} 段视频") {
-                listOf(video.merge(items, ::staging))
+                listOf(video.merge(items, ::staging) { percent -> onProgress(percent, "合并视频") })
             }
             is Operation.VideoTrim -> items.forEach { item ->
                 collect(item.name) { listOf(video.trim(item, operation, ::staging)) }

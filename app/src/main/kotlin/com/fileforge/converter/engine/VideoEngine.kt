@@ -477,10 +477,59 @@ class VideoEngine(private val workspace: Workspace, private val images: ImageEng
         )
     }
 
-    /** 按选中顺序拼接：编码/分辨率/方向/音轨配置都一致才做；一段一段原样搬，不重编码。 */
-    fun merge(items: List<WorkItem>, staging: (String) -> File): EngineOutput {
+    /**
+     * 按选中顺序拼接。先试**原样搬**（快、不损失）；源里有 B 帧时时间戳会倒退，
+     * MediaMuxer 的 writeSampleData 直接拒收 —— 这时退到"每段重编码一次再拼"，
+     * 并在说明里讲清楚画质损失来自哪里。
+     */
+    suspend fun merge(items: List<WorkItem>, staging: (String) -> File, onProgress: (Int) -> Unit = {}): EngineOutput {
         require(items.isNotEmpty()) { "没有视频可合并" }
-        val parts = items.mapIndexed { index, item -> inspectMergePart(item, index) }
+        val parts = items.mapIndexed { index, item -> inspectMergePart(item.file, index) }
+        validateParts(parts)
+        val output = staging("mp4")
+        val direct = runCatching { copyParts(parts, output) }
+        if (direct.isSuccess) {
+            return EngineOutput(
+                OutputNaming.tagged(items.first().name, "合并${parts.size}段", "mp4"),
+                output,
+                "${parts.size} 段 · 约 ${"%.1f".format(direct.getOrThrow() / 1_000_000.0)} 秒 · 原样搬运不重编码",
+            )
+        }
+        runCatching { output.delete() }
+        val temps = ArrayList<File>()
+        try {
+            items.forEachIndexed { index, item ->
+                val kbps = (videoKbps(item.file) ?: 8000).coerceIn(1500, 20_000)
+                val out = compress(
+                    item,
+                    Operation.CompressVideo(
+                        format = VideoFormat.Mp4,
+                        videoBitrateKbps = kbps,
+                        maxEdge = 0,
+                        audioBitrateKbps = 128,
+                        targetBytes = null,
+                    ),
+                ) { percent -> onProgress((index * 100 + percent) / items.size) }
+                temps += out.file
+            }
+            val tempParts = temps.mapIndexed { index, file -> inspectMergePart(file, index) }
+            validateParts(tempParts)
+            val duration = copyParts(tempParts, output)
+            return EngineOutput(
+                OutputNaming.tagged(items.first().name, "合并${parts.size}段", "mp4"),
+                output,
+                "${parts.size} 段 · 约 ${"%.1f".format(duration / 1_000_000.0)} 秒 · " +
+                    "源里有 B 帧，原样拼接被系统拒收，已重编码后再拼（画质一次损失）",
+            )
+        } catch (error: Exception) {
+            runCatching { output.delete() }
+            throw IllegalStateException("合并不了：${error.message ?: error.javaClass.simpleName}", error)
+        } finally {
+            temps.forEach { runCatching { it.delete() } }
+        }
+    }
+
+    private fun validateParts(parts: List<MergePart>) {
         val first = parts.first()
         parts.forEachIndexed { index, part ->
             val label = "第 ${index + 1} 段"
@@ -491,7 +540,7 @@ class VideoEngine(private val workspace: Workspace, private val images: ImageEng
                 part.videoFormat.integer(MediaFormat.KEY_WIDTH) == first.videoFormat.integer(MediaFormat.KEY_WIDTH) &&
                     part.videoFormat.integer(MediaFormat.KEY_HEIGHT) == first.videoFormat.integer(MediaFormat.KEY_HEIGHT),
             ) { "$label 的分辨率与第一段不一致" }
-            require(rotationOf(part.item) == rotationOf(first.item)) { "$label 的方向标记与第一段不一致" }
+            require(rotationOf(part.file) == rotationOf(first.file)) { "$label 的方向标记与第一段不一致" }
             require((part.audioTrack >= 0) == (first.audioTrack >= 0)) {
                 "$label ${if (part.audioTrack >= 0) "有" else "没有"}音轨，与第一段不一致"
             }
@@ -504,13 +553,15 @@ class VideoEngine(private val workspace: Workspace, private val images: ImageEng
                 ) { "$label 的音轨编码/采样率/声道与第一段不一致" }
             }
         }
+    }
 
-        val output = staging("mp4")
+    private fun copyParts(parts: List<MergePart>, output: File): Long {
+        val first = parts.first()
         var muxer: MediaMuxer? = null
         try {
             val mux = MediaMuxer(output.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
             muxer = mux
-            rotationOf(items.first()).takeIf { it != 0 }?.let { mux.setOrientationHint(it) }
+            rotationOf(first.file).takeIf { it != 0 }?.let { mux.setOrientationHint(it) }
             val sinkVideo = mux.addTrack(first.videoFormat)
             val sinkAudio = first.audioFormat?.let { mux.addTrack(it) } ?: -1
             mux.start()
@@ -521,7 +572,7 @@ class VideoEngine(private val workspace: Workspace, private val images: ImageEng
             parts.forEach { part ->
                 val extractor = MediaExtractor()
                 try {
-                    extractor.setDataSource(part.item.file.absolutePath)
+                    extractor.setDataSource(part.file.absolutePath)
                     var lastPts = 0L
                     fun copy(track: Int, sink: Int, countVideo: Boolean) {
                         extractor.unselectTrack(track)
@@ -539,40 +590,32 @@ class VideoEngine(private val workspace: Workspace, private val images: ImageEng
                     }
                     copy(part.videoTrack, sinkVideo, true)
                     if (sinkAudio >= 0 && part.audioTrack >= 0) copy(part.audioTrack, sinkAudio, false)
-                    shift += part.durationUs.takeIf { it > 0 } ?: (lastPts + 33_000)
+                    // 按本段实际最后一个采样往后接，别用容器声明的时长：AAC 的尾巴可能比它长
+                    shift += lastPts + 33_000
                 } finally {
                     runCatching { extractor.release() }
                 }
             }
             require(videoWritten > 0) { "一段画面都没写进去" }
             mux.stop()
-            return EngineOutput(
-                OutputNaming.tagged(items.first().name, "合并${parts.size}段", "mp4"),
-                output,
-                "${parts.size} 段 · 约 ${"%.1f".format(shift / 1_000_000.0)} 秒 · 原样搬运不重编码" +
-                    if (sinkAudio < 0) " · 音轨没带上" else "",
-            )
-        } catch (error: Exception) {
-            runCatching { output.delete() }
-            throw IllegalStateException("合并不了：${error.message ?: error.javaClass.simpleName}", error)
+            return shift
         } finally {
             runCatching { muxer?.release() }
         }
     }
 
     private class MergePart(
-        val item: WorkItem,
+        val file: File,
         val videoTrack: Int,
         val audioTrack: Int,
         val videoFormat: MediaFormat,
         val audioFormat: MediaFormat?,
-        val durationUs: Long,
     )
 
-    private fun inspectMergePart(item: WorkItem, index: Int): MergePart {
+    private fun inspectMergePart(file: File, index: Int): MergePart {
         val extractor = MediaExtractor()
         try {
-            extractor.setDataSource(item.file.absolutePath)
+            extractor.setDataSource(file.absolutePath)
             var video = -1
             var audio = -1
             for (track in 0 until extractor.trackCount) {
@@ -583,12 +626,32 @@ class VideoEngine(private val workspace: Workspace, private val images: ImageEng
             require(video >= 0) { "第 ${index + 1} 段没有画面" }
             val videoFormat = extractor.getTrackFormat(video)
             val audioFormat = if (audio >= 0) extractor.getTrackFormat(audio) else null
-            return MergePart(item, video, audio, videoFormat, audioFormat,
-                videoFormat.long(MediaFormat.KEY_DURATION) ?: 0L)
+            return MergePart(file, video, audio, videoFormat, audioFormat)
         } finally {
             runCatching { extractor.release() }
         }
     }
+
+    private fun videoKbps(file: File): Int? = runCatching {
+        val extractor = MediaExtractor()
+        try {
+            extractor.setDataSource(file.absolutePath)
+            val track = extractor.selectFirst("video/")
+            if (track < 0) null else extractor.getTrackFormat(track).integer(MediaFormat.KEY_BIT_RATE)?.div(1000)
+        } finally {
+            runCatching { extractor.release() }
+        }
+    }.getOrNull()
+
+    private fun rotationOf(file: File): Int = runCatching {
+        val retriever = MediaMetadataRetriever()
+        try {
+            retriever.setDataSource(file.absolutePath)
+            retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+        } finally {
+            runCatching { retriever.release() }
+        }
+    }.getOrDefault(0)
 
     /** 「5-12,30-41」「1:05-2:30」多段起止 → 微秒区间；止留空表示到片尾。段给反了（止 ≤ 起）直接丢掉。 */
     private fun parseRanges(spec: String): List<Pair<Long, Long>> =

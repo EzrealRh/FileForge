@@ -434,7 +434,7 @@ class Parameters(
                 Summary("WebM 那条不带音轨（封装收不下源音轨）；要声音就选 MP4。")
             }
             OperationKind.VideoMerge -> {
-                Summary("按选中顺序首尾相接，画面与音轨都原样搬，不重编码。")
+                Summary("按选中顺序首尾相接：先试原样搬（不重编码）；源里有 B 帧、系统 muxer 拒收时会自动重编码后再拼，说明里会写清楚。")
                 Summary("视频编码、分辨率、方向与音轨配置要一致；不一致会点名是第几段，先统一转格式再合并。")
             }
             OperationKind.AudioTrim -> {
