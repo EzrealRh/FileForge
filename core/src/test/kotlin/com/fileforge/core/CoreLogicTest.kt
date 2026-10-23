@@ -458,8 +458,8 @@ class OperationLabelTest {
             Operation.FormatJson(pretty = false),
             Operation.JsonToCsv(),
             Operation.CsvToJson(header = false),
-            Operation.UnpackArchive,
-            Operation.PackArchive,
+            Operation.UnpackArchive(),
+            Operation.PackArchive(),
             Operation.XmlToJson(),
             Operation.JsonToXml(root = "catalog"),
         ).forEach {

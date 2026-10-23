@@ -18,8 +18,21 @@ import com.fileforge.core.naming.OutputNaming
 import com.fileforge.core.ops.Operation
 import com.fileforge.core.util.SizeInput
 import com.fileforge.converter.data.WorkItem
+import com.github.junrar.Archive
+import net.lingala.zip4j.ZipFile
+import net.lingala.zip4j.model.ZipParameters
+import net.lingala.zip4j.model.enums.AesKeyStrength
+import net.lingala.zip4j.model.enums.CompressionMethod
+import net.lingala.zip4j.model.enums.EncryptionMethod
+import org.apache.commons.compress.archivers.sevenz.SevenZFile
+import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.InputStream
 import java.io.RandomAccessFile
+
+private const val MAX_ENTRY_BYTES = 1L shl 30
+private const val MAX_TOTAL_BYTES = 2L shl 30
+private const val MAX_ENTRIES = 10_000
 
 /**
  * 压缩包进出。
@@ -32,6 +45,7 @@ class ArchiveEngine {
 
     /** 多份文件压成一个包。名字按选中顺序进包，重名自动编号。 */
     fun pack(items: List<WorkItem>, operation: Operation.PackArchive, staging: (String) -> File): EngineOutput {
+        if (operation.password.isNotBlank()) return packEncrypted(items, operation.password, staging)
         val names = ArchivePlan.uniqueNames(items.map { OutputNaming.sanitize(it.name) })
         val target = staging("zip")
         val sink = FileZipSink(target)
@@ -64,6 +78,11 @@ class ArchiveEngine {
      * 我们从不拿条目名去拼路径，也就没有"逃出去写到别处"这回事。
      */
     fun unpack(item: WorkItem, operation: Operation.UnpackArchive, staging: (String) -> File): List<EngineOutput> {
+        val encrypted = runCatching { ZipFile(item.file).isEncrypted }.getOrDefault(false)
+        if (encrypted) {
+            require(operation.password.isNotBlank()) { "这个 ZIP 有密码，先把密码填上" }
+            return unpackZipWithPassword(item, operation.password, staging)
+        }
         val slices = FileSlices(item.file)
         return try {
             val plan = ArchivePlan.plan(ZipReader.read(slices, item.file.length()))
@@ -96,6 +115,155 @@ class ArchiveEngine {
      * 先写一份 tar 再套 gzip：tar 是纯归档（不逐条压），把整份一次性压下去通常比
      * zip 那种"每条各压一段"小一点，而且条目路径与时间是写在头里的 —— Unix 侧的工具链认这个。
      */
+    /** 7z：固态压缩与多卷交给库；这里按条目流式取字节、平铺命名。 */
+    fun unpackSevenZ(item: WorkItem, operation: Operation.UnpackSevenZ, staging: (String) -> File): List<EngineOutput> {
+        val builder = SevenZFile.builder().setFile(item.file)
+        if (operation.password.isNotBlank()) builder.setPassword(operation.password.toCharArray())
+        val archive = try {
+            builder.get()
+        } catch (error: Exception) {
+            throw IllegalArgumentException(
+                "这个 7z 打不开${if (operation.password.isBlank()) "（有密码就填上）" else "，密码对不对？"}：${error.message}",
+            )
+        }
+        try {
+            val entries = ArrayList<Pair<String, ByteArray>>()
+            var total = 0L
+            while (true) {
+                val entry = archive.nextEntry ?: break
+                if (entry.isDirectory) continue
+                require(entries.size < MAX_ENTRIES) { "条目太多（超过 $MAX_ENTRIES 个），拒绝继续解" }
+                val bytes = readLimited(archive.getInputStream(entry), MAX_ENTRY_BYTES)
+                total += bytes.size
+                require(total <= MAX_TOTAL_BYTES) { "解出来超过 2GB，拒绝继续解（防压缩炸弹）" }
+                entries += entry.name to bytes
+            }
+            require(entries.isNotEmpty()) { "这个 7z 里没有文件" }
+            return emitEntries(item, entries, staging, "解压自 ${item.name}")
+        } finally {
+            runCatching { archive.close() }
+        }
+    }
+
+    /** RAR4 / RAR5：junrar 负责解码；密码在构造时给。 */
+    fun unpackRar(item: WorkItem, operation: Operation.UnpackRar, staging: (String) -> File): List<EngineOutput> {
+        val archive = try {
+            if (operation.password.isBlank()) Archive(item.file) else Archive(item.file, operation.password)
+        } catch (error: Exception) {
+            if (error is com.github.junrar.exception.UnsupportedRarV5Exception) {
+                throw IllegalArgumentException("这是 RAR5，暂不支持；先用别的工具转成 ZIP 或 RAR4")
+            }
+            throw IllegalArgumentException(
+                "这个 RAR 打不开${if (operation.password.isBlank()) "（有密码就填上）" else "，密码对不对？"}：${error.message}",
+            )
+        }
+        try {
+            val entries = ArrayList<Pair<String, ByteArray>>()
+            var total = 0L
+            while (true) {
+                val header = archive.nextFileHeader() ?: break
+                if (header.isDirectory) continue
+                require(entries.size < MAX_ENTRIES) { "条目太多（超过 $MAX_ENTRIES 个），拒绝继续解" }
+                require(header.fullUnpackSize <= MAX_ENTRY_BYTES) {
+                    "「${header.fileName}」解出来超过 1GB，拒绝继续解"
+                }
+                val out = ByteArrayOutputStream()
+                archive.extractFile(header, out)
+                val bytes = out.toByteArray()
+                total += bytes.size
+                require(total <= MAX_TOTAL_BYTES) { "解出来超过 2GB，拒绝继续解（防压缩炸弹）" }
+                entries += (header.fileName ?: "条目${entries.size + 1}") to bytes
+            }
+            require(entries.isNotEmpty()) { "这个 RAR 里没有文件" }
+            return emitEntries(item, entries, staging, "解压自 ${item.name}")
+        } catch (error: com.github.junrar.exception.RarException) {
+            throw IllegalArgumentException(
+                "这个 RAR 解不开${if (operation.password.isBlank()) "（有密码就填上）" else "，密码对不对？"}：${error.message}",
+            )
+        } finally {
+            runCatching { archive.close() }
+        }
+    }
+
+    /** 加密 ZIP：Zip4j 的 AES-256；文件名照旧压平。 */
+    private fun packEncrypted(items: List<WorkItem>, password: String, staging: (String) -> File): EngineOutput {
+        require(password.length >= 4) { "加密 ZIP 的密码至少 4 位" }
+        val target = staging("zip")
+        try {
+            val names = ArchivePlan.uniqueNames(items.map { OutputNaming.sanitize(it.name) })
+            val zip = ZipFile(target, password.toCharArray())
+            val params = ZipParameters().apply {
+                compressionMethod = CompressionMethod.DEFLATE
+                setEncryptFiles(true)
+                encryptionMethod = EncryptionMethod.AES
+                aesKeyStrength = AesKeyStrength.KEY_STRENGTH_256
+            }
+            items.forEachIndexed { index, item ->
+                params.fileNameInZip = names[index]
+                zip.addFile(item.file, params)
+            }
+            return EngineOutput(
+                OutputNaming.tagged(items.first().name, "加密打包", "zip"),
+                target,
+                "${items.size} 份 · AES-256 · 密码丢了就打不开",
+            )
+        } catch (error: Exception) {
+            target.delete()
+            throw IllegalStateException("加密打包没成：${error.message ?: error.javaClass.simpleName}", error)
+        }
+    }
+
+    private fun unpackZipWithPassword(item: WorkItem, password: String, staging: (String) -> File): List<EngineOutput> {
+        val zip = ZipFile(item.file, password.toCharArray())
+        val headers = try {
+            zip.fileHeaders.filter { !it.isDirectory }
+        } catch (error: Exception) {
+            throw IllegalArgumentException("这个 ZIP 打不开（密码对不对？）：${error.message}")
+        }
+        require(headers.isNotEmpty()) { "这个 ZIP 里没有文件" }
+        val entries = ArrayList<Pair<String, ByteArray>>()
+        var total = 0L
+        headers.forEach { header ->
+            require(entries.size < MAX_ENTRIES) { "条目太多（超过 $MAX_ENTRIES 个），拒绝继续解" }
+            val bytes = readLimited(zip.getInputStream(header), MAX_ENTRY_BYTES)
+            total += bytes.size
+            require(total <= MAX_TOTAL_BYTES) { "解出来超过 2GB，拒绝继续解（防压缩炸弹）" }
+            entries += (header.fileName ?: "条目${entries.size + 1}") to bytes
+        }
+        return emitEntries(item, entries, staging, "解压自 ${item.name}（用了密码）")
+    }
+
+    private fun emitEntries(
+        item: WorkItem,
+        entries: List<Pair<String, ByteArray>>,
+        staging: (String) -> File,
+        note: String,
+    ): List<EngineOutput> {
+        val names = ArchivePlan.uniqueNames(entries.map { ArchivePlan.outputName(item.name, it.first.replace('\\', '/')) })
+        return entries.mapIndexed { index, (_, bytes) ->
+            val name = names[index]
+            EngineOutput(
+                name,
+                staging(OutputNaming.extension(name, "bin")).apply { writeBytes(bytes) },
+                if (index == 0) note else null,
+            )
+        }
+    }
+
+    private fun readLimited(input: InputStream, max: Long): ByteArray {
+        val out = ByteArrayOutputStream()
+        val buffer = ByteArray(64 * 1024)
+        var total = 0L
+        while (true) {
+            val read = input.read(buffer)
+            if (read < 0) break
+            total += read
+            if (total > max) throw IllegalArgumentException("单个条目解出来超过 ${max / (1024 * 1024)} MB，拒绝继续解")
+            out.write(buffer, 0, read)
+        }
+        return out.toByteArray()
+    }
+
     fun packTar(items: List<WorkItem>, operation: Operation.PackTarGz, staging: (String) -> File): EngineOutput {
         require(items.isNotEmpty()) { "没有可选中要打包的文件" }
         val names = ArchivePlan.uniqueNames(items.map { OutputNaming.sanitize(it.name) })

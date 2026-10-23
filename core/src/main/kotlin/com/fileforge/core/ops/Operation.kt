@@ -410,16 +410,26 @@ sealed interface Operation {
     }
 
     /** 多份文件压成一个 zip。包名取第一份文件的名字，条目名重名会自动编号。 */
-    data object PackArchive : Operation {
-        override val label get() = "打包成 ZIP"
+    data class PackArchive(val password: String = "") : Operation {
+        override val label get() = if (password.isBlank()) "打包成 ZIP" else "打包成加密 ZIP"
     }
 
     /**
      * 解开 zip。一次给出一批产物，目录结构压进文件名而不真的建目录 ——
      * 既因为工作台是平的，也因为不拿条目名拼路径就结构性地挡掉了 `../../` 那类穿越。
      */
-    data object UnpackArchive : Operation {
-        override val label get() = "解压"
+    data class UnpackArchive(val password: String = "") : Operation {
+        override val label get() = if (password.isBlank()) "解压" else "解压（带密码）"
+    }
+
+    /** 解 7z：路径压进文件名，与 ZIP 同一条平铺规矩；有密码就填。 */
+    data class UnpackSevenZ(val password: String = "") : Operation {
+        override val label get() = "解压 7z"
+    }
+
+    /** 解 RAR4：RAR5 的压缩格式没有能用的纯 Java 实现，遇到会直说。 */
+    data class UnpackRar(val password: String = "") : Operation {
+        override val label get() = "解压 RAR"
     }
 
     /**

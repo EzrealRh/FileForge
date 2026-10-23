@@ -9,3 +9,5 @@
 *.mp4 binary
 *.webm binary
 *.pdf binary
+*.7z binary
+*.rar binary

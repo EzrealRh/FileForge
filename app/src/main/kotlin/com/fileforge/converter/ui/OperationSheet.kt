@@ -205,6 +205,7 @@ class Parameters(
     var pdfUserPw by mutableStateOf("")
     var pdfOwnerPw by mutableStateOf("")
     var pdfOpenPw by mutableStateOf("")
+    var archivePassword by mutableStateOf("")
     var pdfBlankSpec by mutableStateOf("1")
     var pdfCropMargin by mutableStateOf(24f)
     var pdfImageFormat by mutableStateOf(ImageFormat.Png)
@@ -1231,14 +1232,49 @@ class Parameters(
                 Summary("影响显示的部分会留着：ICC 色彩配置、JFIF 密度、Adobe 通道序。删掉它们照片会变色，那就不是清理而是损坏。")
             }
             OperationKind.PackZip -> {
+                OutlinedTextField(
+                    value = archivePassword,
+                    onValueChange = { archivePassword = it },
+                    label = { Text("密码（留空 = 不加密）") },
+                    singleLine = true,
+                    supportingText = { Text("填了就 AES-256 加密；至少 4 位，丢了就打不开。") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 Summary("${items.size} 份文件、合计 ${sizeOf(items)}，压成一个 zip。")
                 Summary("进包用原文件名，重名会自动补编号；jpg / mp4 / zip 这类已经压过的直接存原文，不再压第二遍。")
                 Summary("包名跟着第一份文件走：${OutputNaming.stem(items.first().name)}_打包.zip")
             }
             OperationKind.UnpackZip -> {
+                OutlinedTextField(
+                    value = archivePassword,
+                    onValueChange = { archivePassword = it },
+                    label = { Text("密码（没有就留空）") },
+                    singleLine = true,
+                    supportingText = { Text("有口令的 ZIP 要填对才能解；AES 与 ZipCrypto 都认。") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 Summary("解出来的文件平铺在工作台里，路径压进名字（包名_目录_文件.扩展名），不保留目录层级。")
-                Summary("带口令的条目、符号链接和解不了的压缩方式会跳过并在结果里说明；整包都是口令包就直接不做。")
-                Summary("这一条只解 zip：tar / tar.gz 与单个 .gz 走「解开 tar / gz」。rar / 7z 用的是另一套算法，这里不支持，会直接告诉你不是 zip。")
+                Summary("符号链接与解不了的压缩方式会跳过并在结果里说明；有密码但没填会直说。")
+            }
+            OperationKind.UnpackSevenZ -> {
+                OutlinedTextField(
+                    value = archivePassword,
+                    onValueChange = { archivePassword = it },
+                    label = { Text("密码（没有就留空）") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Summary("7z 的固态压缩与多卷交给库解；条目名同样压平，单条超过 1GB 或总量超过 2GB 会停。")
+            }
+            OperationKind.UnpackRar -> {
+                OutlinedTextField(
+                    value = archivePassword,
+                    onValueChange = { archivePassword = it },
+                    label = { Text("密码（没有就留空）") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Summary("RAR4 能解；RAR5 用的是另一套压缩格式，这一版没有纯 Java 实现，遇到会明确告诉你转成 ZIP / RAR4。")
             }
             OperationKind.PackTar -> {
                 Summary("${items.size} 份文件、合计 ${sizeOf(items)}，先归档成 tar 再整份压成 gzip。")
@@ -1278,6 +1314,9 @@ class Parameters(
         if (kind == OperationKind.RemovePdfPages && pageSpec.isBlank()) return "先写要删哪些页"
         if (kind == OperationKind.MergePdfs && items.size < 2) return "合并 PDF 至少选两个文件"
         if (kind == OperationKind.VideoMerge && items.size < 2) return "合并视频至少选两段"
+        if (kind == OperationKind.PackZip && archivePassword.isNotBlank() && archivePassword.length < 4) {
+            return "加密 ZIP 的密码至少写 4 位"
+        }
         if (kind == OperationKind.PdfWatermark && watermarkText.isBlank()) return "先写要盖的水印文字"
         if (kind == OperationKind.ImageWatermark && imageWatermarkText.isBlank() && imageWatermarkLogo == null) {
             return "先写要盖的水印文字，或选一张 Logo 图"
@@ -1401,8 +1440,10 @@ class Parameters(
             OperationKind.ConvertSubtitle -> Operation.ConvertSubtitle(subtitleTarget, encodingAt(subtitleSource))
             OperationKind.DecryptPdf -> Operation.DecryptPdf(pdfOpenPw)
             OperationKind.CleanMetadata -> Operation.CleanMetadata
-            OperationKind.PackZip -> Operation.PackArchive
-            OperationKind.UnpackZip -> Operation.UnpackArchive
+            OperationKind.PackZip -> Operation.PackArchive(archivePassword)
+            OperationKind.UnpackZip -> Operation.UnpackArchive(archivePassword)
+            OperationKind.UnpackSevenZ -> Operation.UnpackSevenZ(archivePassword)
+            OperationKind.UnpackRar -> Operation.UnpackRar(archivePassword)
             OperationKind.PackTar -> Operation.PackTarGz
             OperationKind.Untar -> Operation.UntarArchive
             OperationKind.FormatJson -> Operation.FormatJson(

@@ -315,6 +315,8 @@ class MetaReader {
         FileKind.Tiff -> "TIFF 图片"
         FileKind.Bmp -> "BMP 图片"
         FileKind.Zip -> "ZIP 压缩包"
+        FileKind.SevenZ -> "7z 压缩包"
+        FileKind.Rar -> "RAR 压缩包"
         FileKind.Tar -> "TAR 归档"
         FileKind.Gzip -> "GZ 压缩"
         FileKind.Docx -> "DOCX 文档"

@@ -80,6 +80,11 @@ dependencies {
     implementation(libs.androidx.documentfile)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.pdfbox.android)
+    implementation(libs.commons.compress)
+    implementation(libs.xz)
+    implementation(libs.junrar)
+    implementation(libs.zip4j)
+    implementation(libs.slf4j.nop)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
 

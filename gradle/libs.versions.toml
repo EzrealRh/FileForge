@@ -9,6 +9,10 @@ documentFile = "1.0.1"
 coroutines = "1.9.0"
 pdfboxAndroid = "2.0.27.0"
 junitJupiter = "5.11.4"
+commonsCompress = "1.27.1"
+xz = "1.10"
+junrar = "7.5.5"
+zip4j = "2.11.5"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -25,6 +29,11 @@ androidx-compose-material-icons-extended = { group = "androidx.compose.material"
 androidx-documentfile = { group = "androidx.documentfile", name = "documentfile", version.ref = "documentFile" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 pdfbox-android = { group = "com.tom-roush", name = "pdfbox-android", version.ref = "pdfboxAndroid" }
+commons-compress = { module = "org.apache.commons:commons-compress", version.ref = "commonsCompress" }
+xz = { module = "org.tukaani:xz", version.ref = "xz" }
+junrar = { module = "com.github.junrar:junrar", version.ref = "junrar" }
+zip4j = { module = "net.lingala.zip4j:zip4j", version.ref = "zip4j" }
+slf4j-nop = { module = "org.slf4j:slf4j-nop", version = "2.0.16" }
 junit-jupiter = { group = "org.junit.jupiter", name = "junit-jupiter", version.ref = "junitJupiter" }
 
 [plugins]

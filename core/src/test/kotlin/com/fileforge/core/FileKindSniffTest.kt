@@ -39,6 +39,9 @@ class FileKindSniffTest {
         assertEquals(FileKind.Heic, FileTypeSniffer.sniff(h(4 to s("ftyp"), 8 to s("mif1"))))
         assertEquals(FileKind.Avif, FileTypeSniffer.sniff(h(4 to s("ftyp"), 8 to s("avif"))))
         assertEquals(FileKind.Zip, FileTypeSniffer.sniff(h(0 to listOf(0x50, 0x4B, 3, 4))))
+        assertEquals(FileKind.SevenZ, FileTypeSniffer.sniff(h(0 to listOf(0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C))))
+        assertEquals(FileKind.Rar, FileTypeSniffer.sniff(h(0 to listOf(0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x00))))
+        assertEquals(FileKind.Rar, FileTypeSniffer.sniff(h(0 to listOf(0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x01, 0x00))))
         // 纯 ASCII 现在是"文本"而不是"未知" —— 转编码、转字幕都靠这一格进来。
         // 注意夹具要用真实字节：h() 造的数组后面补的是零，那在判据里就是二进制
         assertEquals(FileKind.Text, FileTypeSniffer.sniff("who knows what this is".toByteArray()))
