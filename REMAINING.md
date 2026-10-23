@@ -1,7 +1,7 @@
 # 还要做的（0.58 起）
 
 当前状态：0.57.0 代码已推送；`gate68` 闸门 **986 步 0 红**；APK 已出（`app/build/outputs/apk/release/fileforge-v0.57.0-release.apk`）。
-0.57.0 的 Release 与回读校验是下面 P0 的第一条。
+0.57.0 Release 已发（asset 已挂）；远端 sha256 回读还没做。
 
 ## P0
 
