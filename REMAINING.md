@@ -11,16 +11,16 @@
   飞行模式下真机验过（`D:/fflogs/device-ocr.txt`：图片 4/4、PDF 4/4）。
 - **音频合并真机验证**：两支 WAV 多选合并，产物 132300 样本与两段原文件逐样本一致（`D:/fflogs/pulled-ocr/merge.wav`）。
 - **视频裁画面 / 加水印 / 烧字幕 / 抽字幕**：Media3 Transformer（GL 效果管线）落地。
-  真机 15/16 通过（`D:/fflogs/check_video_outputs.py`、`video-checks.txt`）：裁画面 320×180 全红块、水印中心 0→1236 个亮像素、
-  烧字幕的没字幕帧与两句字幕帧都按像素验过、MP4（mov_text）抽字幕文本与 0.5/2.0 秒时间轴对。
+  真机 **18/18 通过**（`D:/fflogs/check_video_outputs.py`、`video-checks.txt`）：裁画面 320×180 全红块、水印中心 0→1236 个亮像素、
+  烧字幕的没字幕帧与两句字幕帧都按像素验过、MP4（mov_text）与 MKV（Matroska 自解析）抽字幕的文本、条数与时间轴都对。
   外挂字幕（SRT/VTT/ASS/LRC）与自带轨走同一层，UI 取外挂文件那一路还没单独真机跑。
+- **MKV 字幕轨**：系统 `MediaExtractor` 不暴露 MKV 字幕轨，改用 `core/video/Matroska.kt` 自解析
+  （Tracks/Cluster/SimpleBlock/BlockGroup + ASS 九段正文）；真机导出 523/1523、2023/2823 两条。
 - **MOBI / AZW3**：`Mobi.kt` 解析 PDB/MOBI 头与 EXTH，PalmDOC LZ77 展开；HUFF/CDIC 与 DRM 明确拒绝。
   `MobiTest` 7 项（真实夹具、压缩/未压缩、回指、DRM、HUFF、嗅探）全绿；可抽 txt 或转 EPUB。
 
 ## P1（未做）
 
-- **MKV 字幕轨**：Android `MediaExtractor` 不暴露 MKV 里的 subrip 轨（`withsubs.mkv` 真机报「没有文字字幕轨」），
-  MP4 的 mov_text 正常。要支持 MKV 得自己解 Matroska（Tracks/Cluster/Block + ASS 私有字段），或先转成 MP4。
 - **RAR5**：`junrar 7.5.5` 不支持（`UnsupportedRarV5Exception`），当前会明确拒绝并提示转 ZIP/RAR4；要支持需换库或原生实现。
 - **旧 Office**：`.doc/.xls/.ppt`（POI-scratchpad 在安卓的可行性未验）；iWork（Pages/Keynote/Numbers）。
 

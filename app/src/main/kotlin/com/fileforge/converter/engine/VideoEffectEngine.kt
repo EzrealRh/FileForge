@@ -32,6 +32,7 @@ import com.fileforge.core.text.SubtitleFormat
 import com.fileforge.core.text.Subtitles
 import com.fileforge.core.text.TextCodecs
 import com.fileforge.core.text.TimedText
+import com.fileforge.core.video.Matroska
 import com.fileforge.converter.data.WorkItem
 import com.fileforge.converter.data.Workspace
 import java.io.File
@@ -96,9 +97,10 @@ class VideoEffectEngine(
                 val cues: List<Cue>
                 if (picked.isEmpty()) {
                     // 不选外挂字幕就烧视频自带的那条轨：扫描/下载来的片子常常已经带着字幕
-                    val embedded = embeddedCues(item.file)
-                    cues = embedded.first
-                    notes += "烧的是视频自带的字幕轨（${mimeLabel(embedded.second)}）"
+                    val embedded = readEmbeddedSubtitles(item)
+                    cues = embedded.cues
+                    notes += "烧的是视频自带的字幕轨（${embedded.label}）"
+                    embedded.note?.let { notes += it }
                 } else {
                     val file = subtitleFile ?: error("选的字幕「$picked」已经不在工作台里了，重新选一份")
                     val decoded = TextCodecs.decodeForConversion(file.readBytes(), null)
@@ -146,34 +148,70 @@ class VideoEffectEngine(
      * 外挂字幕不走这里 —— 它们本来就已是 SRT / VTT / ASS 文件。
      */
     fun extractSubtitles(item: WorkItem): EngineOutput {
+        val embedded = readEmbeddedSubtitles(item)
+        val cues = embedded.cues
+        require(cues.isNotEmpty()) { "字幕轨有 ${embedded.count} 条，但一条正文都没解出来" }
+        val output = workspace.newStagingFile("srt").apply {
+            writeText(Subtitles.render(SubtitleFormat.Srt, cues), Charsets.UTF_8)
+        }
+        val notes = buildList {
+            add("${cues.size} 条 · ${embedded.label}")
+            if (!embedded.endsFromContainer) add("结束时间按下一句开始时补")
+            if (!embedded.language.isNullOrBlank()) add("语言 ${embedded.language}")
+            if (embedded.count > 1) add("共 ${embedded.count} 条字幕轨，取第一条")
+            embedded.note?.let { add(it) }
+        }
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "字幕", "srt"),
+            output,
+            notes.joinToString(" · "),
+        )
+    }
+
+    private class EmbeddedSubtitles(
+        val cues: List<Cue>,
+        val label: String,
+        val language: String?,
+        val count: Int,
+        /** 容器给了每条时长，SRT 就不用按下一句硬补。 */
+        val endsFromContainer: Boolean,
+        val note: String?,
+    )
+
+    /**
+     * 先走系统 extractor；MKV 的字幕轨在不少安卓版本上根本不列出来，那时用 `:core` 的
+     * Matroska 解析兜底。两边都没有才失败。
+     */
+    private fun readEmbeddedSubtitles(item: WorkItem): EmbeddedSubtitles {
         val extractor = MediaExtractor()
         try {
             extractor.setDataSource(item.file.absolutePath)
             val chosen = chooseTextTrack(extractor)
-            requireNotNull(chosen) {
-                "这个视频里没有文字字幕轨；外挂字幕直接就是 SRT / VTT / ASS，不需要导出"
+            if (chosen != null) {
+                extractor.selectTrack(chosen.index)
+                val cues = readCues(extractor, chosen.mime)
+                return EmbeddedSubtitles(
+                    cues, mimeLabel(chosen.mime), chosen.language, chosen.count,
+                    endsFromContainer = false, note = null,
+                )
             }
-            extractor.selectTrack(chosen.index)
-            val language = chosen.language
-            val cues = readCues(extractor, chosen.mime)
-            require(cues.isNotEmpty()) { "字幕轨有 ${chosen.count} 条，但一条正文都没解出来" }
-            val output = workspace.newStagingFile("srt").apply {
-                writeText(Subtitles.render(SubtitleFormat.Srt, cues), Charsets.UTF_8)
-            }
-            val notes = buildList {
-                add("${cues.size} 条 · ${mimeLabel(chosen.mime)}")
-                add("结束时间按下一句开始时补")
-                if (!language.isNullOrBlank()) add("语言 $language")
-                if (chosen.count > 1) add("共 ${chosen.count} 条字幕轨，取第一条")
-            }
-            return EngineOutput(
-                OutputNaming.tagged(item.name, "字幕", "srt"),
-                output,
-                notes.joinToString(" · "),
-            )
         } finally {
             runCatching { extractor.release() }
         }
+        if (item.kind == FileKind.Mkv) {
+            val matroska = runCatching { Matroska.readSubtitles(item.file.readBytes()) }.getOrNull()
+            if (matroska != null && matroska.cues.isNotEmpty()) {
+                return EmbeddedSubtitles(
+                    matroska.cues,
+                    "Matroska ${matroska.codec}",
+                    matroska.language,
+                    count = 1,
+                    endsFromContainer = true,
+                    note = "系统 extractor 不暴露 MKV 字幕轨，改用文件内自解析",
+                )
+            }
+        }
+        error("这个视频里没有文字字幕轨；外挂字幕直接就是 SRT / VTT / ASS，不需要导出")
     }
 
     private class TrackChoice(val index: Int, val mime: String, val language: String?, val count: Int)
@@ -196,21 +234,6 @@ class VideoEffectEngine(
             }
         }
         return first?.let { TrackChoice(it.index, it.mime, it.language, count) }
-    }
-
-    /** 烧字幕不选外挂文件时用：把视频自带的那条文字字幕轨读成 cue。 */
-    private fun embeddedCues(file: File): Triple<List<Cue>, String, String?> {
-        val extractor = MediaExtractor()
-        try {
-            extractor.setDataSource(file.absolutePath)
-            val chosen = chooseTextTrack(extractor)
-                ?: error("这个视频没有文字字幕轨；要么在工作台放一份字幕文件，要么换一条带字幕的片子")
-            extractor.selectTrack(chosen.index)
-            val cues = readCues(extractor, chosen.mime)
-            return Triple(cues, chosen.mime, chosen.language)
-        } finally {
-            runCatching { extractor.release() }
-        }
     }
 
     private fun readCues(extractor: MediaExtractor, mime: String): List<Cue> {
