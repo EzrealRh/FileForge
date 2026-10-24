@@ -86,6 +86,8 @@ dependencies {
     implementation(libs.zip4j)
     implementation(libs.slf4j.nop)
     implementation(libs.mlkit.text.recognition.chinese)
+    implementation(libs.androidx.media3.transformer)
+    implementation(libs.androidx.media3.effect)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
 

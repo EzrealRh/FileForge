@@ -14,6 +14,7 @@ xz = "1.10"
 junrar = "7.5.5"
 zip4j = "2.11.5"
 mlkitTextChinese = "16.0.1"
+media3 = "1.5.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -36,6 +37,8 @@ junrar = { module = "com.github.junrar:junrar", version.ref = "junrar" }
 zip4j = { module = "net.lingala.zip4j:zip4j", version.ref = "zip4j" }
 slf4j-nop = { module = "org.slf4j:slf4j-nop", version = "2.0.16" }
 mlkit-text-recognition-chinese = { group = "com.google.mlkit", name = "text-recognition-chinese", version.ref = "mlkitTextChinese" }
+androidx-media3-transformer = { group = "androidx.media3", name = "media3-transformer", version.ref = "media3" }
+androidx-media3-effect = { group = "androidx.media3", name = "media3-effect", version.ref = "media3" }
 junit-jupiter = { group = "org.junit.jupiter", name = "junit-jupiter", version.ref = "junitJupiter" }
 
 [plugins]

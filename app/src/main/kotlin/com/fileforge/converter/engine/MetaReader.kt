@@ -322,6 +322,7 @@ class MetaReader {
         FileKind.Docx -> "DOCX 文档"
         FileKind.Xlsx -> "XLSX 表格"
         FileKind.Epub -> "EPUB 电子书"
+        FileKind.Mobi -> "MOBI 电子书"
         FileKind.Odt -> "ODT 文档"
         FileKind.Ods -> "ODS 表格"
         FileKind.Pptx -> "PPTX 演示"

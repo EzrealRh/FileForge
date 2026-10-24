@@ -199,6 +199,49 @@ sealed interface Operation {
         override val label get() = "合并视频"
     }
 
+    /** 画面裁剪：写明「左,上,宽,高」，四段都带 % 就按画面边长折算。要重新编码。 */
+    data class CropVideo(val rect: String) : Operation {
+        override val label get() = "裁画面"
+    }
+
+    /** 视频文字水印：位置、不透明度、大小与图片水印同一套口径；压在每一帧上，重新编码。 */
+    data class VideoWatermark(
+        val text: String,
+        val spot: Int = 0,
+        val opacityPercent: Int = 35,
+        val sizePercent: Int = 100,
+    ) : Operation {
+        override val label get() = "视频加水印"
+    }
+
+    /**
+     * 把工作台里的一份字幕（SRT / VTT / ASS / LRC）烧进画面。
+     * [subtitleFrom] 是工作台里的文件名，与图片水印选 Logo 同一条取法。
+     */
+    data class BurnSubtitles(
+        /** 工作台里的字幕文件名；留空表示烧视频自带的那条字幕轨。 */
+        val subtitleFrom: String = "",
+        val sizePercent: Int = 100,
+        val bottomPercent: Int = 8,
+    ) : Operation {
+        override val label get() = "烧字幕"
+    }
+
+    /** 把视频自带的字幕轨导成一份 SRT；外挂字幕不在这里（各格式之间转用「字幕转格式」）。 */
+    data object ExtractSubtitles : Operation {
+        override val label get() = "导出字幕"
+    }
+
+    /** MOBI / AZW3 抽正文（PalmDOC 的 LZ77 已展开；HUFF 压缩与 DRM 会明确拒绝）。 */
+    data object MobiToText : Operation {
+        override val label get() = "提取文字"
+    }
+
+    /** MOBI / AZW3 转 EPUB：正文按 HTML 结构还原，标题层级、列表与表格都留着。 */
+    data object MobiToEpub : Operation {
+        override val label get() = "转为电子书"
+    }
+
     /** 音频截取：[target] 选 WAV（无损搬运）或 M4A（重编）；[spec] 多段起止（止留空到片尾），段间合并。 */
     data class AudioTrim(
         val target: AudioTarget = AudioTarget.Wav,

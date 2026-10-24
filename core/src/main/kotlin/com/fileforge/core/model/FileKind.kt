@@ -6,7 +6,7 @@ import com.fileforge.core.doc.Html
 enum class FileKind {
     Pdf, Png, Jpeg, Tiff, Gif, WebP, Bmp, Heic, Avif, Mp4, WebM, Mkv, QuickTime,
     Mp3, Aac, M4a, Flac, Ogg, Wav,
-    Zip, SevenZ, Rar, Ico, Docx, Xlsx, Pptx, Odt, Ods, Epub, Tar, Gzip, Rtf, Text, Html, Unknown;
+    Zip, SevenZ, Rar, Ico, Docx, Xlsx, Pptx, Odt, Ods, Epub, Mobi, Tar, Gzip, Rtf, Text, Html, Unknown;
 
     val isImage: Boolean get() = this in IMAGE_KINDS
     val isVideo: Boolean get() = this in VIDEO_KINDS
@@ -46,6 +46,7 @@ enum class FileKind {
         Docx -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         Xlsx -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         Epub -> "application/epub+zip"
+        Mobi -> "application/x-mobipocket-ebook"
         Odt -> "application/vnd.oasis.opendocument.text"
         Ods -> "application/vnd.oasis.opendocument.spreadsheet"
         Tar -> "application/x-tar"
@@ -88,6 +89,7 @@ enum class FileKind {
         Docx -> "DOCX"
         Xlsx -> "XLSX"
         Epub -> "EPUB"
+        Mobi -> "MOBI"
         Odt -> "ODT"
         Ods -> "ODS"
         Tar -> "TAR"
@@ -154,6 +156,8 @@ object FileTypeSniffer {
             // 裸帧同步 0x111：ADTS(AAC) 的 layer 两位恒为 0，MP3 不是 —— 靠这一位分开
             u(0) == 0xFF && (u(1) and 0xE0) == 0xE0 && (u(1) and 0xF6) == 0xF0 -> FileKind.Aac
             u(0) == 0xFF && (u(1) and 0xE0) == 0xE0 -> FileKind.Mp3
+            // Palm 的 PDB：类型/创建者写在偏移 60；BOOKMOBI 是 MOBI/AZW3，TEXtREAd 是纯 PalmDOC
+            isAscii(60, "BOOKMOBI") || isAscii(60, "TEXtREAd") -> FileKind.Mobi
             u(0) == 0x50 && u(1) == 0x4B && u(2) == 0x03 && u(3) == 0x04 -> FileKind.Zip
             // 7z：37 7A BC AF 27 1C；RAR4/5：52 61 72 21 1A 07 00 / 01 00
             u(0) == 0x37 && u(1) == 0x7A && u(2) == 0xBC && u(3) == 0xAF &&

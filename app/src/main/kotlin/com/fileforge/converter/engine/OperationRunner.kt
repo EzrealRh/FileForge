@@ -32,6 +32,7 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
     private val office = OfficeEngine(workspace)
     private val book = BookEngine(workspace)
     private val ocr = OcrEngine(workspace)
+    private val videoEffects = VideoEffectEngine(context, workspace, images)
 
     suspend fun run(
         items: List<WorkItem>,
@@ -341,6 +342,12 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
             is Operation.EpubToDocx -> items.forEach { item ->
                 collect(item.name) { listOf(book.toDocx(item)) }
             }
+            is Operation.MobiToText -> items.forEach { item ->
+                collect(item.name) { listOf(book.mobiToText(item)) }
+            }
+            is Operation.MobiToEpub -> items.forEach { item ->
+                collect(item.name) { listOf(book.mobiToEpub(item)) }
+            }
             is Operation.TextToDocx -> items.forEach { item ->
                 collect(item.name) { listOf(office.toDocx(item)) }
             }
@@ -480,6 +487,24 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
                 collect(item.name) {
                     listOf(ocr.recognize(item, operation) { percent -> onProgress(percent, item.name) })
                 }
+            }
+            is Operation.CropVideo, is Operation.VideoWatermark, is Operation.BurnSubtitles -> {
+                // 字幕与 Logo 同一条取法：按名从工作台里取，取不到就明确失败
+                val subtitle = (operation as? Operation.BurnSubtitles)?.subtitleFrom?.let { name ->
+                    workspace.list().firstOrNull { it.name == name }?.file
+                }
+                items.forEach { item ->
+                    collect(item.name) {
+                        listOf(
+                            videoEffects.transform(item, operation, subtitle) { percent ->
+                                onProgress(percent, item.name)
+                            },
+                        )
+                    }
+                }
+            }
+            is Operation.ExtractSubtitles -> items.forEach { item ->
+                collect(item.name) { listOf(videoEffects.extractSubtitles(item)) }
             }
         }
 

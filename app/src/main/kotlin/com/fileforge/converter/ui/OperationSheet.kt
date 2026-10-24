@@ -79,6 +79,7 @@ import kotlin.math.roundToInt
 fun OperationSheet(
     items: List<WorkItem>,
     imageNames: List<String> = emptyList(),
+    subtitleNames: List<String> = emptyList(),
     recentKinds: List<String> = emptyList(),
     onDismiss: () -> Unit,
     onStart: (Operation) -> Unit,
@@ -143,7 +144,9 @@ fun OperationSheet(
                     }
                 }
             } else {
-                val draft = remember(kind, items, imageNames) { Parameters(kind, items, imageNames) }
+                val draft = remember(kind, items, imageNames, subtitleNames) {
+                    Parameters(kind, items, imageNames, subtitleNames)
+                }
                 Column(
                     Modifier.padding(horizontal = 20.dp).heightIn(max = 380.dp).verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -175,6 +178,8 @@ class Parameters(
     val items: List<WorkItem>,
     /** 工作台里可当 Logo 用的图名（不含本次选中的），图片水印的下拉候选。 */
     val imageNames: List<String> = emptyList(),
+    /** 工作台里可烧进画面的字幕文件名（不含本次选中的）。 */
+    val subtitleNames: List<String> = emptyList(),
 ) {
     var imageFormat by mutableStateOf(if (kind == OperationKind.GifToImages) ImageFormat.Png else ImageFormat.Jpeg)
     var quality by mutableStateOf(if (kind == OperationKind.GifToImages || kind == OperationKind.VideoToImage) 92f else 82f)
@@ -191,6 +196,9 @@ class Parameters(
     var videoFormat by mutableStateOf(VideoFormat.Mp4)
     var videoByTarget by mutableStateOf(false)
     var videoConvertFormat by mutableStateOf(VideoFormat.Mp4)
+    var subtitleFrom by mutableStateOf("")
+    var videoSubtitleSize by mutableStateOf(100f)
+    var videoSubtitleBottom by mutableStateOf(8f)
     var audioTarget by mutableStateOf(AudioTarget.M4a)
     var audioByTarget by mutableStateOf(false)
     var pdfMetaMode by mutableStateOf("edit")
@@ -446,6 +454,85 @@ class Parameters(
             OperationKind.VideoMerge -> {
                 Summary("按选中顺序首尾相接：先试原样搬（不重编码）；源里有 B 帧、系统 muxer 拒收时会自动重编码后再拼，说明里会写清楚。")
                 Summary("视频编码、分辨率、方向与音轨配置要一致；不一致会点名是第几段，先统一转格式再合并。")
+            }
+            OperationKind.VideoCrop -> {
+                SpecField(
+                    "裁哪一块（左,上,宽,高）",
+                    cropRectText,
+                    "写 40,20,300,200；按百分比就给四段都带 %，例 10%,10%,80%,80%",
+                ) { cropRectText = it }
+                Summary("按你看到的方向算（横拍竖播的视频先转正再裁）；裁完重新编码，产出一份 MP4。")
+                items.forEach { Summary("${it.name} · ${it.sizeLabel}") }
+            }
+            OperationKind.VideoWatermark -> {
+                OutlinedTextField(
+                    value = imageWatermarkText,
+                    onValueChange = { imageWatermarkText = it },
+                    label = { Text("水印文字") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Segmented("位置", listOf("居中", "右下", "左下", "右上", "左上"), imageWatermarkSpot) {
+                    imageWatermarkSpot = it
+                }
+                IntSlider("不透明度", imageWatermarkOpacity, 5f..100f, { "%.0f%%".format(it) }) {
+                    imageWatermarkOpacity = it
+                }
+                IntSlider("大小", imageWatermarkSize, 50f..300f, { "%.0f%%".format(it) }) {
+                    imageWatermarkSize = it
+                }
+                Summary("文字压在每一帧上，重新编码；白字带深色描边，深底与亮底都读得清。")
+                items.forEach { Summary("${it.name} · ${it.sizeLabel}") }
+            }
+            OperationKind.BurnSubtitles -> {
+                var subtitleMenuOpen by remember { mutableStateOf(false) }
+                Box {
+                    OutlinedTextField(
+                        value = subtitleFrom.ifBlank { "用视频自带的字幕轨（没有就报错）" },
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("字幕来源") },
+                        trailingIcon = {
+                            IconButton(onClick = { subtitleMenuOpen = !subtitleMenuOpen }) {
+                                Icon(Icons.Outlined.ArrowDropDown, contentDescription = "选字幕")
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    DropdownMenu(expanded = subtitleMenuOpen, onDismissRequest = { subtitleMenuOpen = false }) {
+                        DropdownMenuItem(
+                            text = { Text("用视频自带的字幕轨") },
+                            onClick = {
+                                subtitleFrom = ""
+                                subtitleMenuOpen = false
+                            },
+                        )
+                        subtitleNames.forEach { name ->
+                            DropdownMenuItem(
+                                text = { Text(name) },
+                                onClick = {
+                                    subtitleFrom = name
+                                    subtitleMenuOpen = false
+                                },
+                            )
+                        }
+                    }
+                }
+                IntSlider("字号", videoSubtitleSize, 60f..200f, { "%.0f%%".format(it) }) {
+                    videoSubtitleSize = it
+                }
+                IntSlider("离底边", videoSubtitleBottom, 2f..30f, { "%.0f%%".format(it) }) {
+                    videoSubtitleBottom = it
+                }
+                Summary("外挂字幕支持 SRT / VTT / ASS / LRC；不选就用视频封装里自带的那条文字字幕轨。")
+                Summary("时间轴照字幕走，没有字幕的帧不着字；烧完重新编码，产出一份 MP4。")
+                if (subtitleNames.isEmpty()) Summary("工作台里还没有字幕文件：也可以直接用视频自带的字幕轨。")
+            }
+            OperationKind.ExtractSubtitles -> {
+                Summary("把视频封装里自带的文字字幕轨导成一份 SRT；MP4 定时文本、WebVTT、ASS/SSA 都认。")
+                Summary("结束时间按下一句开始时补（容器不提供每条时长）；逐位图的字幕轨（DVD/PGS）提不出文字，会直说。")
+                Summary("外挂字幕本来就是字幕文件，不用这一步。")
+                items.forEach { Summary("${it.name} · ${it.sizeLabel}") }
             }
             OperationKind.AudioTrim -> {
                 Segmented("输出格式", AudioTarget.entries.map { it.label }, audioTrimTarget.ordinal) {
@@ -1134,6 +1221,12 @@ class Parameters(
                 Summary("加密的 EPUB（带 DRM）读不出正文，会直说，不会出一份空文件。")
                 items.forEach { Summary("${it.name} · ${it.sizeLabel}") }
             }
+            OperationKind.MobiToText, OperationKind.MobiToEpub -> {
+                Summary("MOBI 与 AZW3（KF8）都认：记录 0 的 MOBI 头给标题与作者，后面几条正文记录按 PalmDOC 展开。")
+                Summary("HUFF/CDIC 压缩与带 DRM 的书读不了，会明确说，不给乱码；AZW3 的图片与分片索引不搬。")
+                Summary("转 EPUB 时按正文 HTML 的结构还原标题层级、列表与表格；图片不搬，说明里会写。")
+                items.forEach { Summary("${it.name} · ${it.sizeLabel}") }
+            }
             OperationKind.IcoToImages -> {
                 Summary("PNG 内嵌的那种直接把内嵌字节原样取出，不重新编码；老式位图（DIB）的要重建像素再编 PNG。")
                 Summary("一个图标里有几个尺寸就出几张图，名字带序号。")
@@ -1349,6 +1442,15 @@ class Parameters(
         if (kind == OperationKind.CropImage && cropRectText.isBlank() && cropAspectText.isBlank()) {
             return "裁哪块要写点什么：「左,上,宽,高」，或一个宽高比（比如 1:1）"
         }
+        if (kind == OperationKind.VideoCrop && cropRectText.isBlank()) {
+            return "裁哪块要写「左,上,宽,高」，四段也可以都带 %"
+        }
+        if (kind == OperationKind.VideoWatermark && imageWatermarkText.isBlank()) {
+            return "先写要盖的水印文字"
+        }
+        if (kind == OperationKind.BurnSubtitles && subtitleFrom.isNotBlank() && subtitleFrom !in subtitleNames) {
+            return "选的字幕已经不在工作台里了，重新选一份"
+        }
         if (kind == OperationKind.RotateImage && imageRotatePreset == 3 && imageRotateDegrees == 0f) {
             return "自己给角度时别写 0，那等于没转"
         }
@@ -1435,6 +1537,15 @@ class Parameters(
             )
             OperationKind.ConvertVideo -> Operation.ConvertVideo(videoConvertFormat)
             OperationKind.VideoMerge -> Operation.VideoMerge
+            OperationKind.VideoCrop -> Operation.CropVideo(cropRectText.trim())
+            OperationKind.VideoWatermark -> Operation.VideoWatermark(
+                imageWatermarkText.trim(), imageWatermarkSpot,
+                imageWatermarkOpacity.roundToInt(), imageWatermarkSize.roundToInt(),
+            )
+            OperationKind.BurnSubtitles -> Operation.BurnSubtitles(
+                subtitleFrom.trim(), videoSubtitleSize.roundToInt(), videoSubtitleBottom.roundToInt(),
+            )
+            OperationKind.ExtractSubtitles -> Operation.ExtractSubtitles
             OperationKind.ConvertAudio, OperationKind.ExtractAudio -> Operation.AudioConvert(
                 audioTarget, if (audioByTarget) targetBytes else null,
             )
@@ -1533,6 +1644,8 @@ class Parameters(
             OperationKind.EpubToText -> Operation.EpubToText
             OperationKind.EpubToMarkdown -> Operation.EpubToMarkdown
             OperationKind.EpubToDocx -> Operation.EpubToDocx
+            OperationKind.MobiToText -> Operation.MobiToText
+            OperationKind.MobiToEpub -> Operation.MobiToEpub
         }
     }
 }

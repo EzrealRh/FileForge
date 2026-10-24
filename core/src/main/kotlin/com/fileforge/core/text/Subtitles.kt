@@ -58,6 +58,10 @@ object Subtitles {
     /** LRC 只给开始时间，转成有结束时间的格式时要补一个默认停留时长。 */
     const val LRC_DEFAULT_MS = 4_000L
 
+    /** 某一时刻正在显示的字幕：起止都算边界，时间落在 [start, end) 里；重叠时取后开始的那条。 */
+    fun cueAt(cues: List<Cue>, timeMs: Long): Cue? =
+        cues.lastOrNull { timeMs >= it.startMs && timeMs < it.endMs }
+
     fun parse(format: SubtitleFormat, source: String): List<Cue> = when (format) {
         SubtitleFormat.Srt -> parseBlocks(source, "SRT")
         SubtitleFormat.Vtt -> {

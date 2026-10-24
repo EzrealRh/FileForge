@@ -10,12 +10,19 @@
   `OcrEngine` 用 `Tasks.await`；图片整张认，PDF 用 `PdfRenderer` 逐页渲染（长边 2200、先刷白底）；输出 txt 带页界；
   飞行模式下真机验过（`D:/fflogs/device-ocr.txt`：图片 4/4、PDF 4/4）。
 - **音频合并真机验证**：两支 WAV 多选合并，产物 132300 样本与两段原文件逐样本一致（`D:/fflogs/pulled-ocr/merge.wav`）。
+- **视频裁画面 / 加水印 / 烧字幕 / 抽字幕**：Media3 Transformer（GL 效果管线）落地。
+  真机 15/16 通过（`D:/fflogs/check_video_outputs.py`、`video-checks.txt`）：裁画面 320×180 全红块、水印中心 0→1236 个亮像素、
+  烧字幕的没字幕帧与两句字幕帧都按像素验过、MP4（mov_text）抽字幕文本与 0.5/2.0 秒时间轴对。
+  外挂字幕（SRT/VTT/ASS/LRC）与自带轨走同一层，UI 取外挂文件那一路还没单独真机跑。
+- **MOBI / AZW3**：`Mobi.kt` 解析 PDB/MOBI 头与 EXTH，PalmDOC LZ77 展开；HUFF/CDIC 与 DRM 明确拒绝。
+  `MobiTest` 7 项（真实夹具、压缩/未压缩、回指、DRM、HUFF、嗅探）全绿；可抽 txt 或转 EPUB。
 
-## P1
+## P1（未做）
 
-- **视频裁画面 / 加水印 / 烧字幕 / 抽字幕**：转格式与合并已完成并真机验过；这四条需要逐帧解码→Canvas 叠加→重编码（或字幕轨解析），是下一块大工程。
+- **MKV 字幕轨**：Android `MediaExtractor` 不暴露 MKV 里的 subrip 轨（`withsubs.mkv` 真机报「没有文字字幕轨」），
+  MP4 的 mov_text 正常。要支持 MKV 得自己解 Matroska（Tracks/Cluster/Block + ASS 私有字段），或先转成 MP4。
 - **RAR5**：`junrar 7.5.5` 不支持（`UnsupportedRarV5Exception`），当前会明确拒绝并提示转 ZIP/RAR4；要支持需换库或原生实现。
-- **旧 Office**：`.doc/.xls/.ppt`（POI-scratchpad 在安卓的可行性未验）；iWork（Pages/Keynote/Numbers）；MOBI/AZW3。
+- **旧 Office**：`.doc/.xls/.ppt`（POI-scratchpad 在安卓的可行性未验）；iWork（Pages/Keynote/Numbers）。
 
 ## P2（平台或依赖限制）
 
@@ -25,6 +32,7 @@
 
 ## 每次重活的铁律（本机 16 GB）
 
+0. **起模拟器前先杀构建守护进程**：`gradlew --stop` 之后还有 `KotlinCompileDaemon` 与另一个 `GRADLE_USER_HOME` 的 daemon，共占约 4.4 GB commit；不杀时基线 71% + qemu → 90.1% `MEMHIGH`，杀了回到 50%。
 1. 构建与模拟器**串行**；只用 `MiniListAudit`（2 GB，`D:/minilist-review/start-emulator.ps1`），不要用 4 GB 的 Pixel。
 2. 测完（失败也）立刻 `adb -s emulator-5554 emu kill`，再确认 `qemu-system-x86_64-headless` 已退出。
 3. 每步前看 `D:/crashwatch/watch.log`：`commitPct >= 85` 或 `memAvailMB < 800` 立即停并报告。

@@ -39,6 +39,10 @@ enum class OperationKind(val label: String, val hint: String) {
     CompressVideo("压缩视频", "硬件转码，可按目标体积反推码率"),
     ConvertVideo("视频转格式", "MP4 与 WebM 互转；重新编码，不是换容器"),
     VideoMerge("合并视频", "按选中顺序拼接；编码与分辨率要一致"),
+    VideoCrop("视频裁画面", "按像素或百分比裁一块，重新编码"),
+    VideoWatermark("视频加水印", "文字水印压在每一帧，重新编码"),
+    BurnSubtitles("视频烧字幕", "把 SRT / VTT / ASS / LRC 压进画面"),
+    ExtractSubtitles("提取字幕轨", "把视频自带的字幕轨导出成 SRT"),
     VideoTrim("视频截取片段", "选起止时间，不重编码秒出"),
     ConvertAudio("音频转格式", "MP3 / FLAC / OGG 转 M4A 或 WAV"),
     AudioTrim("音频截取", "选起止时间，WAV 无损 / M4A 重编"),
@@ -93,6 +97,8 @@ enum class OperationKind(val label: String, val hint: String) {
     EpubToText("EPUB 提取全书文字", "按 spine 的章节顺序接起来，输出 txt"),
     EpubToMarkdown("EPUB 转 Markdown", "标题、列表、表格写成标记"),
     EpubToDocx("EPUB 写成 Word", "结构与记号走 Word 的样式，可继续编辑"),
+    MobiToText("MOBI 提取文字", "MOBI / AZW3 抽正文成 txt；HUFF 压缩与 DRM 会直说"),
+    MobiToEpub("MOBI 转 EPUB", "同一份正文与结构写成电子书"),
     DocxToMarkdown("Word 转 Markdown", "层级、列表、表格与链接按文件里写的读出来，不靠猜"),
     DocxToHtml("Word 转网页", "同一棵读回来的树，落成浏览器直接打开的 HTML"),
     ImageToIco("做成图标 ICO", "一次出 16/32/48/256 多个尺寸"),
@@ -156,10 +162,13 @@ enum class OperationKind(val label: String, val hint: String) {
             // OCR 是"认画面上有什么"：图片按整张认，PDF 逐页渲染再认。
             // ICO 是容器（多个尺寸），不在这里拆；GIF 只认第一帧，与抽首帧同一条读法。
             OcrText -> (fileKind.isImage && fileKind != FileKind.Ico) || fileKind == FileKind.Pdf
+            MobiToText, MobiToEpub -> fileKind == FileKind.Mobi
             CompressGif, GifToImages, GifWatermark -> fileKind == FileKind.Gif
             ImagesToGif -> fileKind.isImage
             VideoToGif, VideoToImage, VideoTrim -> fileKind.isVideo
-            CompressVideo, ConvertVideo, VideoMerge -> fileKind.isVideo
+            CompressVideo, ConvertVideo, VideoMerge, VideoCrop, VideoWatermark, BurnSubtitles,
+            ExtractSubtitles,
+            -> fileKind.isVideo
             ConvertAudio -> fileKind.isAudio
             // 两种都只认"这是个文本文件"，具体是哪种字幕交给解析器判
             ConvertTextEncoding, ConvertSubtitle -> fileKind.isTextual

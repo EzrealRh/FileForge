@@ -453,6 +453,12 @@ fun WorkbenchScreen(
             imageNames = state.items
                 .filter { it.kind.isImage && state.selected.none { s -> s.id == it.id } }
                 .map { it.name },
+            subtitleNames = state.items
+                .filter { item ->
+                    item.kind.isTextual && state.selected.none { s -> s.id == item.id } &&
+                        item.name.substringAfterLast('.', "").lowercase() in SUBTITLE_EXTENSIONS
+                }
+                .map { it.name },
             recentKinds = viewModel.recentOperationNames(),
             onDismiss = { viewModel.openSheet(false) },
             onStart = viewModel::run,
@@ -556,6 +562,9 @@ private fun BatchHeader(batch: com.fileforge.converter.data.Batch?, count: Int, 
 }
 
 private val clock = java.text.SimpleDateFormat("M月d日 HH:mm", java.util.Locale.CHINA)
+
+/** 能当「烧字幕」来源的扩展名；内容是文字就行，类型判定走 FileKind.isTextual。 */
+private val SUBTITLE_EXTENSIONS = setOf("srt", "vtt", "ass", "ssa", "lrc")
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable

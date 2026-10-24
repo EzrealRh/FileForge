@@ -26,6 +26,23 @@ class SubtitlesTest {
     """.trimIndent() + "\n"
 
     @Test
+    fun `按时刻取正在显示的字幕，结束边界不算`() {
+        val cues = listOf(
+            Cue(1_000, 2_000, listOf("甲")),
+            Cue(2_000, 3_000, listOf("乙")),
+            Cue(5_000, 6_000, listOf("丙")),
+        )
+        assertEquals("甲", Subtitles.cueAt(cues, 1_000)?.text)
+        assertEquals("甲", Subtitles.cueAt(cues, 1_999)?.text)
+        // 正好落在交界上取后开始的那条；两条都覆盖同一时刻时同样取后开始的
+        assertEquals("乙", Subtitles.cueAt(cues, 2_000)?.text)
+        assertEquals(null, Subtitles.cueAt(cues, 3_000))
+        assertEquals(null, Subtitles.cueAt(cues, 4_000))
+        assertEquals("丙", Subtitles.cueAt(cues, 5_999)?.text)
+        assertEquals(null, Subtitles.cueAt(emptyList(), 0))
+    }
+
+    @Test
     fun `SRT 逗号毫秒与多行正文`() {
         val cues = Subtitles.parse(SubtitleFormat.Srt, srt)
         assertEquals(2, cues.size)

@@ -4,6 +4,7 @@ import com.fileforge.core.archive.ZipReader
 import com.fileforge.core.book.Epub
 import com.fileforge.core.book.EpubBook
 import com.fileforge.core.book.EpubWrite
+import com.fileforge.core.book.Mobi
 import com.fileforge.core.doc.Doc
 import com.fileforge.core.doc.DocPart
 import com.fileforge.core.doc.Html
@@ -109,6 +110,49 @@ class BookEngine(private val workspace: Workspace) {
             file,
             "《$title》 · ${pages.size} 章 · $chars 字 · 语言标 $language · " +
                 (reading.notes + reading.doc.notes + out.notes).joinToString(" · "),
+        )
+    }
+
+    /** MOBI / AZW3 抽正文：PalmDOC 压缩在 `:core` 展开，这里只落盘与写说明。 */
+    fun mobiToText(item: WorkItem): EngineOutput {
+        val book = Mobi.read(item.file.readBytes())
+        require(book.plainText.isNotBlank()) { "这本书的正文都是图片，没有可抽的文字" }
+        val notes = ArrayList<String>()
+        notes += "《${book.title}》" + (book.author?.let { " · $it" } ?: "")
+        notes += "${book.plainText.count { !it.isWhitespace() }} 字"
+        notes += book.notes
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "文字", "txt"),
+            writeText(item, book.plainText, "txt"),
+            notes.filter { it.isNotBlank() }.joinToString(" · "),
+        )
+    }
+
+    /** MOBI / AZW3 转 EPUB：正文是 HTML，按同一棵文档树还原标题、列表与表格。 */
+    fun mobiToEpub(item: WorkItem): EngineOutput {
+        val book = Mobi.read(item.file.readBytes())
+        val doc = Html.toDoc(book.html)
+        require(doc.parts.isNotEmpty()) { "正文里没有可排的段落（可能全是图片）" }
+        val pages = EpubWrite.chaptersOf(doc, book.title)
+        val language = EpubWrite.languageOf(doc)
+        val out = EpubWrite.book(
+            title = book.title,
+            author = book.author,
+            pages = pages,
+            language = language,
+            identifier = EpubWrite.identifierFor(book.title + book.html),
+            modifiedAt = item.file.lastModified(),
+        )
+        val notes = ArrayList<String>()
+        notes += "《${book.title}》"
+        notes += "${pages.size} 章 · 语言标 $language"
+        notes += book.notes
+        notes += doc.notes
+        notes += out.notes
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "", "epub"),
+            workspace.newStagingFile("epub").apply { writeBytes(out.bytes) },
+            notes.filter { it.isNotBlank() }.joinToString(" · "),
         )
     }
 
