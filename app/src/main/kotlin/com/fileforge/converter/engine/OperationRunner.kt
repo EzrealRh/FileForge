@@ -294,6 +294,18 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
             is Operation.XlsxToCsv -> items.forEach { item ->
                 collect(item.name) { office.toCsv(item, operation.delimiter, operation.ending) }
             }
+            is Operation.XlsToCsv -> items.forEach { item ->
+                collect(item.name) { office.xlsToCsv(item, operation.delimiter, operation.ending) }
+            }
+            is Operation.XlsToXlsx -> items.forEach { item ->
+                collect(item.name) { listOf(office.xlsToXlsx(item)) }
+            }
+            is Operation.DocToText -> items.forEach { item ->
+                collect(item.name) { listOf(office.docToText(item)) }
+            }
+            is Operation.PptToText -> items.forEach { item ->
+                collect(item.name) { listOf(office.pptToText(item)) }
+            }
             is Operation.XlsxToHtml -> items.forEach { item ->
                 collect(item.name) { listOf(office.xlsxToHtml(item)) }
             }

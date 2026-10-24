@@ -403,6 +403,15 @@ class CrossConversionCatalogTest {
     }
 
     @Test
+    fun `旧版 XLS 只给两条表格操作，通用 OLE 容器不给`() {
+        val xls = OperationKind.applicable(setOf(FileKind.Xls))
+        assertTrue(OperationKind.XlsToCsv in xls)
+        assertTrue(OperationKind.XlsToXlsx in xls)
+        assertFalse(OperationKind.XlsToCsv in OperationKind.applicable(setOf(FileKind.Ole)))
+        assertFalse(OperationKind.XlsToCsv in OperationKind.applicable(setOf(FileKind.Docx)))
+    }
+
+    @Test
     fun `GIF 与 PDF 混选时只剩打包与 OCR`() {
         // GIF 和 PDF 没有共同的转换操作；活下来的是两条打包（把不相干的两类装进一个包本来就是压缩包的用途），
         // 以及 OCR —— 两边都能"按画面认字"，GIF 认第一帧，PDF 逐页认。

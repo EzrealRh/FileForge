@@ -293,7 +293,14 @@ internal fun sniffedKindOf(file: File): FileKind = runCatching {
         val read = stream.read(header)
         if (read in 0 until header.size) header.copyOf(read) else header
     }.let { FileTypeSniffer.sniff(it) }
-        .let { if (it == FileKind.Zip) containerKindOf(file) else it }
+        .let { kind ->
+            when (kind) {
+                FileKind.Zip -> containerKindOf(file)
+                // OLE2 的三种旧 Office 只看头分不出，开一次目录按流名细化
+                FileKind.Ole -> com.fileforge.core.office.OldOffice.detect(file) ?: kind
+                else -> kind
+            }
+        }
 }.getOrDefault(FileKind.Unknown)
 
 /** 开不了目录、目录读坏了的都算回普通 zip：具体哪里坏，引擎那边会照着文件说。 */

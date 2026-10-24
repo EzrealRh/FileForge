@@ -6,7 +6,8 @@ import com.fileforge.core.doc.Html
 enum class FileKind {
     Pdf, Png, Jpeg, Tiff, Gif, WebP, Bmp, Heic, Avif, Mp4, WebM, Mkv, QuickTime,
     Mp3, Aac, M4a, Flac, Ogg, Wav,
-    Zip, SevenZ, Rar, Ico, Docx, Xlsx, Pptx, Odt, Ods, Epub, Mobi, Tar, Gzip, Rtf, Text, Html, Unknown;
+    Zip, SevenZ, Rar, Ico, Docx, Xlsx, Pptx, Odt, Ods, Epub, Mobi, Ole, Xls, Doc, Ppt,
+    Tar, Gzip, Rtf, Text, Html, Unknown;
 
     val isImage: Boolean get() = this in IMAGE_KINDS
     val isVideo: Boolean get() = this in VIDEO_KINDS
@@ -47,6 +48,10 @@ enum class FileKind {
         Xlsx -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         Epub -> "application/epub+zip"
         Mobi -> "application/x-mobipocket-ebook"
+        Ole -> "application/x-ole-storage"
+        Xls -> "application/vnd.ms-excel"
+        Doc -> "application/msword"
+        Ppt -> "application/vnd.ms-powerpoint"
         Odt -> "application/vnd.oasis.opendocument.text"
         Ods -> "application/vnd.oasis.opendocument.spreadsheet"
         Tar -> "application/x-tar"
@@ -90,6 +95,10 @@ enum class FileKind {
         Xlsx -> "XLSX"
         Epub -> "EPUB"
         Mobi -> "MOBI"
+        Ole -> "OLE"
+        Xls -> "XLS"
+        Doc -> "DOC"
+        Ppt -> "PPT"
         Odt -> "ODT"
         Ods -> "ODS"
         Tar -> "TAR"
@@ -156,6 +165,9 @@ object FileTypeSniffer {
             // 裸帧同步 0x111：ADTS(AAC) 的 layer 两位恒为 0，MP3 不是 —— 靠这一位分开
             u(0) == 0xFF && (u(1) and 0xE0) == 0xE0 && (u(1) and 0xF6) == 0xF0 -> FileKind.Aac
             u(0) == 0xFF && (u(1) and 0xE0) == 0xE0 -> FileKind.Mp3
+            // OLE2 复合文档：Word/Excel/PowerPoint 97 共用这个头；具体是哪一种要看目录里的流名（Workspace 里再细化）
+            u(0) == 0xD0 && u(1) == 0xCF && u(2) == 0x11 && u(3) == 0xE0 &&
+                u(4) == 0xA1 && u(5) == 0xB1 && u(6) == 0x1A && u(7) == 0xE1 -> FileKind.Ole
             // Palm 的 PDB：类型/创建者写在偏移 60；BOOKMOBI 是 MOBI/AZW3，TEXtREAd 是纯 PalmDOC
             isAscii(60, "BOOKMOBI") || isAscii(60, "TEXtREAd") -> FileKind.Mobi
             u(0) == 0x50 && u(1) == 0x4B && u(2) == 0x03 && u(3) == 0x04 -> FileKind.Zip

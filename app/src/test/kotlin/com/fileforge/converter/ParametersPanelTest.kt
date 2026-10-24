@@ -135,6 +135,16 @@ class ParametersPanelTest {
     }
 
     @Test
+    fun `旧版表格转 CSV 与写成 XLSX 直接拼操作`() {
+        val csv = Parameters(OperationKind.XlsToCsv, listOf(item("old.xls", FileKind.Xls)))
+        assertNull(csv.validation())
+        assertEquals(Operation.XlsToCsv(), csv.build())
+        val xlsx = Parameters(OperationKind.XlsToXlsx, listOf(item("old.xls", FileKind.Xls)))
+        assertNull(xlsx.validation())
+        assertEquals(Operation.XlsToXlsx, xlsx.build())
+    }
+
+    @Test
     fun `导出字幕不需要参数`() {
         val draft = Parameters(OperationKind.ExtractSubtitles, listOf(video()))
         assertNull(draft.validation())

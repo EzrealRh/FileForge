@@ -11,3 +11,8 @@
 *.pdf binary
 *.7z binary
 *.rar binary
+*.xls binary
+*.doc binary
+*.ppt binary
+*.mobi binary
+*.mkv binary

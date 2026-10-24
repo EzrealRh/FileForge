@@ -618,6 +618,29 @@ sealed interface Operation {
         override val label get() = "表格转 CSV"
     }
 
+    /** Excel 97-2003（.xls）每张表转一份 CSV；日期照 XF→FORMAT 判出来的样子写。 */
+    data class XlsToCsv(
+        val delimiter: Delimiter = Delimiter.Comma,
+        val ending: LineEnding = LineEnding.Lf,
+    ) : Operation {
+        override val label get() = "旧版表格转 CSV"
+    }
+
+    /** Excel 97-2003 → 一份新的 .xlsx（值照读出来的写法搬，不重新发明数字格式）。 */
+    data object XlsToXlsx : Operation {
+        override val label get() = "旧版表格写成 Excel"
+    }
+
+    /** Word 97-2003（.doc）抽正文：按 FIB → CLX → piece table 读，不按固定偏移猜。 */
+    data object DocToText : Operation {
+        override val label get() = "旧版 Word 提取文字"
+    }
+
+    /** PowerPoint 97-2003（.ppt）抽文字：走记录树里的 TextCharsAtom / TextBytesAtom。 */
+    data object PptToText : Operation {
+        override val label get() = "旧版 PPT 提取文字"
+    }
+
     /**
      * Markdown → HTML 的一份完整页面（带 charset，浏览器双击就能看）。
      *

@@ -994,6 +994,36 @@ class Parameters(
                 Summary("日期格子按样式认出来再转成 ISO 写法 —— 不认样式的话，转出来是 45047 这种序列号。")
                 Summary("数字照文件里的写法原样搬：1.50 不会变成 1.5，007 不会变成 7。")
                 Summary("公式给的是文件里存着的**算过的结果**；没算过的格子（比如别的工具刚写完还没打开过的）会是空格，并写明有几格。")
+                items.forEach { Summary("${it.name} · ${it.sizeLabel}") }
+            }
+            OperationKind.XlsToCsv -> {
+                PickerRow("分隔符", Delimiter.entries.map { it.label }, Delimiter.entries.indexOf(csvDelimiter)) {
+                    csvDelimiter = Delimiter.entries[it]
+                }
+                Segmented("换行", LineEnding.entries.map { it.label }, LineEnding.entries.indexOf(csvEnding)) {
+                    csvEnding = LineEnding.entries[it]
+                }
+                Summary("Excel 97-2003（.xls）的 OLE2 容器与 BIFF 记录在本地读：每张表一份 CSV，表名进文件名。")
+                Summary("日期靠 XF → FORMAT 的格式串判，认出来的写成 ISO；认不出的保留 Excel 序列号并写明。")
+                Summary("公式取文件里存着的算过的结果；图片、图表与合并单元格的画法不搬。")
+                items.forEach { Summary("${it.name} · ${it.sizeLabel}") }
+            }
+            OperationKind.XlsToXlsx -> {
+                Summary("把 .xls 的每张表搬到新的 .xlsx；值照读出来的写法搬，日期已经是 ISO 文字。")
+                Summary("样式、图片、图表与公式不搬 —— 产物是能继续编辑的干净表格。")
+                items.forEach { Summary("${it.name} · ${it.sizeLabel}") }
+            }
+            OperationKind.DocToText -> {
+                Summary("Word 97-2003（.doc）的 OLE2 容器与 piece table 在本地读：正文按片段拼，不按固定偏移猜。")
+                Summary("字段只留结果、不留指令；段落、换行与表格单元格换成看得见的空白。")
+                Summary("图片、脚注正文、批注与修订痕迹不在正文流里，抽不出来，结果里会写明。")
+                items.forEach { Summary("${it.name} · ${it.sizeLabel}") }
+            }
+            OperationKind.PptToText -> {
+                Summary("PowerPoint 97-2003（.ppt）按记录树读 TextCharsAtom / TextBytesAtom：一页里的标题与正文按段落给出。")
+                Summary("同一段文字在多次保存的修订里会重复出现，按最后一次去重；母版与备注文字不抽。")
+                Summary("图片、表格线、SmartArt 与图表不搬。")
+                items.forEach { Summary("${it.name} · ${it.sizeLabel}") }
             }
             OperationKind.XlsxToHtml, OperationKind.XlsxToMarkdown -> {
                 Summary("每张表一节，表名当小标题：与「表格转 CSV」用的是同一次读格子，两边的数不会打架。")
@@ -1627,6 +1657,10 @@ class Parameters(
             OperationKind.ImageToIco -> Operation.ImageToIco(icoSizes())
             OperationKind.OfficeToText -> Operation.OfficeToText
             OperationKind.XlsxToCsv -> Operation.XlsxToCsv(csvDelimiter, csvEnding)
+            OperationKind.XlsToCsv -> Operation.XlsToCsv(csvDelimiter, csvEnding)
+            OperationKind.XlsToXlsx -> Operation.XlsToXlsx
+            OperationKind.DocToText -> Operation.DocToText
+            OperationKind.PptToText -> Operation.PptToText
             OperationKind.XlsxToHtml -> Operation.XlsxToHtml
             OperationKind.XlsxToMarkdown -> Operation.XlsxToMarkdown
             OperationKind.MdToHtml -> Operation.MdToHtml

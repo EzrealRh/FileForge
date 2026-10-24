@@ -18,11 +18,16 @@
   （Tracks/Cluster/SimpleBlock/BlockGroup + ASS 九段正文）；真机导出 523/1523、2023/2823 两条。
 - **MOBI / AZW3**：`Mobi.kt` 解析 PDB/MOBI 头与 EXTH，PalmDOC LZ77 展开；HUFF/CDIC 与 DRM 明确拒绝。
   `MobiTest` 7 项（真实夹具、压缩/未压缩、回指、DRM、HUFF、嗅探）全绿；可抽 txt 或转 EPUB。
+- **旧版 Office（.doc / .xls / .ppt）**：`Ole2.kt` 读 CFB（FAT + miniFAT + 目录），
+  `OldOffice.detect` 按流名把 OLE2 细化成 Doc/Xls/Ppt（`Workspace` 导入时就走这一串）。
+  `Biff.kt` 读 BIFF8 单元格 + XF/FORMAT 日期；`Word97.kt` 读 FIB/CLX/piece table；`PptText.kt` 走记录树并去重修订。
+  单测用 xlwt 生成的真实 .xls、POI 的 simple.doc / simple.ppt（Apache-2.0）与独立字节串对照。
+  XLS→CSV 已真机验过（两张表、日期、带逗号与 007）；DOC/PPT 的解析在 JVM 夹具上验过，未单独跑真机。
 
 ## P1（未做）
 
+- **iWork（Pages / Keynote / Numbers）**：包体是 IWA（Snappy 压缩的 protobuf），要还原文字得实现 IWA 解包与各文档的模型映射，工作量大且没有公共规范；当前会按普通 zip 认，不会硬读。
 - **RAR5**：`junrar 7.5.5` 不支持（`UnsupportedRarV5Exception`），当前会明确拒绝并提示转 ZIP/RAR4；要支持需换库或原生实现。
-- **旧 Office**：`.doc/.xls/.ppt`（POI-scratchpad 在安卓的可行性未验）；iWork（Pages/Keynote/Numbers）。
 
 ## P2（平台或依赖限制）
 

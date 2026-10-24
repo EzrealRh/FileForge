@@ -21,8 +21,12 @@ import com.fileforge.core.doc.DocTable
 import com.fileforge.core.text.LineEnding
 import com.fileforge.core.model.FileKind
 import com.fileforge.core.naming.OutputNaming
+import com.fileforge.core.office.Biff
 import com.fileforge.core.office.DocxWrite
 import com.fileforge.core.office.OdsRead
+import com.fileforge.core.office.Ole2
+import com.fileforge.core.office.PptText
+import com.fileforge.core.office.Word97
 import com.fileforge.core.office.OdsWrite
 import com.fileforge.core.office.SheetToWriteOds
 import com.fileforge.core.office.OoxmlStructure
@@ -82,6 +86,83 @@ class OfficeEngine(private val workspace: Workspace) {
                 notes.joinToString(" · "),
             )
         }
+    }
+
+    /** Excel 97-2003 每张表一份 CSV。 */
+    fun xlsToCsv(item: WorkItem, delimiter: Delimiter, ending: LineEnding): List<EngineOutput> {
+        val read = readXls(item)
+        val sheets = read.sheets.filter { it.rows.isNotEmpty() }
+        require(sheets.isNotEmpty()) { (read.notes + "每张表都是空的").joinToString(" · ") }
+        return sheets.map { sheet ->
+            val notes = ArrayList(read.notes)
+            notes += "「${sheet.name}」${sheet.rows.size} 行 × ${sheet.rows.maxOfOrNull { it.size } ?: 0} 列"
+            notes += sheet.notes
+            EngineOutput(
+                OutputNaming.tagged(item.name, if (read.sheets.size == 1) "" else tag(sheet.name), "csv"),
+                write("csv", Csv.render(sheet.rows, delimiter, ending)),
+                notes.filter { it.isNotBlank() }.joinToString(" · "),
+            )
+        }
+    }
+
+    /** Excel 97-2003 → 新的 .xlsx：格子照读出来的写法搬，日期已经是 ISO 文字。 */
+    fun xlsToXlsx(item: WorkItem): EngineOutput {
+        val read = readXls(item)
+        val sheets = read.sheets.filter { it.rows.isNotEmpty() }
+        require(sheets.isNotEmpty()) { (read.notes + "每张表都是空的").joinToString(" · ") }
+        val notes = ArrayList(read.notes)
+        notes += sheets.flatMap { it.notes }.take(4)
+        return workbook(
+            item,
+            sheets.map { SheetToWrite(it.name, com.fileforge.core.office.OdsSheets.padded(it.rows)) },
+            notes,
+        )
+    }
+
+    /** Word 97-2003 抽正文：正文的坐标在 FIB → CLX → piece table 里，图片与脚注正文不搬。 */
+    fun docToText(item: WorkItem): EngineOutput {
+        val streams = Ole2.open(item.file).use { ole ->
+            Triple(
+                ole.read("WordDocument"),
+                ole.read("0Table") ?: ByteArray(0),
+                ole.read("1Table") ?: ByteArray(0),
+            )
+        }
+        val word = streams.first ?: error("这个 OLE 文件里没有 WordDocument 流；可能是 Excel/PowerPoint")
+        val doc = Word97.read(word, streams.second, streams.third)
+        val notes = ArrayList(doc.notes)
+        notes += "${doc.text.length} 字 · ${doc.text.count { it == '\n' }} 行"
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "文字", "txt"),
+            write("txt", doc.text + "\n"),
+            notes.joinToString(" · "),
+        )
+    }
+
+    /** PowerPoint 97-2003 抽文字：只收 Slide / Document 下的正文记录，母版与备注不进。 */
+    fun pptToText(item: WorkItem): EngineOutput {
+        val stream = Ole2.open(item.file).use { ole -> ole.read("PowerPoint Document") }
+        requireNotNull(stream) { "这个 OLE 文件里没有 PowerPoint Document 流；可能是 Word/Excel" }
+        val doc = PptText.read(stream)
+        val notes = ArrayList(doc.notes)
+        notes += "${doc.text.length} 字 · ${doc.text.count { it == '\n' } + 1} 行"
+        return EngineOutput(
+            OutputNaming.tagged(item.name, "文字", "txt"),
+            write("txt", doc.text + "\n"),
+            notes.joinToString(" · "),
+        )
+    }
+
+    private fun readXls(item: WorkItem): Biff.Result {
+        val stream = Ole2.open(item.file).use { ole -> ole.read("Workbook") ?: ole.read("Book") }
+        requireNotNull(stream) {
+            "这个 OLE 文件里没有 Excel 的工作簿流；可能是 Word/PowerPoint，或文件已损坏"
+        }
+        require(stream.size <= 64 * 1024 * 1024) { "工作簿流 ${stream.size / 1024 / 1024} MB，超过 64 MB 上限" }
+        val result = Biff.read(stream)
+        val head = ArrayList(result.notes)
+        head.add(0, "Excel 97-2003 · ${result.sheets.size} 张表")
+        return Biff.Result(result.sheets, head)
     }
 
     /** 一次读入：哪张表读成了、哪张读不成为什么，一起带回去。 */

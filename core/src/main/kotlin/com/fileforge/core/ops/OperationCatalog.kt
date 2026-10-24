@@ -65,6 +65,10 @@ enum class OperationKind(val label: String, val hint: String) {
     TextToPdf("印成 PDF", "按文件里的结构排：标题抬字号、列表画记号、表格画成横平竖直的网格，自动断行分页"),
     OfficeToText("Word 演示提取文字", "docx / pptx 抽正文，丢了什么逐条写明"),
     XlsxToCsv("表格转 CSV", "每张表一份 CSV，日期不再是序列号"),
+    XlsToCsv("XLS 转 CSV", "Excel 97-2003，每张表一份 CSV"),
+    XlsToXlsx("XLS 写成 XLSX", "旧版工作簿搬成新格式，每张表都留着"),
+    DocToText("DOC 提取文字", "Word 97-2003 按 piece table 抽正文"),
+    PptToText("PPT 提取文字", "PowerPoint 97-2003 按记录树抽正文"),
     XlsxToHtml("Excel 转网页", "每张表一块表格，浏览器直接打开；行列按文件里的位置对齐"),
     XlsxToMarkdown("Excel 转 Markdown", "表名当小标题，一张表一节"),
     TextToOdt("写成 ODT", "LibreOffice / OpenOffice 的默认格式：标题层级、列表、表格与链接都留着"),
@@ -163,6 +167,9 @@ enum class OperationKind(val label: String, val hint: String) {
             // ICO 是容器（多个尺寸），不在这里拆；GIF 只认第一帧，与抽首帧同一条读法。
             OcrText -> (fileKind.isImage && fileKind != FileKind.Ico) || fileKind == FileKind.Pdf
             MobiToText, MobiToEpub -> fileKind == FileKind.Mobi
+            XlsToCsv, XlsToXlsx -> fileKind == FileKind.Xls
+            DocToText -> fileKind == FileKind.Doc
+            PptToText -> fileKind == FileKind.Ppt
             CompressGif, GifToImages, GifWatermark -> fileKind == FileKind.Gif
             ImagesToGif -> fileKind.isImage
             VideoToGif, VideoToImage, VideoTrim -> fileKind.isVideo
