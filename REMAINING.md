@@ -2,13 +2,10 @@
 
 当前状态：0.58.0 已发布（`https://github.com/EzrealRh/FileForge/releases/tag/v0.58.0`，asset `fileforge-v0.58.0-release.apk`，54,611,235 字节）；
 `gate69` 闸门 **986 步 0 红**；版本 0.58.0 / versionCode 74 已推送。
-**0.58 远端 sha256 回读还没跑完**（`D:/fflogs/check_release_0580.py` 后台下载被断电打断；本机 sha256 `e4aa5a617bbeedc8f0db61bb53f35fee2b8fbeaa249105ce7aace5133a18462c`）。
-
-## P0（恢复后第一件事）
-
-- **回读 0.58.0 远端资产**：`cd D:/fflogs && PYTHONIOENCODING=utf-8 python check_release_0580.py v0.58.0`；
-  应看到远端字节/sha256 与本地一致，且 dex 里有 `视频烧字幕`（脚本里的 marker）。
-- 回读通过后把本节状态改成“已核对”，`LOCAL-PATHS.md` 已指向 `gate69`。
+**0.58 远端资产已核对**：GitHub API 给的 `digest` 为
+`sha256:e4aa5a617bbeedc8f0db61bb53f35fee2b8fbeaa249105ce7aace5133a18462c`，与本机 sha256 完全一致；
+asset 大小 54,611,235 字节也一致（远端字节与本地同一份，本地 dex 已确认含 `视频烧字幕`）。
+`check_release_0580.py` 的整包下载因网速太慢被停掉，改用 API digest 核对（不需要再跑）。
 
 ## P1（已有实现，还差真机/外挂路径）
 
