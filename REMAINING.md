@@ -1,15 +1,15 @@
 # 还要做的（0.58 起）
 
-当前状态：0.57.0 代码已推送；`gate68` 闸门 **986 步 0 红**；APK 已出（`app/build/outputs/apk/release/fileforge-v0.57.0-release.apk`）。
-0.57.0 Release 已发（asset 已挂）；远端 sha256 回读还没做。
+当前状态：0.57.0 已发并回读核对（远端字节/sha256 与 dex「解压 7z」一致）；`gate68` 闸门 **986 步 0 红**。
+0.58 开发中：OCR 已实现并真机验过（中文图片 8/8、两页图片型 PDF 页界），音频合并已真机逐样本验过。
 
-## P0
+## 已完成（0.58）
 
-- **回读 0.57.0 远端资产**：用 `D:/fflogs/check_release_0570.py` 核 sha256 与 dex 里的「解压 7z」；更新 `LOCAL-PATHS.md` 到 `gate68`。
-- **OCR（图片 / 扫描 PDF 提字）**：依赖已确认可取 —— `com.google.mlkit:text-recognition-chinese:16.0.1`（2 MB AAR，内置中文 Hani 与拉丁模型，离线）。
-  要做：`OcrEngine`（`Tasks.await` 调 ML Kit）+ `ImageOcr` / `PdfOcr`（`PdfRenderer` 逐页渲染）+ 目录/界面/入口；
-  真机用「中文文字图片」与「图片型 PDF」各验一次，确认输出文字与页分隔。
-- **音频合并真机验证**：目前只有 `Pcm16Test`（拼接/采样率校验）与音量/降噪的真机证据；合并要选两段真机跑一次。
+- **0.57.0 远端回读**：`D:/fflogs/check_release_0570.py` 通过；`LOCAL-PATHS.md` 已指向 `gate68`。
+- **OCR（图片 / 扫描 PDF 提字）**：`com.google.mlkit:text-recognition-chinese:16.0.1`（AAR 自带 Hani/Latn 模型与检测器）。
+  `OcrEngine` 用 `Tasks.await`；图片整张认，PDF 用 `PdfRenderer` 逐页渲染（长边 2200、先刷白底）；输出 txt 带页界；
+  飞行模式下真机验过（`D:/fflogs/device-ocr.txt`：图片 4/4、PDF 4/4）。
+- **音频合并真机验证**：两支 WAV 多选合并，产物 132300 样本与两段原文件逐样本一致（`D:/fflogs/pulled-ocr/merge.wav`）。
 
 ## P1
 

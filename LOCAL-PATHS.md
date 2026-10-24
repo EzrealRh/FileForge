@@ -45,7 +45,7 @@
 
 | 路径 | 是什么 |
 | --- | --- |
-| `gateNN.sh` + `gateNN.log` | 发版闸门（串行跑全部判据与反例、重出包、重刷产物、复核）。当前是 `gate67.sh`（面向 0.56.0）→ `gate67.log`：986 步 0 红；上一轮 `gate66.sh` → `gate66.log`：954 步 0 红 |
+| `gateNN.sh` + `gateNN.log` | 发版闸门（串行跑全部判据与反例、重出包、重刷产物、复核）。当前是 `gate68.sh`（面向 0.57.0）→ `gate68.log`：986 步 0 红；上一轮 `gate67.sh` → `gate67.log`：986 步 0 红 |
 | `device_*.py` | 真机驱动：`device_image.py`（改图片方向这一族）、`device_extra.py`（BMP/TIFF 与 GIF/ICO）、`device_pdf.py` / `device_insert.py`（PDF 新操作）、`device_audio.py`（音量/降噪）、`device_eo.py`（EPUB / ODS 印成 PDF）、`device_xlsx.py`、`device_diag.py`、`device_sheet_list.py`、`device_epub_msg.py`；日志 `device-*.txt` |
 | `make_release.py`、`check_release.py` | 发 GitHub Release（带包与说明）与**发完后按 sha256 回读远端资产** |
 | `notes-05xx.md` | 每个版本的 Release 说明正文（发版脚本 `--notes-file` 指它） |

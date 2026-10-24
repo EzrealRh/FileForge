@@ -20,6 +20,7 @@ enum class OperationKind(val label: String, val hint: String) {
     RotatePdfPages("PDF 旋转页面", "整份或指定页，90 的倍数"),
     MergePdfs("合并 PDF", "按选中顺序拼成一份"),
     PdfToText("PDF 提取文字", "输出 txt，可以只要几页"),
+    OcrText("OCR 提取文字", "图片与扫描 PDF 提字，中文+英文，离线"),
     PdfToDocx("PDF 转 Word", "按字号与位置还原标题、列表与段落"),
     PdfToCsv("PDF 表格转 CSV", "按列对齐的行还原成格子，一表一份"),
     PdfToXlsx("PDF 写成 Excel", "认出的表逐张成工作表，跨页的接起来"),
@@ -152,6 +153,9 @@ enum class OperationKind(val label: String, val hint: String) {
             PdfToCsv, PdfToXlsx, InsertBlankPages, CropPdfPages, ExtractPdfImages, SplitPdfByOutline,
             PdfToEpub,
             -> fileKind == FileKind.Pdf
+            // OCR 是"认画面上有什么"：图片按整张认，PDF 逐页渲染再认。
+            // ICO 是容器（多个尺寸），不在这里拆；GIF 只认第一帧，与抽首帧同一条读法。
+            OcrText -> (fileKind.isImage && fileKind != FileKind.Ico) || fileKind == FileKind.Pdf
             CompressGif, GifToImages, GifWatermark -> fileKind == FileKind.Gif
             ImagesToGif -> fileKind.isImage
             VideoToGif, VideoToImage, VideoTrim -> fileKind.isVideo

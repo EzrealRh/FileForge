@@ -376,6 +376,15 @@ class Parameters(
                 PageSpecField("留空=全文；也可只要几页，例：1-3,7", "只抽文字层；扫描件没有文字层，得走「每页导出图片」")
                 items.forEach { Summary("${it.name} · ${it.sizeLabel}") }
             }
+            OperationKind.OcrText -> {
+                if (items.any { it.kind == FileKind.Pdf }) {
+                    PageSpecField("留空=整份；也可只要几页，例：1-3,7", "逐页按画面认字，页与页之间留页界")
+                }
+                Summary("本地离线识别（中文 + 英文），画面不出设备，也不下载模型。")
+                Summary("图片整张认；PDF 逐页渲染后认 —— 扫描件没有文字层也能出字。")
+                Summary("认的是画面：表格会被摊成一行行，普通 PDF 要原文请优先用「PDF 提取文字」。")
+                items.forEach { Summary("${it.name} · ${it.sizeLabel}") }
+            }
             OperationKind.PdfToDocx -> {
                 PageSpecField("留空=整份；也可只要几页，例：1-3,7", "结构是按字号与位置推的：推不出来的（多栏读序、表格线、图片）会照实说明")
                 Summary("标题按大小排层级，列表的圆点与编号交给 Word 画，被折开的行并回一段。")
@@ -1375,6 +1384,7 @@ class Parameters(
             OperationKind.RemovePdfPages -> Operation.RemovePdfPages(pageSpec)
             OperationKind.RotatePdfPages -> Operation.RotatePdfPages(pageSpec.trim(), ROTATE_OPTIONS[rotateIndex].second)
             OperationKind.PdfToText -> Operation.PdfToText(pageSpec.trim())
+            OperationKind.OcrText -> Operation.OcrText(pageSpec.trim())
             OperationKind.PdfToDocx -> Operation.PdfToDocx(pageSpec.trim())
             OperationKind.PdfToCsv -> Operation.PdfToCsv(pageSpec.trim())
             OperationKind.PdfToXlsx -> Operation.PdfToXlsx(pageSpec.trim())

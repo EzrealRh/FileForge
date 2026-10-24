@@ -31,6 +31,7 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
     private val archives = ArchiveEngine()
     private val office = OfficeEngine(workspace)
     private val book = BookEngine(workspace)
+    private val ocr = OcrEngine(workspace)
 
     suspend fun run(
         items: List<WorkItem>,
@@ -474,6 +475,11 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
             }
             is Operation.PdfToEpub -> items.forEach { item ->
                 collect(item.name) { listOf(pdf.toEpub(item, operation)) }
+            }
+            is Operation.OcrText -> items.forEach { item ->
+                collect(item.name) {
+                    listOf(ocr.recognize(item, operation) { percent -> onProgress(percent, item.name) })
+                }
             }
         }
 

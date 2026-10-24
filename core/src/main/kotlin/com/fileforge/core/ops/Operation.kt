@@ -370,6 +370,16 @@ sealed interface Operation {
     }
 
     /**
+     * 离线 OCR：图片直接认，PDF 逐页渲染后认。
+     *
+     * PDF 走的是 [spec] 页码范围（留空=整份）；扫描件没有文字层，这一步不看原来有没有字，
+     * 认出来的是"画面上有什么"。输出一份 txt，页与页之间留页界。
+     */
+    data class OcrText(val spec: String = "") : Operation {
+        override val label get() = "识别文字"
+    }
+
+    /**
      * PDF → Word：把"画在纸上的样子"还原成文档结构（标题层级、列表、段落），写进一份 .docx。
      *
      * spec 留空表示整份，多段用页码范围写。PDF 里没有"标题"这一层，所以层级是按字号与位置**推**的：

@@ -85,6 +85,7 @@ dependencies {
     implementation(libs.junrar)
     implementation(libs.zip4j)
     implementation(libs.slf4j.nop)
+    implementation(libs.mlkit.text.recognition.chinese)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
 
