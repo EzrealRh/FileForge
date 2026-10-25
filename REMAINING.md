@@ -1,14 +1,23 @@
 # 还要做的（0.59 起）
 
-当前状态：0.58.0 已发布（`https://github.com/EzrealRh/FileForge/releases/tag/v0.58.0`，asset `fileforge-v0.58.0-release.apk`，54,611,235 字节）；
-`gate69` 闸门 **986 步 0 红**；版本 0.58.0 / versionCode 74 已推送。
-**0.58 远端资产已核对**：GitHub API 给的 `digest` 为
-`sha256:e4aa5a617bbeedc8f0db61bb53f35fee2b8fbeaa249105ce7aace5133a18462c`，与本机 sha256 完全一致；
-asset 大小 54,611,235 字节也一致（远端字节与本地同一份，本地 dex 已确认含 `视频烧字幕`）。
-`check_release_0580.py` 的整包下载因网速太慢被停掉，改用 API digest 核对（不需要再跑）。
+当前状态：0.59.0 已发布（`https://github.com/EzrealRh/FileForge/releases/tag/v0.59.0`，asset `fileforge-v0.59.0-release.apk`，54,611,235 字节）；
+`gate70` 闸门 **986 步 0 红**；版本 0.59.0 / versionCode 75 已推送。
+**0.59 远端资产已核对**：GitHub API 的 `digest` 为
+`sha256:688c67d03e4cfec0d1dd35d2b5d23b2f70c4dfa9354bde7782113c6ef2fe4997`，与本机 sha256 一致；
+asset 大小也一致，本机 release dex 里搜得到多行水印文案「每一行都会落在画面上」（`check_release_0590.py` 退出 0，没有整包下载）。
+
+## 本阶段已完成（0.59.0）
+
+- **图片 / GIF / 视频水印支持多行文字**：换行即分行；单处与平铺都按整块对齐；单行落位与倾斜轴保持原样。
+  - core：`WatermarkTextTest` 4 例（CRLF/CR、行内空白、首尾空行丢掉、中间空行保留、短行按对齐缩进、块高递推），core 共 939 例。
+  - app：`ParametersPanelTest` 2 例（换行原样进操作、只有换行/空白仍拦下），app 共 33 例。
+  - 像素：`WatermarkDrawTest` 用 Robolectric 原生图形把「AAA / BBB」真画到 400×400 画布，逐行数非透明像素，断言单行一条字带、两行两条字带且中间留空。
+- 发布证据：`D:/fflogs/gate70.log` 末行 `OK 条数 986  RED 条数 0`；`D:/fflogs/notes-0590.md` 带本次 SHA256；
+  `D:/fflogs/check_release_0590.py` 用 API digest 回读，不下载 54MB 整包。
 
 ## P1（已有实现，还差真机/外挂路径）
 
+- **0.59 多行水印的真机 UI**：输入框已换成 1~4 行，产物要用真机人眼确认一次（本阶段只到 Robolectric 原生图形，未起模拟器）。
 - **DOC / PPT 真机各跑一次**：解析在 JVM 真实夹具上验过（POI 的 `simple.doc` / `simple.ppt`），
   OLE2 与类型细化由 XLS 真机覆盖；但 `DOC 提取文字` / `PPT 提取文字` 的 UI 入口还没单独真机跑。
 - **外挂字幕烧进视频的真机验证**：目前真机烧的是视频自带的 mov_text 轨；工作台选 `subs.srt` 那一路还没单独跑
@@ -24,15 +33,13 @@ asset 大小 54,611,235 字节也一致（远端字节与本地同一份，本�
 - 数据：SQL / Parquet。
 - 元数据清理扩展到 WebP / HEIC；图片加密（或明确不做）。
 
-## 0.58 的验证证据（断电前已落盘）
+## 下一阶段候选
 
-- 视频 18/18：`D:/fflogs/check_video_outputs.py` → `video-checks.txt`；裁画面 320×180 全红块、水印中心亮像素 0→1236、
-  烧字幕三帧像素、MKV/MP4 抽字幕文本与 0.5/2.0 秒时间轴。
-- OCR：`D:/fflogs/device-ocr.txt`（飞行模式，图片 4/4、PDF 4/4）；音频合并：`D:/fflogs/pulled-ocr/merge.wav`。
-- XLS：`D:/fflogs/device-xls.txt` 与 `pulled-xls/sheet1.csv`、`sheet2.csv`（两张表、日期、带逗号、007）。
-- 闸门：`D:/fflogs/gate69.log` 末尾 `OK 条数 986  RED 条数 0`。
-- 0.58 包比 0.57 大约 5 倍：ML Kit OCR 的 native 库带了 arm64-v8a / armeabi-v7a / x86 / x86_64 四套；
-  若要减体积可在 release 里只留前两套（代价是 x86 模拟器/Chromebook 跑不了）。
+- 修水印「左下」：面板选左下时，文字与 Logo 现在都画在底部中间（`ImageEngine` 两处 `spotX` 把 2 与 0 一起居中），
+  要补一条数墨迹位置的像素判据；已有产物会从底部中间换到真的左下。详见 `TODO.md`。
+- 视频截取的段预览（选段前先看那一秒的画面）。
+- 操作参数面板的小结文案统一。
+- 上面 P1 的真机验证。
 
 ## 每次重活的铁律（本机 16 GB）
 
@@ -43,4 +50,6 @@ asset 大小 54,611,235 字节也一致（远端字节与本地同一份，本�
 3. 每步前看 `D:/crashwatch/watch.log`：`commitPct >= 85` 或 `memAvailMB < 800` 立即停并报告。
 4. `gradle.properties` 里的 2g / 4 workers / 不并行不要覆盖。
 5. 发版/判据/模拟器不要与第二个会话或 Computer Use 同时跑。
-6. 推送 TLS 抖动时用 `git -c http.version=HTTP/1.1 push origin HEAD`。
+6. 推送 TLS 抖动时先试 `git -c http.version=HTTP/1.1 push origin HEAD`；Clash 7897 节点 502 时直接绕过代理：
+   `git -c http.https://github.com.proxy= -c http.version=HTTP/1.1 push origin HEAD`（本机直连 github.com 间歇可用，
+   `api.github.com` 直连稳定）。

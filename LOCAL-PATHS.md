@@ -45,9 +45,9 @@
 
 | 路径 | 是什么 |
 | --- | --- |
-| `gateNN.sh` + `gateNN.log` | 发版闸门（串行跑全部判据与反例、重出包、重刷产物、复核）。当前是 `gate69.sh`（面向 0.58.0）→ `gate69.log`：986 步 0 红；上一轮 `gate68.sh` → `gate68.log`：986 步 0 红 |
+| `gateNN.sh` + `gateNN.log` | 发版闸门（串行跑全部判据与反例、重出包、重刷产物、复核）。当前是 `gate70.sh`（面向 0.59.0）→ `gate70.log`：986 步 0 红；上一轮 `gate69.sh` → `gate69.log`：986 步 0 红 |
 | `device_*.py` | 真机驱动：`device_image.py`（改图片方向这一族）、`device_extra.py`（BMP/TIFF 与 GIF/ICO）、`device_pdf.py` / `device_insert.py`（PDF 新操作）、`device_audio.py`（音量/降噪）、`device_eo.py`（EPUB / ODS 印成 PDF）、`device_xlsx.py`、`device_diag.py`、`device_sheet_list.py`、`device_epub_msg.py`；日志 `device-*.txt` |
-| `make_release.py`、`check_release.py` | 发 GitHub Release（带包与说明）与**发完后按 sha256 回读远端资产** |
+| `make_release.py`、`check_release.py` | 发 GitHub Release（带包与说明）与**发完后按 sha256 回读远端资产**；0.59 用 `make_release_0590.py` / `check_release_0590.py`（后者读 API digest，不下载整包） |
 | `notes-05xx.md` | 每个版本的 Release 说明正文（发版脚本 `--notes-file` 指它） |
 | `pdfprobe/`、`imgprobe/` | 探针的编译产物与输出缓存（`PDFPROBE_OUT` / `IMGPROBE_OUT` 的默认值；闸门里显式传这两个） |
 | `pulled-eo/`、`pulled-image/`、`pulled-*/` | 从手机共享存储拉回来的产物，判据读的就是这些 |
@@ -74,6 +74,8 @@
 4. **`GRADLE_USER_HOME` 一定要显式带**（前提 3）；反例脚本与闸门里都写死了 `D:/gradle-home`。
 5. **`tools/updateprobe/run.sh` 会打线上接口**（GitHub Releases 的公开 API，不带任何凭据），它不在闸门里；发版之后的核对走"远端资产 sha256 回读"（本机用 `D:/fflogs/check_release.py`）。
 6. **Windows 的两个编码坑一直在背景上生效**：命令行参数走 cp936（所以判据与夹具都写成 UTF-8 的 `.py` 文件而不是内联 heredoc，Java 侧统一带 `-Dstdout.encoding=UTF-8 -Dsun.stderr.encoding=UTF-8`），以及 MSYS 会把像路径的参数改写（所以往设备发文本要 `MSYS_NO_PATHCONV=1`）。
+7. **推送 TLS 抖动的两条退路**：先试 `git -c http.version=HTTP/1.1 push origin HEAD`；如果 Clash 的 7897 节点自己 502（`curl -x http://127.0.0.1:7897 http://www.gstatic.com/generate_204` 回 502），改为绕过代理直连：
+   `git -c http.https://github.com.proxy= -c http.version=HTTP/1.1 push origin HEAD`。本机 `api.github.com` 直连稳定，`gh release` 不受影响；`github.com` 直连间歇可用，失败再换回代理。
 
 ## 6 一次性把上面核一遍
 
