@@ -90,7 +90,7 @@ class VideoEffectEngine(
                 )
                 effects = listOf(OverlayEffect(listOf(BitmapOverlay.createStaticBitmapOverlay(overlay))))
                 tag = "水印"
-                notes += "「${operation.text.trim().take(12)}」· ${operation.opacityPercent.coerceIn(3, 100)}% 不透明"
+                notes += "「${operation.text.trim().replace('\n', ' ').take(12)}」· ${operation.opacityPercent.coerceIn(3, 100)}% 不透明"
             }
             is Operation.BurnSubtitles -> {
                 val picked = operation.subtitleFrom.trim()

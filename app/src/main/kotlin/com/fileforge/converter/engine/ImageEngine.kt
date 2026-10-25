@@ -9,6 +9,8 @@ import com.fileforge.core.data.IcoImage
 import com.fileforge.core.image.Flip
 import com.fileforge.core.image.ImageGeometry
 import com.fileforge.core.image.RasterFormats
+import com.fileforge.core.image.WatermarkAlign
+import com.fileforge.core.image.WatermarkText
 import com.fileforge.core.meta.ImageMeta
 import com.fileforge.core.model.FileKind
 import com.fileforge.core.naming.OutputNaming
@@ -141,7 +143,8 @@ class ImageEngine {
         val bytes = encode(painted, format, 92)
         painted.recycle()
         val placement = if (operation.tiled) "平铺" else SPOT_LABELS.getOrElse(operation.spot) { "居中" }
-        val what = if (logoFile != null) "Logo「${logoFile.nameWithoutExtension.take(12)}」" else "「${operation.text.trim().take(12)}」"
+        val what = if (logoFile != null) "Logo「${logoFile.nameWithoutExtension.take(12)}」" else
+            "「${operation.text.trim().replace('\n', ' ').take(12)}」"
         return EngineOutput(
             OutputNaming.tagged(item.name, "水印", format.extension),
             staging(format.extension).apply { writeBytes(bytes) },
@@ -149,7 +152,7 @@ class ImageEngine {
         )
     }
 
-    /** 文字水印的绘制：图片水印与 GIF 逐帧水印共用。 */
+    /** 文字水印的绘制：图片水印与 GIF 逐帧水印共用；换行按用户写的那样分到画面上。 */
     fun drawTextWatermark(
         target: Bitmap,
         text: String,
@@ -165,28 +168,45 @@ class ImageEngine {
             textSize = max(target.width, target.height) / 14f * sizePercent.coerceIn(20, 400) / 100f
             setShadowLayer(6f, 2f, 2f, android.graphics.Color.argb(110, 0, 0, 0))
         }
-        val textWidth = paint.measureText(text)
+        val align = when {
+            tiled -> WatermarkAlign.CENTER
+            spot.coerceIn(0, 4) == 2 || spot.coerceIn(0, 4) == 4 -> WatermarkAlign.LEFT
+            spot.coerceIn(0, 4) == 1 || spot.coerceIn(0, 4) == 3 -> WatermarkAlign.RIGHT
+            else -> WatermarkAlign.CENTER
+        }
+        val block = WatermarkText.layout(text, { line -> paint.measureText(line) }, align)
+        if (block.isEmpty) return
         val metrics = paint.fontMetrics
         val textHeight = metrics.descent - metrics.ascent
+        val lineStep = textHeight * WatermarkText.LINE_SPACING
+        val blockHeight = block.height(lineStep, textHeight)
         val margin = max(target.width, target.height) / 30f
+        val single = block.lines.size == 1
 
-        fun drawOne(x: Float, y: Float) {
+        fun drawBlock(left: Float, top: Float) {
             canvas.save()
-            if (tilt != 0) canvas.rotate(tilt.toFloat(), x + textWidth / 2f, y)
-            canvas.drawText(text, x, y, paint)
+            if (tilt != 0) {
+                // 单行绕基线中心转，跟老版本的位置对得上；多行绕整块中心转，行才不会各转各的
+                val pivotY = if (single) top - metrics.ascent else top + blockHeight / 2f
+                canvas.rotate(tilt.toFloat(), left + block.width / 2f, pivotY)
+            }
+            block.lines.forEachIndexed { index, line ->
+                canvas.drawText(line.text, left + line.left, top + index * lineStep - metrics.ascent, paint)
+            }
             canvas.restore()
         }
 
         if (tiled) {
-            val stepX = textWidth + margin * 2f
-            val stepY = textHeight + margin * 2f
+            val stepX = block.width + margin * 2f
+            val stepY = blockHeight + margin * 2f
             var row = 0
-            var y = -textHeight
-            while (y < target.height + textHeight) {
+            // 单行从老版本的基线起点往上退一个字高，铺出来的格子跟以前一致
+            var y = -blockHeight + if (single) metrics.ascent else 0f
+            while (y < target.height + blockHeight) {
                 // 隔行错位半格：铺出来才是水印的样子，不是表格
-                var x = -textWidth + if (row % 2 == 0) 0f else stepX / 2f
+                var x = -block.width + if (row % 2 == 0) 0f else stepX / 2f
                 while (x < target.width) {
-                    drawOne(x, y)
+                    drawBlock(x, y)
                     x += stepX
                 }
                 y += stepY
@@ -194,16 +214,25 @@ class ImageEngine {
             }
         } else {
             val spotX = when (spot.coerceIn(0, 4)) {
-                0, 2 -> (target.width - textWidth) / 2f
-                1, 3 -> target.width - textWidth - margin
+                0, 2 -> (target.width - block.width) / 2f
+                1, 3 -> target.width - block.width - margin
                 else -> margin
             }
-            val spotY = when (spot.coerceIn(0, 4)) {
-                0 -> (target.height + textHeight) / 2f
-                1, 2 -> target.height - metrics.descent - margin
-                else -> margin - metrics.ascent
+            val spotY = if (single) {
+                val baseline = when (spot.coerceIn(0, 4)) {
+                    0 -> (target.height + textHeight) / 2f
+                    1, 2 -> target.height - metrics.descent - margin
+                    else -> margin - metrics.ascent
+                }
+                baseline + metrics.ascent
+            } else {
+                when (spot.coerceIn(0, 4)) {
+                    0 -> (target.height - blockHeight) / 2f
+                    1, 2 -> target.height - blockHeight - margin
+                    else -> margin
+                }
             }
-            drawOne(spotX, spotY)
+            drawBlock(spotX, spotY)
         }
     }
 

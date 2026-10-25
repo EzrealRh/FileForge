@@ -469,7 +469,9 @@ class Parameters(
                     value = imageWatermarkText,
                     onValueChange = { imageWatermarkText = it },
                     label = { Text("水印文字") },
-                    singleLine = true,
+                    supportingText = { Text("可以换行：每一行都会落在画面上") },
+                    minLines = 1,
+                    maxLines = 4,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Segmented("位置", listOf("居中", "右下", "左下", "右上", "左上"), imageWatermarkSpot) {
@@ -627,8 +629,9 @@ class Parameters(
                     value = imageWatermarkText,
                     onValueChange = { imageWatermarkText = it },
                     label = { Text("水印文字") },
-                    supportingText = { Text("选了 Logo 图就盖图，没选就盖文字") },
-                    singleLine = true,
+                    supportingText = { Text("选了 Logo 图就盖图，没选就盖文字；文字可以换行") },
+                    minLines = 1,
+                    maxLines = 4,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 // Logo 从工作台里挑：选中要加水印的这几张不会出现在候选里
@@ -687,7 +690,9 @@ class Parameters(
                     value = imageWatermarkText,
                     onValueChange = { imageWatermarkText = it },
                     label = { Text("水印文字") },
-                    singleLine = true,
+                    supportingText = { Text("可以换行：每一行都会落在画面上") },
+                    minLines = 1,
+                    maxLines = 4,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Segmented("位置", listOf("居中", "右下", "左下", "右上", "左上"), imageWatermarkSpot) {

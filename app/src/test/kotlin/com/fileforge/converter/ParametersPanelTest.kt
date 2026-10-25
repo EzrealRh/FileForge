@@ -75,6 +75,29 @@ class ParametersPanelTest {
     }
 
     @Test
+    fun `水印文字里的换行原样带进操作`() {
+        val image = Parameters(OperationKind.ImageWatermark, listOf(item("p.jpg", FileKind.Jpeg))).apply {
+            imageWatermarkText = "第一行\n第二行"
+        }
+        assertNull(image.validation())
+        assertEquals("第一行\n第二行", (image.build() as Operation.ImageWatermark).text)
+
+        val video = Parameters(OperationKind.VideoWatermark, listOf(video())).apply {
+            imageWatermarkText = "上\n下"
+        }
+        assertNull(video.validation())
+        assertEquals("上\n下", (video.build() as Operation.VideoWatermark).text)
+    }
+
+    @Test
+    fun `只有换行和空白的文字仍要拦下`() {
+        val draft = Parameters(OperationKind.GifWatermark, listOf(item("a.gif", FileKind.Gif))).apply {
+            imageWatermarkText = "  \n \n"
+        }
+        assertTrue(draft.validation()!!.contains("水印文字"))
+    }
+
+    @Test
     fun `Logo 图按名挂进操作`() {
         val draft = Parameters(OperationKind.ImageWatermark, listOf(item("p.jpg", FileKind.Jpeg))).apply {
             imageWatermarkText = ""
