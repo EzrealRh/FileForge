@@ -1,23 +1,32 @@
-# 还要做的（0.59 起）
+# 还要做的（0.60 起）
 
-当前状态：0.59.0 已发布（`https://github.com/EzrealRh/FileForge/releases/tag/v0.59.0`，asset `fileforge-v0.59.0-release.apk`，54,611,235 字节）；
-`gate70` 闸门 **986 步 0 红**；版本 0.59.0 / versionCode 75 已推送。
-**0.59 远端资产已核对**：GitHub API 的 `digest` 为
-`sha256:688c67d03e4cfec0d1dd35d2b5d23b2f70c4dfa9354bde7782113c6ef2fe4997`，与本机 sha256 一致；
-asset 大小也一致，本机 release dex 里搜得到多行水印文案「每一行都会落在画面上」（`check_release_0590.py` 退出 0，没有整包下载）。
+当前状态：0.60.0 已发布（`https://github.com/EzrealRh/FileForge/releases/tag/v0.60.0`，asset `fileforge-v0.60.0-release.apk`，54,611,235 字节）；
+`gate71` 闸门 **986 步 0 红**；版本 0.60.0 / versionCode 76 已推送。
+**0.60 远端资产已核对**：GitHub API 的 `digest` 为
+`sha256:a89a1fc5e00943b8d85c347e7b365db8a640142940b1fb0ac92e9204b122805d`，与本机 sha256 一致；
+asset 大小也一致，本机 aapt2 读出的包版本是 `0.60.0 / 76`（`check_release_0600.py` 退出 0，没有整包下载）。
 
-## 本阶段已完成（0.59.0）
+## 已完成
 
-- **图片 / GIF / 视频水印支持多行文字**：换行即分行；单处与平铺都按整块对齐；单行落位与倾斜轴保持原样。
-  - core：`WatermarkTextTest` 4 例（CRLF/CR、行内空白、首尾空行丢掉、中间空行保留、短行按对齐缩进、块高递推），core 共 939 例。
-  - app：`ParametersPanelTest` 2 例（换行原样进操作、只有换行/空白仍拦下），app 共 33 例。
-  - 像素：`WatermarkDrawTest` 用 Robolectric 原生图形把「AAA / BBB」真画到 400×400 画布，逐行数非透明像素，断言单行一条字带、两行两条字带且中间留空。
-- 发布证据：`D:/fflogs/gate70.log` 末行 `OK 条数 986  RED 条数 0`；`D:/fflogs/notes-0590.md` 带本次 SHA256；
-  `D:/fflogs/check_release_0590.py` 用 API digest 回读，不下载 54MB 整包。
+### 0.60.0 · 水印「左下」落位
+
+- `ImageEngine` 的文字与 Logo 两处 `spotX` 不再把 2 与 0 一起居中：选左下时真的贴左下。
+- `WatermarkDrawTest` 新增墨迹边界判据：改前红（文字左边距 150px），改后绿（贴左边距 13px）；
+  文字与 Logo 各量一次，底边同时断言贴底。
+- 多行水印在左下按整块左对齐，短行往左缩进。
+
+### 0.59.0 · 水印多行文字
+
+- 图片 / GIF / 视频水印换行即分行；单处与平铺都按整块对齐；单行落位与倾斜轴保持原样。
+- core `WatermarkTextTest` 4 例（CRLF/CR、行内空白、首尾空行丢掉、中间空行保留、短行按对齐缩进、块高递推），core 共 939 例。
+- app `ParametersPanelTest` 2 例（换行原样进操作、只有换行/空白仍拦下）；app 全量 34 例。
+- 像素 `WatermarkDrawTest`：Robolectric 原生图形把「AAA / BBB」真画到 400×400 画布，逐行数非透明像素，
+  断言单行一条字带、两行两条字带且中间留空。
 
 ## P1（已有实现，还差真机/外挂路径）
 
-- **0.59 多行水印的真机 UI**：输入框已换成 1~4 行，产物要用真机人眼确认一次（本阶段只到 Robolectric 原生图形，未起模拟器）。
+- **水印真机 UI**：0.59 的多行输入框（1~4 行）与 0.60 的左下落位，要用真机人眼确认一次
+  （本阶段只到 Robolectric 原生图形，未起模拟器）。
 - **DOC / PPT 真机各跑一次**：解析在 JVM 真实夹具上验过（POI 的 `simple.doc` / `simple.ppt`），
   OLE2 与类型细化由 XLS 真机覆盖；但 `DOC 提取文字` / `PPT 提取文字` 的 UI 入口还没单独真机跑。
 - **外挂字幕烧进视频的真机验证**：目前真机烧的是视频自带的 mov_text 轨；工作台选 `subs.srt` 那一路还没单独跑
@@ -35,8 +44,6 @@ asset 大小也一致，本机 release dex 里搜得到多行水印文案「每�
 
 ## 下一阶段候选
 
-- 修水印「左下」：面板选左下时，文字与 Logo 现在都画在底部中间（`ImageEngine` 两处 `spotX` 把 2 与 0 一起居中），
-  要补一条数墨迹位置的像素判据；已有产物会从底部中间换到真的左下。详见 `TODO.md`。
 - 视频截取的段预览（选段前先看那一秒的画面）。
 - 操作参数面板的小结文案统一。
 - 上面 P1 的真机验证。
