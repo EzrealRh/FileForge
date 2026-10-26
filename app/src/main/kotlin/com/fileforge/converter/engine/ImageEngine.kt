@@ -214,7 +214,7 @@ class ImageEngine {
             }
         } else {
             val spotX = when (spot.coerceIn(0, 4)) {
-                0, 2 -> (target.width - block.width) / 2f
+                0 -> (target.width - block.width) / 2f
                 1, 3 -> target.width - block.width - margin
                 else -> margin
             }
@@ -280,7 +280,7 @@ class ImageEngine {
             }
         } else {
             val spotX = when (spot.coerceIn(0, 4)) {
-                0, 2 -> (target.width - drawWidth) / 2f
+                0 -> (target.width - drawWidth) / 2f
                 1, 3 -> target.width - drawWidth - margin
                 else -> margin
             }
