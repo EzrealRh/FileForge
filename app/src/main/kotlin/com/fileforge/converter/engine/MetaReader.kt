@@ -126,7 +126,7 @@ class MetaReader {
      * 只读文件开头一小段：EXIF 和文本块都在像素之前，为一屏文字把整张图搬进堆没必要。
      */
     private fun metaFacts(file: File): List<Pair<String, String>> {
-        val report = ImageMeta.report(ImageMeta.head(file))
+        val report = ImageMeta.report(file)
         if (report.container == null) return emptyList()
         return buildList {
             if (report.fields.isEmpty()) add("元数据" to "只有段落结构，没读到字段")

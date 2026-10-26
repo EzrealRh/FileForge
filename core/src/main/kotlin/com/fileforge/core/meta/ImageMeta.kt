@@ -13,6 +13,7 @@ data class MetaReport(
     val container: ImageMeta.Container?,
     val fields: List<Pair<String, String>>,
     val pieces: List<Piece>,
+    val complete: Boolean = true,
 ) {
     val identifying: List<Piece> get() = pieces.filter { it.identifying }
     val nothingToClean: Boolean get() = container == null || identifying.isEmpty()
@@ -48,15 +49,17 @@ data class MetaReport(
      */
     val cleanBlocker: String?
         get() = when {
-            container == null -> "只有 JPEG 和 PNG 能做元数据清理"
+            container == null -> "只有 JPEG、PNG 和 WebP 能做元数据清理"
+            !complete -> "文件头写的长度与文件实际大小对不上，看着是残档，不重组"
             identifying.isEmpty() -> "这张本来就没有可清理的元数据"
-            pieces.none { it.name == terminator } -> "文件缺结束标记，看着是残档，不重组"
+            terminator != null && pieces.none { it.name == terminator } -> "文件缺结束标记，看着是残档，不重组"
             else -> null
         }
 
     private val terminator: String? get() = when (container) {
         ImageMeta.Container.Jpeg -> "EOI"
         ImageMeta.Container.Png -> "IEND"
+        ImageMeta.Container.WebP -> null
         null -> null
     }
 
@@ -65,28 +68,32 @@ data class MetaReport(
 /**
  * 图片元数据的查看与清理。
  *
- * 只支持 JPEG 与 PNG：它们是"发出去被人看到机型和拍摄地"的主要载体，而且清理能做到
- * **段级照抄、一个像素都不重编码**。HEIC / WebP / TIFF 的容器规则不一样，
- * 没做就直接拒，不拿一套解析器硬套出一张坏图。
+ * 支持 JPEG、PNG 与 WebP：它们是"发出去被人看到机型和拍摄地"的主要载体。
+ * JPEG / PNG 能做到**段级照抄、像素一字节不重编码**；WebP 是 RIFF 容器，
+ * 除了丢掉 EXIF / XMP 块，还要重算 RIFF 总长度并清掉 VP8X 里的对应标志位，
+ * 画面块本身仍按原字节照抄。HEIC / TIFF 的容器规则不一样，没做就直接拒。
  *
  * 拆段一律**记原始字节区间**，重组时从原数组照抄 —— 不重算 JPEG 的长度字段、
  * 不重算 PNG 的 CRC。这是唯一能保证"清完还打得开、画质一点没动"的写法。
  */
 object ImageMeta {
 
-    enum class Container(val label: String) { Jpeg("JPEG"), Png("PNG") }
+    enum class Container(val label: String) { Jpeg("JPEG"), Png("PNG"), WebP("WebP") }
 
     fun container(bytes: ByteArray): Container? = when {
         bytes.size > 2 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xD8.toByte() -> Container.Jpeg
         // 首字节 0x89 也是签名的一半：只看 "PNG" 三个字，任何这三个字开头的文件都会被当成 PNG 拆
         bytes.size > 8 && bytes[0] == 0x89.toByte() && bytes[1] == 'P'.code.toByte() &&
             bytes[2] == 'N'.code.toByte() && bytes[3] == 'G'.code.toByte() -> Container.Png
+        bytes.size >= 12 && bytes.startsWith("RIFF") &&
+            String(bytes, 8, 4, Charsets.ISO_8859_1) == "WEBP" -> Container.WebP
         else -> null
     }
 
     fun pieces(bytes: ByteArray): List<Piece> = when (container(bytes)) {
         Container.Jpeg -> jpegPieces(bytes)
         Container.Png -> pngPieces(bytes)
+        Container.WebP -> webpPieces(bytes)
         null -> emptyList()
     }
 
@@ -94,13 +101,25 @@ object ImageMeta {
         val which = container(bytes) ?: return MetaReport(null, emptyList(), emptyList())
         val found = pieces(bytes)
         val fields = ArrayList<Pair<String, String>>()
-        if (which == Container.Jpeg) {
-            exifPayload(bytes, found)?.let { fields += Tiff.read(it) }
-        } else {
-            pngChunk(bytes, "eXIf")?.let { fields += Tiff.read(it) }
-            pngTexts(bytes).forEach { fields += it }
+        when (which) {
+            Container.Jpeg -> exifPayload(bytes, found)?.let { fields += Tiff.read(it) }
+            Container.Png -> {
+                pngChunk(bytes, "eXIf")?.let { fields += Tiff.read(it) }
+                pngTexts(bytes).forEach { fields += it }
+            }
+            Container.WebP -> webpExifPayload(bytes, found)?.let { fields += Tiff.read(it) }
         }
-        return MetaReport(which, fields, found)
+        return MetaReport(which, fields, found, complete = which != Container.WebP || webpComplete(bytes))
+    }
+
+    /**
+     * 详情页用：WebP 的 EXIF 块常在像素数据后面，只读 1MB 前缀会漏掉。
+     * WebP 走随机读写只读块头与 EXIF 载荷，不把整张图搬进堆；其它容器照旧读前缀。
+     */
+    fun report(file: java.io.File): MetaReport {
+        val head = head(file)
+        if (container(head) != Container.WebP) return report(head)
+        return reportWebpFile(file)
     }
 
     /**
@@ -112,8 +131,9 @@ object ImageMeta {
      *    一模一样的假成品
      */
     fun clean(bytes: ByteArray): ByteArray? {
-        val which = container(bytes) ?: error("只支持 JPEG 和 PNG 的元数据清理")
+        val which = container(bytes) ?: error("只支持 JPEG、PNG 和 WebP 的元数据清理")
         val found = pieces(bytes)
+        if (which == Container.WebP) return cleanWebp(bytes, found)
         val terminator = if (which == Container.Jpeg) "EOI" else "IEND"
         if (found.none { it.name == terminator }) return null
         val keep = found.filterNot { it.identifying }
@@ -290,6 +310,137 @@ object ImageMeta {
             val key = payload.takeWhile { it != 0.toByte() }.toByteArray().toString(Charsets.ISO_8859_1)
             "${piece.name} 文本块" to (key.ifBlank { "无键名" } + " · ${piece.bytes} 字节")
         }
+
+    // ---- WebP ---------------------------------------------------------------
+
+    /**
+     * WebP 是 RIFF：头 12 字节里写着总长度，后面每个块 = 四字节名 + 小端长度 + 载荷 + 补齐字节。
+     * EXIF / XMP 算身份块；VP8X 的 flags 里也有这两位，清理时要一起清掉，否则文件头还在说"我有 EXIF"。
+     */
+    internal fun webpPieces(bytes: ByteArray): List<Piece> {
+        val out = ArrayList<Piece>()
+        out += Piece("RIFF 头", 0, 12, false)
+        var i = 12
+        while (i + 8 <= bytes.size) {
+            val fourcc = String(bytes, i, 4, Charsets.ISO_8859_1)
+            val size = u32le(bytes, i + 4)
+            val padded = size + (size and 1L)
+            if (size < 0 || i + 8L + padded > bytes.size) {
+                out += Piece("$fourcc（截断）", i, bytes.size, false)
+                break
+            }
+            val total = (8L + padded).toInt()
+            out += Piece(webpChunkName(fourcc), i, i + total, fourcc == "EXIF" || fourcc == "XMP ")
+            i += total
+        }
+        return out
+    }
+
+    private fun webpComplete(bytes: ByteArray): Boolean {
+        if (bytes.size < 12 || !bytes.startsWith("RIFF") ||
+            String(bytes, 8, 4, Charsets.ISO_8859_1) != "WEBP") return false
+        if (8L + u32le(bytes, 4) != bytes.size.toLong()) return false
+        var i = 12
+        while (i < bytes.size) {
+            if (i + 8 > bytes.size) return false
+            val size = u32le(bytes, i + 4)
+            val step = 8L + size + (size and 1L)
+            if (size < 0 || i + step > bytes.size) return false
+            i += step.toInt()
+        }
+        return i == bytes.size
+    }
+
+    private fun webpExifPayload(bytes: ByteArray, pieces: List<Piece>): ByteArray? {
+        val piece = pieces.firstOrNull { it.name == "EXIF" } ?: return null
+        var payload = bytes.copyOfRange(piece.from + 8, piece.to)
+        // 有些工具把 TIFF 主体再套一层 "Exif\0\0"；有就跳过
+        if (payload.size >= 6 && payload.startsWith("Exif")) payload = payload.copyOfRange(6, payload.size)
+        return payload
+    }
+
+    private fun cleanWebp(bytes: ByteArray, found: List<Piece>): ByteArray? {
+        if (!webpComplete(bytes)) return null
+        val keep = found.filterNot { it.identifying }
+        if (keep.sumOf { it.bytes } == found.sumOf { it.bytes }) return null
+        val body = ByteArrayOutputStream(bytes.size)
+        keep.forEach { piece ->
+            if (piece.name == "RIFF 头") return@forEach
+            val chunk = bytes.copyOfRange(piece.from, piece.to)
+            // VP8X 的载荷首字节是 flags：0x08 EXIF、0x04 XMP；ICC / alpha / 动画位不能动
+            if (piece.name == "VP8X" && chunk.size >= 9) {
+                chunk[8] = (chunk[8].toInt() and 0xF3).toByte()
+            }
+            body.write(chunk)
+        }
+        val bodyBytes = body.toByteArray()
+        val out = ByteArray(12 + bodyBytes.size)
+        "RIFF".toByteArray(Charsets.ISO_8859_1).copyInto(out, 0)
+        val riffSize = 4 + bodyBytes.size
+        out[4] = (riffSize and 0xFF).toByte()
+        out[5] = ((riffSize shr 8) and 0xFF).toByte()
+        out[6] = ((riffSize shr 16) and 0xFF).toByte()
+        out[7] = ((riffSize shr 24) and 0xFF).toByte()
+        "WEBP".toByteArray(Charsets.ISO_8859_1).copyInto(out, 8)
+        bodyBytes.copyInto(out, 12)
+        return out
+    }
+
+    private fun reportWebpFile(file: java.io.File): MetaReport {
+        java.io.RandomAccessFile(file, "r").use { raf ->
+            val length = raf.length()
+            if (length < 12) return MetaReport(Container.WebP, emptyList(), emptyList(), false)
+            val header = ByteArray(12)
+            raf.readFully(header)
+            if (container(header) != Container.WebP) return MetaReport(null, emptyList(), emptyList())
+            val pieces = ArrayList<Piece>()
+            pieces += Piece("RIFF 头", 0, 12, false)
+            val fields = ArrayList<Pair<String, String>>()
+            var complete = 8L + u32le(header, 4) == length
+            var offset = 12L
+            while (offset + 8 <= length) {
+                raf.seek(offset)
+                val chunkHeader = ByteArray(8)
+                raf.readFully(chunkHeader)
+                val fourcc = String(chunkHeader, 0, 4, Charsets.ISO_8859_1)
+                val size = u32le(chunkHeader, 4)
+                val step = 8L + size + (size and 1L)
+                if (size < 0 || offset + step > length) {
+                    pieces += Piece("$fourcc（截断）", offset.toInt(), length.toInt(), false)
+                    complete = false
+                    break
+                }
+                pieces += Piece(
+                    webpChunkName(fourcc), offset.toInt(), (offset + step).toInt(),
+                    fourcc == "EXIF" || fourcc == "XMP ",
+                )
+                if (fourcc == "EXIF" && size <= (8L shl 20)) {
+                    val payload = ByteArray(size.toInt())
+                    raf.seek(offset + 8)
+                    raf.readFully(payload)
+                    val tiff = if (payload.size >= 6 && payload.startsWith("Exif")) {
+                        payload.copyOfRange(6, payload.size)
+                    } else payload
+                    fields += runCatching { Tiff.read(tiff) }.getOrDefault(emptyList())
+                }
+                offset += step
+            }
+            return MetaReport(Container.WebP, fields, pieces, complete)
+        }
+    }
+
+    private fun webpChunkName(fourcc: String): String = when (fourcc) {
+        "VP8 " -> "VP8 画面"
+        "VP8L" -> "VP8L 画面"
+        "ICCP" -> "ICCP (色彩配置)"
+        "EXIF" -> "EXIF"
+        "XMP " -> "XMP"
+        else -> fourcc
+    }
+
+    private fun u32le(b: ByteArray, at: Int): Long =
+        (b[at].toLong() and 0xFF) or ((b[at + 1].toLong() and 0xFF) shl 8) or
+            ((b[at + 2].toLong() and 0xFF) shl 16) or ((b[at + 3].toLong() and 0xFF) shl 24)
 
     private fun ByteArray.startsWith(prefix: String): Boolean =
         size >= prefix.length && prefix.indices.all { this[it] == prefix[it].toByte() }

@@ -9,8 +9,10 @@ PIL 认不认得 EXIF、清完之后像素变不变，都不是我自己说了�
   photo.jpg.truth  PIL 看到的 APPn 标记、字段值、以及扫描数据（像素）的 sha256
   note.png         带 tEXt 文本块与 ICC
   note.png.truth   块清单与 IDAT 的 sha256
+  photo.webp       带 EXIF（在像素块后面）与 ICC 的 RIFF WebP
+  photo.webp.truth 块清单、VP8 载荷 sha256、VP8X 标志位与 ICC 长度
 
-用法：python tools/make_meta_fixtures.py
+用法：python tools/make_meta_fixtures.py [all|jpeg|png|webp]
 """
 import hashlib
 import io
@@ -145,6 +147,51 @@ def make_png() -> None:
     print("note.png", len(data), "字节，块:", kinds)
 
 
+def make_webp() -> None:
+    """带 EXIF 与 ICC 的 WebP：EXIF 块在像素块后面，顺带验证"只读前缀"会不会漏。"""
+    image = Image.new("RGB", (64, 48))
+    for x in range(64):
+        for y in range(48):
+            image.putpixel((x, y), ((x * 3) % 256, (y * 7) % 256, (x + y) % 256))
+    exif = Image.Exif()
+    exif[0x010F] = "WebPCam"
+    exif[0x0110] = "WebPModel"
+    exif[0x0112] = 6
+    exif[0x0132] = "2026:10:26 12:00:00"
+    buffer = io.BytesIO()
+    image.save(buffer, format="WEBP", exif=exif.tobytes(), icc_profile=fake_icc(), quality=80)
+    data = buffer.getvalue()
+    chunks = webp_chunks(data)
+    kinds = [fourcc for fourcc, _ in chunks]
+    vp8 = next(payload for fourcc, payload in chunks if fourcc in ("VP8 ", "VP8L"))
+    vp8x = next(payload for fourcc, payload in chunks if fourcc == "VP8X")
+    icc = next(payload for fourcc, payload in chunks if fourcc == "ICCP")
+    lines = [
+        "chunks=" + ",".join(kinds),
+        "make=WebPCam",
+        "model=WebPModel",
+        "orientation=6",
+        "date_time=2026:10:26 12:00:00",
+        "icc_len=%d" % len(icc),
+        "vp8_sha=" + hashlib.sha256(vp8).hexdigest(),
+        "vp8x_flags=%d" % vp8x[0],
+        "bytes=%d" % len(data),
+    ]
+    write("photo.webp", data)
+    write("photo.webp.truth", "\n".join(lines) + "\n")
+    print("photo.webp", len(data), "字节，块:", kinds)
+
+
+def webp_chunks(data: bytes):
+    out, i = [], 12
+    while i + 8 <= len(data):
+        size = struct.unpack("<I", data[i + 4:i + 8])[0]
+        fourcc = data[i:i + 4].decode("latin-1")
+        out.append((fourcc, data[i + 8:i + 8 + size]))
+        i += 8 + size + (size & 1)
+    return out
+
+
 def write(name: str, payload) -> None:
     os.makedirs(OUT, exist_ok=True)
     data = payload.encode("utf-8") if isinstance(payload, str) else payload
@@ -153,6 +200,11 @@ def write(name: str, payload) -> None:
 
 
 if __name__ == "__main__":
-    make_jpeg()
-    make_png()
+    which = sys.argv[1] if len(sys.argv) > 1 else "all"
+    if which in ("all", "jpeg"):
+        make_jpeg()
+    if which in ("all", "png"):
+        make_png()
+    if which in ("all", "webp"):
+        make_webp()
     print("写到", os.path.normpath(OUT))

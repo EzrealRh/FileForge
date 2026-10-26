@@ -218,7 +218,7 @@ enum class OperationKind(val label: String, val hint: String) {
             ExtractAudio -> fileKind.isVideo
             // 只放开了 JPEG 和 PNG：这两种容器的清理能做到段级照抄。
             // GIF / WebP / HEIC 的元数据规则各不相同，没做透就不给入口，免得产出一张坏图
-            CleanMetadata -> fileKind == FileKind.Jpeg || fileKind == FileKind.Png
+            CleanMetadata -> fileKind == FileKind.Jpeg || fileKind == FileKind.Png || fileKind == FileKind.WebP
             // 打包对类型无要求：任何文件都能塞进 zip，混选更是常见诉求（把发票 pdf 和照片一起发人）
             PackZip -> true
             UnpackZip -> fileKind == FileKind.Zip

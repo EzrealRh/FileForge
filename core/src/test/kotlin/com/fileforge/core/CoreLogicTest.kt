@@ -422,12 +422,13 @@ class CrossConversionCatalogTest {
     }
 
     @Test
-    fun `清元数据只给 JPEG 和 PNG，别的支持不了的容器不给入口`() {
+    fun `清元数据只给 JPEG、PNG 与 WebP，别的支持不了的容器不给入口`() {
         assertTrue(OperationKind.CleanMetadata in OperationKind.applicable(setOf(FileKind.Jpeg)))
         assertTrue(OperationKind.CleanMetadata in OperationKind.applicable(setOf(FileKind.Png)))
+        assertTrue(OperationKind.CleanMetadata in OperationKind.applicable(setOf(FileKind.WebP)))
         // 混选一张 GIF 就该把入口拿掉，不然批量跑起来必然有一半报错
         assertFalse(OperationKind.CleanMetadata in OperationKind.applicable(setOf(FileKind.Png, FileKind.Gif)))
-        for (kind in listOf(FileKind.WebP, FileKind.Bmp, FileKind.Heic, FileKind.Avif, FileKind.Gif)) {
+        for (kind in listOf(FileKind.Bmp, FileKind.Heic, FileKind.Avif, FileKind.Gif)) {
             assertFalse(OperationKind.CleanMetadata in OperationKind.applicable(setOf(kind)), "$kind 还没做，不该给入口")
         }
     }

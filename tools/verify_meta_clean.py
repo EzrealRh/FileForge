@@ -5,7 +5,7 @@
 真正的风险是别家解码器打不开、或者看着打开了其实像素被动过。Pillow 是另一套完整实现，
 它点头才算安全。
 
-先跑测试（ImageMetaTest 会把清理前后的四份文件写到 core/build/meta-clean/）：
+先跑测试（ImageMetaTest 会把清理前后的六份文件写到 core/build/meta-clean/）：
 
     ./gradlew :core:test
 
@@ -87,6 +87,39 @@ def verify_png():
           before.info.get("icc_profile") == after.info.get("icc_profile"))
 
 
+def webp_flags(data: bytes):
+    """VP8X 载荷首字节：0x20 ICC、0x10 alpha、0x08 EXIF、0x04 XMP、0x02 动画。"""
+    i = 12
+    while i + 8 <= len(data):
+        size = int.from_bytes(data[i + 4:i + 8], "little")
+        if data[i:i + 4] == b"VP8X":
+            return data[i + 8]
+        i += 8 + size + (size & 1)
+    return None
+
+
+def verify_webp():
+    print("WebP（photo.webp → cleaned-photo.webp）")
+    before, before_px = load("photo.webp")
+    after, after_px = load("cleaned-photo.webp")
+    check("Pillow 能打开清理后的文件", True)
+    check("像素逐点相同", before_px == after_px)
+    check("尺寸与模式相同", before.size == after.size and before.mode == after.mode)
+    check("原图确实带 EXIF（否则这条是空转）", bool(dict(before.getexif())))
+    check("清理后 EXIF 读不到了", not dict(after.getexif()), str(dict(after.getexif()))[:80])
+    check("原图确实带 ICC", bool(before.info.get("icc_profile")))
+    check("ICC 一个字节都没改",
+          before.info.get("icc_profile") == after.info.get("icc_profile"))
+    raw = open(os.path.join(DIR, "cleaned-photo.webp"), "rb").read()
+    check("RIFF 总长度与文件大小对得上",
+          int.from_bytes(raw[4:8], "little") == len(raw) - 8,
+          "%d vs %d" % (int.from_bytes(raw[4:8], "little"), len(raw) - 8))
+    flags = webp_flags(raw)
+    check("VP8X 的 EXIF 位已清、ICC 位还在",
+          flags is not None and flags & 0x08 == 0 and flags & 0x20 != 0,
+          "flags=%s" % flags)
+
+
 def main():
     if not os.path.isdir(DIR):
         print("找不到 %s，先跑 ./gradlew :core:test" % os.path.normpath(DIR))
@@ -94,6 +127,7 @@ def main():
     print("复核目录", os.path.normpath(DIR))
     verify_jpeg()
     verify_png()
+    verify_webp()
     if failures:
         print("\n%d 项不通过：" % len(failures))
         for item in failures:

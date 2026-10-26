@@ -1,0 +1,9 @@
+chunks=VP8X,ICCP,VP8 ,EXIF
+make=WebPCam
+model=WebPModel
+orientation=6
+date_time=2026:10:26 12:00:00
+icc_len=52
+vp8_sha=dbd9bb5fdc10630f8116d41e4c1c401de653503d0eff87e716a2c6567faa6308
+vp8x_flags=40
+bytes=408

@@ -498,7 +498,11 @@ class ImageEngine {
         report.cleanBlocker?.let { throw IllegalArgumentException(it) }
         val cleaned = ImageMeta.clean(bytes)
             ?: throw IllegalStateException("这份文件清不出结果，已按原样保留，没动原图")
-        val extension = if (report.container == ImageMeta.Container.Png) "png" else "jpg"
+        val extension = when (report.container) {
+            ImageMeta.Container.Png -> "png"
+            ImageMeta.Container.WebP -> "webp"
+            else -> "jpg"
+        }
         val note = buildString {
             append(SizeInput.format(bytes.size.toLong())).append(" → ").append(SizeInput.format(cleaned.size.toLong()))
             append("，删了 ").append(report.identifying.size).append(" 段")

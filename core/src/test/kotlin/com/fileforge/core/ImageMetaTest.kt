@@ -46,6 +46,7 @@ class ImageMetaTest {
     fun `认容器只认前缀不认扩展名`() {
         assertEquals(ImageMeta.Container.Jpeg, ImageMeta.container(resource("photo.jpg")))
         assertEquals(ImageMeta.Container.Png, ImageMeta.container(resource("note.png")))
+        assertEquals(ImageMeta.Container.WebP, ImageMeta.container(resource("photo.webp")))
         assertNull(ImageMeta.container("这不是图片".toByteArray()))
         assertNull(ImageMeta.container(ByteArray(0)))
     }
@@ -180,12 +181,83 @@ class ImageMetaTest {
         assertEquals("PngModelTest", report.fields.toMap()["机型"], "PNG 的 eXIf 块也得读")
     }
 
+    // ---- WebP ----------------------------------------------------------------
+
+    private fun webpChunk(bytes: ByteArray, name: String): ByteArray {
+        val piece = ImageMeta.pieces(bytes).first { it.name == name }
+        return bytes.copyOfRange(piece.from + 8, piece.to)
+    }
+
+    private fun readU32le(bytes: ByteArray, at: Int): Long =
+        (bytes[at].toLong() and 0xFF) or ((bytes[at + 1].toLong() and 0xFF) shl 8) or
+            ((bytes[at + 2].toLong() and 0xFF) shl 16) or ((bytes[at + 3].toLong() and 0xFF) shl 24)
+
+    @Test
+    fun `WebP 块清单与报告要和 PIL 看到的一致`() {
+        val original = resource("photo.webp")
+        val truth = truth("photo.webp.truth")
+        val pieces = ImageMeta.pieces(original)
+        val expected = truth.getValue("chunks").split(",").map { fourcc ->
+            when (fourcc) {
+                "VP8 " -> "VP8 画面"
+                "ICCP" -> "ICCP (色彩配置)"
+                else -> fourcc
+            }
+        }
+        assertEquals(expected, pieces.filter { it.name != "RIFF 头" }.map { it.name })
+        assertTrue(pieces.first { it.name == "EXIF" }.identifying, "EXIF 是身份信息，清理要丢")
+        assertEquals(false, pieces.first { it.name == "ICCP (色彩配置)" }.identifying, "ICC 影响颜色，保留")
+
+        val report = ImageMeta.report(original)
+        val byKey = report.fields.toMap()
+        assertEquals(truth.getValue("make"), byKey["制造商"])
+        assertEquals(truth.getValue("model"), byKey["机型"])
+        assertEquals(truth.getValue("orientation").toInt(), report.orientation)
+        assertTrue(report.willLoseRotation)
+        assertEquals(truth.getValue("icc_len").toInt(), webpChunk(original, "ICCP (色彩配置)").size)
+    }
+
+    @Test
+    fun `WebP 详情页只读块头也能读到像素块后面的 EXIF`() {
+        val original = resource("photo.webp")
+        val temp = java.io.File.createTempFile("photo", ".webp").apply { writeBytes(original) }
+        try {
+            val report = ImageMeta.report(temp)
+            assertEquals("WebPModel", report.fields.toMap()["机型"])
+            assertTrue(report.fields.toMap().containsKey("制造商"))
+            assertNull(report.cleanBlocker)
+        } finally {
+            temp.delete()
+        }
+    }
+
+    @Test
+    fun `WebP 清掉 EXIF 与标志位，画面块与 ICC 原样保留`() {
+        val original = resource("photo.webp")
+        val truth = truth("photo.webp.truth")
+        val cleaned = ImageMeta.clean(original)!!
+        assertEquals("RIFF", String(cleaned, 0, 4, Charsets.ISO_8859_1))
+        assertEquals("WEBP", String(cleaned, 8, 4, Charsets.ISO_8859_1))
+        assertEquals((cleaned.size - 8).toLong(), readU32le(cleaned, 4), "RIFF 总长度要按新内容重算")
+
+        val pieces = ImageMeta.pieces(cleaned)
+        assertTrue(pieces.none { it.identifying }, "还有身份块：${pieces.filter { it.identifying }.map { it.name }}")
+        assertTrue(pieces.any { it.name == "ICCP (色彩配置)" }, "ICC 要留着")
+        assertEquals(truth.getValue("vp8_sha"), sha256(webpChunk(cleaned, "VP8 画面")), "画面块必须逐字节相同")
+        val flags = webpChunk(cleaned, "VP8X")[0].toInt() and 0xFF
+        assertEquals(truth.getValue("vp8x_flags").toInt() and 0xF3, flags, "EXIF/XMP 位要清，ICC 位要留")
+        assertNull(ImageMeta.clean(cleaned), "再清一次没有可清的了")
+    }
+
     @Test
     fun `残档不硬组`() {
         val truncated = resource("photo.jpg").copyOfRange(0, 700)     // 砍掉 EOI
         assertNull(ImageMeta.clean(truncated), "没有 EOI 就原样退回，别产出一份打不开的文件")
         val halfPng = resource("note.png").copyOfRange(0, 40)
         assertNull(ImageMeta.clean(halfPng), "没有 IEND 同理")
+        val halfWebp = resource("photo.webp").copyOfRange(0, 300)
+        assertNull(ImageMeta.clean(halfWebp), "RIFF 头写的长度对不上就原样退回")
+        assertTrue(ImageMeta.report(halfWebp).cleanBlocker!!.contains("残档"))
     }
 
     @Test
@@ -196,9 +268,12 @@ class ImageMetaTest {
         val cases = listOf(
             resource("photo.jpg"),
             resource("note.png"),
+            resource("photo.webp"),
             cleaned,
             ImageMeta.clean(resource("note.png"))!!,
+            ImageMeta.clean(resource("photo.webp"))!!,
             resource("photo.jpg").copyOfRange(0, 700),
+            resource("photo.webp").copyOfRange(0, 300),
             "这不是图片".toByteArray(),
             ByteArray(0),
         )
@@ -268,13 +343,14 @@ class ImageMetaTest {
         // 我家解析器认自己的输出不算数。这两个文件交给 tools/verify_meta_clean.py，
         // 用 Pillow（完全另一套实现）打开、比像素、确认 EXIF 没了 ICC 还在。
         val dir = java.io.File("build/meta-clean").apply { mkdirs() }
-        listOf("photo.jpg", "note.png").forEach { name ->
+        listOf("photo.jpg", "note.png", "photo.webp").forEach { name ->
             val original = resource(name)
             val cleaned = ImageMeta.clean(original) ?: error("$name 应该清得动")
             java.io.File(dir, "cleaned-$name").writeBytes(cleaned)
             java.io.File(dir, name).writeBytes(original)
         }
         assertTrue(java.io.File(dir, "cleaned-photo.jpg").length() > 0)
+        assertTrue(java.io.File(dir, "cleaned-photo.webp").length() > 0)
     }
 
     @Test
@@ -282,7 +358,7 @@ class ImageMetaTest {
         val gif = byteArrayOf(0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0, 0)
         assertNull(ImageMeta.container(gif))
         val error = runCatching { ImageMeta.clean(gif) }.exceptionOrNull()
-        assertNotNull(error, "HEIC/GIF/WebP 没实现就要明确报错，不能拿 JPEG 的规则硬套")
+        assertNotNull(error, "HEIC/GIF 没实现就要明确报错，不能拿 JPEG 的规则硬套")
         assertTrue(error!!.message!!.contains("JPEG"), error.message)
     }
 }
