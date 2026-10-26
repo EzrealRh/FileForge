@@ -1,5 +1,7 @@
 package com.fileforge.converter.ui
 
+import android.graphics.Bitmap
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -37,12 +39,15 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
@@ -70,7 +75,13 @@ import com.fileforge.core.pdf.PdfPermission
 import com.fileforge.core.pdf.PdfSecurity
 import com.fileforge.core.pdf.StampSpot
 import com.fileforge.core.util.SizeInput
+import com.fileforge.core.video.TrimPreview
 import com.fileforge.converter.data.WorkItem
+import com.fileforge.converter.engine.VideoFrameSequence
+import com.fileforge.converter.engine.videoDisplayMeta
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
 /** 选操作 + 填参数，一次敲定。可用操作按选中文件的真实类型筛过。 */
@@ -442,7 +453,11 @@ class Parameters(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Summary("画面按关键帧对齐原样搬运，不重编码，几秒出片；多段按顺序拼成一条，音轨同窗截取，封装跟源走")
+                VideoTrimPreview(
+                    item = items.firstOrNull { it.kind.isVideo },
+                    startUs = TrimPreview.firstStartUs(trimSpecText),
+                )
+                Summary("画面按关键帧对齐原样搬运，不重编码，几秒出片；多段按顺序拼成一条，音轨同窗截取，封装跟源走；上面预览的是起点附近的一帧，方便确认截的是不是那段。")
             }
             OperationKind.ConvertVideo -> {
                 Segmented("目标封装", VideoFormat.entries.map { it.label }, videoConvertFormat.ordinal) {
@@ -1817,6 +1832,81 @@ private fun SpecField(label: String, value: String, support: String, onChange: (
         supportingText = { Text(support) },
         modifier = Modifier.fillMaxWidth(),
     )
+}
+
+/**
+ * 截取起点那一秒的画面：写好第一段就取一次，改数字时 300ms 防抖。
+ * 走与「抽帧成图片」同一条解码路（含旋转），预览只解到 360px，不把整帧留在内存里。
+ */
+@Composable
+private fun VideoTrimPreview(item: WorkItem?, startUs: Long?) {
+    if (item == null) return
+    if (startUs == null) {
+        Summary("写好第一段（如 5-12）就会显示起点那一秒的画面")
+        return
+    }
+    var frame by remember(item.file, startUs) { mutableStateOf<Bitmap?>(null) }
+    var loading by remember(item.file, startUs) { mutableStateOf(true) }
+    LaunchedEffect(item.file, startUs) {
+        delay(300)
+        frame = withContext(Dispatchers.IO) {
+            runCatching {
+                val meta = videoDisplayMeta(item.file)
+                val scale = minOf(1f, 360f / maxOf(meta.width, meta.height))
+                val width = (meta.width * scale).roundToInt().coerceAtLeast(2)
+                val height = (meta.height * scale).roundToInt().coerceAtLeast(2)
+                VideoFrameSequence.extract(
+                    file = item.file,
+                    startUs = startUs,
+                    windowUs = 1L,
+                    frameCount = 1,
+                    stepUs = 1L,
+                    targetWidth = width,
+                    targetHeight = height,
+                    rotation = meta.rotation,
+                ).bitmaps.firstOrNull()
+            }.getOrNull()
+        }
+        loading = false
+    }
+    Text(
+        "起点 ${trimStartLabel(startUs)} · ${item.name}",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier.padding(top = 4.dp),
+    )
+    val bitmap = frame
+    when {
+        bitmap != null -> Image(
+            bitmap = bitmap.asImageBitmap(),
+            contentDescription = "截取起点的画面",
+            contentScale = ContentScale.Fit,
+            modifier = Modifier.fillMaxWidth().heightIn(max = 200.dp).padding(top = 4.dp),
+        )
+        loading -> Text(
+            "正在取画面…",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        else -> Text(
+            "这一秒取不到画面",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+        )
+    }
+}
+
+/** 起点时间的写法：不足一分钟写「5 秒」，超过写「1:05」，带小数写「1.5 秒」。 */
+private fun trimStartLabel(startUs: Long): String {
+    val seconds = startUs / 1_000_000.0
+    val whole = seconds.toInt()
+    return when {
+        seconds - whole > 0.001 -> "%.1f 秒".format(seconds)
+        whole >= 60 -> "%d:%02d".format(whole / 60, whole % 60)
+        else -> "$whole 秒"
+    }
 }
 
 @Composable
