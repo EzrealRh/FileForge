@@ -119,6 +119,7 @@ enum class OperationKind(val label: String, val hint: String) {
     PdfToHtml("PDF 转网页", "结构与转 Word 同源，落成 HTML"),
     InsertBlankPages("PDF 插入空白页", "在指定页后插一张白页，0 表示最前面"),
     CropPdfPages("PDF 裁页边", "四边各裁掉多少 pt，内容不重排"),
+    ResizePdfPages("PDF 改纸张/缩放", "A4 / A5 / Letter，等比留白、裁边或拉伸"),
     ExtractPdfImages("PDF 提取图片", "把页面里引用的位图逐张导出"),
     SplitPdfByOutline("PDF 按书签拆分", "按一级目录各成一份，名字用书签名"),
     PdfToEpub("PDF 转 EPUB", "同一棵结构树落成电子书"),
@@ -160,7 +161,7 @@ enum class OperationKind(val label: String, val hint: String) {
             CompressPdf, SplitPdfBySize, SplitPdfIntoParts, ExtractPdfPages, RemovePdfPages,
             RotatePdfPages, MergePdfs, PdfToText, PdfToImages, AddPageNumbers, PdfWatermark,
             EncryptPdf, DecryptPdf, PdfMetadata, PdfToDocx, PdfToHtml, PdfReorder,
-            PdfToCsv, PdfToXlsx, InsertBlankPages, CropPdfPages, ExtractPdfImages, SplitPdfByOutline,
+            PdfToCsv, PdfToXlsx, InsertBlankPages, CropPdfPages, ResizePdfPages, ExtractPdfImages, SplitPdfByOutline,
             PdfToEpub,
             -> fileKind == FileKind.Pdf
             // OCR 是"认画面上有什么"：图片按整张认，PDF 逐页渲染再认。

@@ -884,6 +884,15 @@ sealed interface Operation {
         override val label get() = "四边各裁 $marginPt pt"
     }
 
+    /** 改纸张/缩放：内容矢量缩放，不转图片；[spec] 留空=所有页。 */
+    data class ResizePdfPages(
+        val paper: PdfPaper = PdfPaper.A4,
+        val mode: com.fileforge.core.pdf.PageResizeMode = com.fileforge.core.pdf.PageResizeMode.Contain,
+        val spec: String = "",
+    ) : Operation {
+        override val label get() = "改成 ${paper.label}"
+    }
+
     /** 把页面里引用的位图导出；短边小于 [minEdge] 的跳过。 */
     data class ExtractPdfImages(
         val minEdge: Int = 0,

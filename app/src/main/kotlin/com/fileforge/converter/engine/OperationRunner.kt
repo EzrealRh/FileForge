@@ -486,6 +486,9 @@ class OperationRunner(context: Context, private val workspace: Workspace) {
             is Operation.CropPdfPages -> items.forEach { item ->
                 collect(item.name) { listOf(pdf.cropPages(item, operation.marginPt)) }
             }
+            is Operation.ResizePdfPages -> items.forEach { item ->
+                collect(item.name) { listOf(pdf.resizePages(item, operation)) }
+            }
             is Operation.ExtractPdfImages -> items.forEach { item ->
                 collect(item.name) { pdf.extractImages(item, operation) }
             }

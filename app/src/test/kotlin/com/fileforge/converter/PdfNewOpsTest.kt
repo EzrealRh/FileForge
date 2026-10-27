@@ -3,10 +3,14 @@ package com.fileforge.converter
 import android.app.Application
 import androidx.test.core.app.ApplicationProvider
 import com.fileforge.core.model.FileKind
+import com.fileforge.core.ops.Operation
+import com.fileforge.core.ops.PdfPaper
+import com.fileforge.core.pdf.PageResizeMode
 import com.fileforge.converter.data.WorkItem
 import com.fileforge.converter.data.Workspace
 import com.fileforge.converter.engine.PdfEngine
 import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.text.PDFTextStripper
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.Test
@@ -53,5 +57,47 @@ class PdfNewOpsTest {
             assertEquals(page.mediaBox.width, page.cropBox.width)
             assertTrue(page.mediaBox.width < 600f, "A4 宽 ${page.mediaBox.width} 应小于 600")
         }
+    }
+
+    private fun save(out: File, name: String) {
+        val dir = File("build/pdf-resize").apply { mkdirs() }
+        out.copyTo(File(dir, name), overwrite = true)
+    }
+
+    @Test
+    fun `改纸张把 A4 缩到 A5，页框与文字层都对`() {
+        val out = engine.resizePages(
+            item("base3.pdf"),
+            Operation.ResizePdfPages(PdfPaper.A5, PageResizeMode.Contain),
+        )
+        PDDocument.load(out.file).use { doc ->
+            val page = doc.getPage(0)
+            assertEquals(420f, page.mediaBox.width, 1f, out.note)
+            assertEquals(595f, page.mediaBox.height, 1f, out.note)
+            assertEquals(page.mediaBox.width, page.cropBox.width, 0.01f)
+            assertTrue(PDFTextStripper().getText(doc).isNotBlank(), "缩放不能把文字层弄丢")
+        }
+        save(out.file, "portrait-a5.pdf")
+    }
+
+    @Test
+    fun `旋转 90 的页改成横向 A4，页框保持竖的 595x842`() {
+        val source = item("base3.pdf")
+        val rotated = File(app.cacheDir, "rotated-base3.pdf")
+        PDDocument.load(source.file).use { doc ->
+            doc.getPage(0).rotation = 90
+            doc.save(rotated)
+        }
+        val out = engine.resizePages(
+            source.copy(file = rotated, size = rotated.length()),
+            Operation.ResizePdfPages(PdfPaper.A4, PageResizeMode.Contain),
+        )
+        PDDocument.load(out.file).use { doc ->
+            val page = doc.getPage(0)
+            assertEquals(595f, page.mediaBox.width, 1f, "未旋转页框应保持竖的 A4")
+            assertEquals(842f, page.mediaBox.height, 1f)
+            assertEquals(90, page.rotation, "旋转角不能被改掉")
+        }
+        save(out.file, "landscape-a4.pdf")
     }
 }

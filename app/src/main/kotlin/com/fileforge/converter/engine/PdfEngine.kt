@@ -13,6 +13,7 @@ import com.fileforge.core.pdf.Horizontal
 import com.fileforge.core.pdf.PageGroups
 import com.fileforge.core.pdf.PageNumberPlan
 import com.fileforge.core.pdf.PageRangeParser
+import com.fileforge.core.pdf.PageResizePlan
 import com.fileforge.core.pdf.PdfCompressPlan
 import com.fileforge.core.pdf.PdfDoc
 import com.fileforge.core.pdf.PdfLine
@@ -45,6 +46,7 @@ import com.tom_roush.pdfbox.cos.COSObject
 import com.tom_roush.pdfbox.cos.COSStream
 import com.tom_roush.pdfbox.io.MemoryUsageSetting
 import com.tom_roush.pdfbox.multipdf.PDFMergerUtility
+import com.tom_roush.pdfbox.multipdf.LayerUtility
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.PDPage
 import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
@@ -1027,9 +1029,53 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
         }
     }
 
-    /** 提取页面里引用的位图；同一张图被多页引用时按对象去重。 */
-    fun extractImages(item: WorkItem, operation: Operation.ExtractPdfImages): List<EngineOutput> {
+    /** 改纸张/缩放：内容矢量缩放，不转图片；旋转页按视觉方向配横竖纸。 */
+    fun resizePages(item: WorkItem, operation: Operation.ResizePdfPages): EngineOutput {
+        require(operation.paper != PdfPaper.FitImage) { "目标纸张要选 A4 / A5 / Letter" }
         val document = loadForReading(item.file)
+        try {
+            val pages = pagesFor(operation.spec, document.numberOfPages)
+            require(pages.isNotEmpty()) { "没有页要改" }
+            val paper = when (operation.paper) {
+                PdfPaper.A4 -> PDRectangle.A4
+                PdfPaper.A5 -> PDRectangle.A5
+                PdfPaper.Letter -> PDRectangle.LETTER
+                PdfPaper.FitImage -> error("目标纸张要选 A4 / A5 / Letter")
+            }
+            var annotations = 0
+            pages.forEach { index ->
+                val page = document.getPage(index)
+                val box = page.cropBox
+                val plan = PageResizePlan.plan(
+                    box.width, box.height, box.lowerLeftX, box.lowerLeftY,
+                    page.rotation, paper.width, paper.height, operation.mode,
+                )
+                // 先把原内容包进 q/Q，再把缩放矩阵插到最前面；不这样做会把同页后面的新内容一起缩掉
+                LayerUtility(document).wrapInSaveRestore(page)
+                PDPageContentStream(document, page, PDPageContentStream.AppendMode.PREPEND, true, true).use { stream ->
+                    stream.transform(
+                        Matrix(plan.scaleX, 0f, 0f, plan.scaleY, plan.translateX, plan.translateY),
+                    )
+                }
+                val rect = PDRectangle(0f, 0f, plan.boxWidth, plan.boxHeight)
+                page.mediaBox = rect
+                page.cropBox = rect
+                annotations += page.annotations.size
+            }
+            val output = workspace.newStagingFile("pdf")
+            document.save(output)
+            val note = buildString {
+                append("${pages.size} 页 · ${operation.paper.label} · ${operation.mode.label}（矢量缩放，不转图片）")
+                if (annotations > 0) append("；表单/批注不跟着缩放（$annotations 个）")
+            }
+            return EngineOutput(OutputNaming.tagged(item.name, "改纸张", "pdf"), output, note)
+        } finally {
+            runCatching { document.close() }
+        }
+    }
+
+    /** 提取页面里引用的位图；同一张图被多页引用时按对象去重。 */
+    fun extractImages(item: WorkItem, operation: Operation.ExtractPdfImages): List<EngineOutput> {        val document = loadForReading(item.file)
         val outputs = ArrayList<EngineOutput>()
         try {
             val seen = HashSet<String>()

@@ -4,6 +4,8 @@ import com.fileforge.core.model.FileKind
 import com.fileforge.core.ops.Operation
 import com.fileforge.core.ops.OperationKind
 import com.fileforge.core.ops.OperationKind.Companion.applicable
+import com.fileforge.core.ops.PdfPaper
+import com.fileforge.core.pdf.PageResizeMode
 import com.fileforge.converter.data.WorkItem
 import com.fileforge.converter.ui.Parameters
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -54,6 +56,20 @@ class ParametersPanelTest {
         val draft = Parameters(OperationKind.PdfReorder, listOf(video())).apply { pdfReorderSpec = "3,1,2" }
         assertNull(draft.validation())
         assertEquals(Operation.PdfReorder("3,1,2"), draft.build())
+    }
+
+    @Test
+    fun `改纸张拼出纸张、缩放模式与页码范围`() {
+        val draft = Parameters(OperationKind.ResizePdfPages, listOf(item("a.pdf", FileKind.Pdf))).apply {
+            pdfResizePaper = PdfPaper.A5
+            pdfResizeMode = PageResizeMode.Cover
+            pageSpec = "1,3-5"
+        }
+        assertNull(draft.validation())
+        assertEquals(
+            Operation.ResizePdfPages(PdfPaper.A5, PageResizeMode.Cover, "1,3-5"),
+            draft.build(),
+        )
     }
 
     @Test

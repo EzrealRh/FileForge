@@ -73,6 +73,7 @@ import com.fileforge.core.text.TextCodecs
 import com.fileforge.core.text.TextEncoding
 import com.fileforge.core.pdf.PdfPermission
 import com.fileforge.core.pdf.PdfSecurity
+import com.fileforge.core.pdf.PageResizeMode
 import com.fileforge.core.pdf.StampSpot
 import com.fileforge.core.util.SizeInput
 import com.fileforge.core.video.TrimPreview
@@ -227,6 +228,8 @@ class Parameters(
     var archivePassword by mutableStateOf("")
     var pdfBlankSpec by mutableStateOf("1")
     var pdfCropMargin by mutableStateOf(24f)
+    var pdfResizePaper by mutableStateOf(PdfPaper.A4)
+    var pdfResizeMode by mutableStateOf(PageResizeMode.Contain)
     var pdfImageFormat by mutableStateOf(ImageFormat.Png)
     var pdfImageMinEdge by mutableStateOf(0f)
     var pdfEpubTitle by mutableStateOf("")
@@ -1159,6 +1162,20 @@ class Parameters(
                 Summary("MediaBox 与 CropBox 一起收：内容坐标不动，只是可视范围小了；裁得太狠会直接拒。")
                 items.forEach { Summary("${it.name} · ${it.sizeLabel}") }
             }
+            OperationKind.ResizePdfPages -> {
+                Segmented(
+                    "目标纸张",
+                    listOf(PdfPaper.A4.label, PdfPaper.A5.label, PdfPaper.Letter.label),
+                    listOf(PdfPaper.A4, PdfPaper.A5, PdfPaper.Letter).indexOf(pdfResizePaper),
+                ) {
+                    pdfResizePaper = listOf(PdfPaper.A4, PdfPaper.A5, PdfPaper.Letter)[it]
+                }
+                Segmented("缩放", PageResizeMode.entries.map { it.label }, pdfResizeMode.ordinal) {
+                    pdfResizeMode = PageResizeMode.entries[it]
+                }
+                PageSpecField("留空=所有页；也可只改几页，例：1,3-5", "内容矢量缩放，不转图片；横页配横纸")
+                Summary("按源页方向自动选横竖纸；表单与批注不跟着缩放，扫描图会按比例缩，字可能变糊。")
+            }
             OperationKind.ExtractPdfImages -> {
                 Segmented("导出格式", ImageFormat.entries.map { it.label }, pdfImageFormat.ordinal) {
                     pdfImageFormat = ImageFormat.entries[it]
@@ -1668,6 +1685,7 @@ class Parameters(
             OperationKind.PdfToHtml -> Operation.PdfToHtml(pageSpec.trim(), htmlTitle.trim())
             OperationKind.InsertBlankPages -> Operation.InsertBlankPages(pdfBlankSpec.trim())
             OperationKind.CropPdfPages -> Operation.CropPdfPages(pdfCropMargin.roundToInt())
+            OperationKind.ResizePdfPages -> Operation.ResizePdfPages(pdfResizePaper, pdfResizeMode, pageSpec.trim())
             OperationKind.ExtractPdfImages -> Operation.ExtractPdfImages(pdfImageMinEdge.roundToInt(), pdfImageFormat, 92)
             OperationKind.SplitPdfByOutline -> Operation.SplitPdfByOutline
             OperationKind.PdfToEpub -> Operation.PdfToEpub(pdfEpubTitle.trim(), pdfEpubAuthor.trim())
