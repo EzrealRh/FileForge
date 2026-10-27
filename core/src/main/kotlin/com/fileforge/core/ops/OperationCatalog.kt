@@ -62,6 +62,7 @@ enum class OperationKind(val label: String, val hint: String) {
     FormatJson("JSON 格式化", "缩进或压平、键排序；数字原文不被改写"),
     JsonToCsv("JSON 转 CSV", "对象数组拆成表，会丢什么都先说明"),
     CsvToJson("CSV 转 JSON", "首行当列名；默认不猜类型，007 不会变成 7"),
+    SqlToCsv("SQL 转 CSV", "只读 CREATE/INSERT，每张表一份 CSV"),
     TextToPdf("印成 PDF", "按文件里的结构排：标题抬字号、列表画记号、表格画成横平竖直的网格，自动断行分页"),
     OfficeToText("Word 演示提取文字", "docx / pptx 抽正文，丢了什么逐条写明"),
     XlsxToCsv("表格转 CSV", "每张表一份 CSV，日期不再是序列号"),
@@ -232,7 +233,7 @@ enum class OperationKind(val label: String, val hint: String) {
             // 判不动会直说 —— 与字幕那族同一个路子，不在类型层猜。Markdown 同理：
             // 纯文本里没有任何记号时"转 HTML"没意义，引擎会拒而不是硬出一页。
             // .html 也算这一族：很多人把网页存成 .txt，反向那两条（抽文字 / 转 MD）本来就要给它
-            FormatJson, JsonToCsv, CsvToJson, XmlToJson, JsonToXml, XmlToCsv, XmlToXlsx, MdToHtml, MdToText,
+            FormatJson, JsonToCsv, CsvToJson, SqlToCsv, XmlToJson, JsonToXml, XmlToCsv, XmlToXlsx, MdToHtml, MdToText,
             YamlToJson, JsonToYaml, YamlToCsv, CsvToYaml, XmlToYaml, YamlToXml, CsvToXml,
             TomlToJson, JsonToToml, TomlToYaml, YamlToToml, TomlToCsv, TomlToXlsx, TomlToIni,
             IniToJson, JsonToIni, IniToYaml, YamlToIni, IniToToml -> fileKind.isTextual

@@ -135,6 +135,29 @@ class TextEngine(private val workspace: Workspace) {
      * CSV → JSON。默认**不猜类型**：`007` 认成 7、`1.50` 认成 1.5 都是不可逆的，
      * 所以只有用户明确要才开，开的时候也说明会丢哪一层写法。
      */
+    /** SQL dump → 每张表一份 CSV；只读解析，不执行 SQL。 */
+    fun sqlToCsv(item: WorkItem, operation: Operation.SqlToCsv): List<EngineOutput> {
+        val decoded = TextCodecs.decodeForConversion(read(item), null)
+        val tables = com.fileforge.core.data.SqlDump.parse(decoded.text)
+        require(tables.isNotEmpty()) { "没找到 CREATE TABLE / INSERT INTO，这份文件不像 SQL dump" }
+        val wanted = operation.table.trim()
+        val selected = if (wanted.isEmpty()) tables else tables.filter { it.name.equals(wanted, ignoreCase = true) }
+        require(selected.isNotEmpty()) {
+            "没有表「$wanted」；这份 dump 有：${tables.joinToString("、") { it.name }}"
+        }
+        return selected.map { table ->
+            val safe = table.name.replace(Regex("[^A-Za-z0-9_.-]"), "_").ifBlank { "table" }
+            val file = workspace.newStagingFile("csv").apply {
+                writeText(com.fileforge.core.data.SqlDump.toCsv(table), Charsets.UTF_8)
+            }
+            EngineOutput(
+                OutputNaming.tagged(item.name, safe, "csv"),
+                file,
+                "${table.rows.size} 行 · ${table.columns.size} 列",
+            )
+        }
+    }
+
     fun csvToJson(item: WorkItem, operation: Operation.CsvToJson): EngineOutput {
         val bytes = read(item)
         val decoded = TextCodecs.decodeForConversion(bytes, null)

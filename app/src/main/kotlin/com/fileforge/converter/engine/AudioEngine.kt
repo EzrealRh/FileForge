@@ -8,6 +8,7 @@ import android.media.MediaFormat
 import android.media.MediaMuxer
 import com.fileforge.core.audio.AudioPlan
 import com.fileforge.core.audio.AudioTarget
+import com.fileforge.core.audio.FlacEncoder
 import com.fileforge.core.audio.Pcm16
 import com.fileforge.core.audio.WavHeader
 import com.fileforge.core.naming.OutputNaming
@@ -76,6 +77,7 @@ class AudioEngine(private val workspace: Workspace) {
                 when {
                     passthrough -> copyAcross(extractor, sourceFormat, output, durationUs, onProgress)
                     target == AudioTarget.Wav -> decodeToWav(extractor, sourceFormat, sourceMime, output, durationUs, onProgress)
+                    target == AudioTarget.Flac -> decodeToFlac(extractor, sourceFormat, sourceMime, output, durationUs, onProgress)
                     else -> encodeToM4a(extractor, sourceFormat, sourceMime, output, kbps, durationUs, onProgress)
                 }
             } catch (e: Throwable) {
@@ -133,6 +135,7 @@ class AudioEngine(private val workspace: Workspace) {
                 when {
                     passthrough -> copyAcross(extractor, sourceFormat, output, durationUs, onProgress, ranges)
                     target == AudioTarget.Wav -> decodeToWav(extractor, sourceFormat, sourceMime, output, durationUs, onProgress, ranges)
+                    target == AudioTarget.Flac -> decodeToFlac(extractor, sourceFormat, sourceMime, output, durationUs, onProgress, ranges)
                     else -> encodeToM4a(
                         extractor, sourceFormat, sourceMime, output,
                         AudioPlan.bitrateKbps(null, durationUs, sourceKbps), durationUs, onProgress, ranges,
@@ -150,6 +153,7 @@ class AudioEngine(private val workspace: Workspace) {
             val how = when {
                 passthrough -> "原样搬运不重编"
                 target == AudioTarget.Wav -> "解码落成 WAV"
+                target == AudioTarget.Flac -> "解码落成 FLAC 无损"
                 else -> "重编成 AAC"
             }
             return EngineOutput(
@@ -229,6 +233,27 @@ class AudioEngine(private val workspace: Workspace) {
     private fun seconds(pcm: Pcm16): String = "%.1f".format(pcm.frames.toDouble() / pcm.sampleRate)
 
     /** 任何一条音轨 → 临时 WAV（16 位整数）；非 16 位的解码输出由 Pcm16 直说。 */
+    /** 解码到临时 WAV，再流式编码 FLAC；临时文件用完即删，PCM 不进大堆。 */
+    private fun decodeToFlac(
+        extractor: MediaExtractor,
+        sourceFormat: MediaFormat,
+        sourceMime: String,
+        output: File,
+        durationUs: Long,
+        onProgress: (Int) -> Unit,
+        ranges: List<LongRange>? = null,
+    ): Int {
+        val temp = workspace.newStagingFile("wav")
+        try {
+            val blocks = decodeToWav(extractor, sourceFormat, sourceMime, temp, durationUs, onProgress, ranges)
+            if (blocks <= 0) return 0
+            val result = FlacEncoder.encodeWav(temp, output)
+            return (result.frames * result.channels).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+        } finally {
+            runCatching { temp.delete() }
+        }
+    }
+
     private fun decodeToTempWav(item: WorkItem, onProgress: (Int) -> Unit): File {
         val extractor = MediaExtractor()
         try {

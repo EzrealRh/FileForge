@@ -10,6 +10,7 @@ enum class AudioTarget(val label: String, val extension: String, val mime: Strin
 
     M4a("M4A（AAC）", "m4a", "audio/mp4", true),
     Wav("WAV（无损）", "wav", "audio/wav", false),
+    Flac("FLAC（无损）", "flac", "audio/flac", false),
     ;
 
     companion object {

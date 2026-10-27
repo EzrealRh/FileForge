@@ -254,6 +254,7 @@ class Parameters(
     var jsonSort by mutableStateOf(false)
     var jsonAscii by mutableStateOf(false)
     var csvDelimiter by mutableStateOf(Delimiter.Comma)
+    var sqlTableText by mutableStateOf("")
     var csvQuoteAll by mutableStateOf(false)
     var csvEnding by mutableStateOf(LineEnding.Lf)
     var csvHeader by mutableStateOf(true)
@@ -569,7 +570,7 @@ class Parameters(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Summary("AAC 选 M4A 时原样搬运秒出；其他编码会解了重编，WAV 是无损落盘；多段按顺序拼成一条")
+                Summary("AAC 选 M4A 时原样搬运秒出；其他编码会解了重编，WAV / FLAC 是无损落盘；多段按顺序拼成一条")
             }
             OperationKind.AudioVolume -> {
                 IntSlider("音量", audioVolumePercent, 0f..300f, { "%.0f%%".format(it) }) { audioVolumePercent = it }
@@ -750,19 +751,23 @@ class Parameters(
                 Segmented("目标格式", AudioTarget.entries.map { it.label }, audioTarget.ordinal) {
                     audioTarget = AudioTarget.entries[it]
                 }
-                Segmented("取法", listOf("跟随源码率", "按目标体积"), if (audioByTarget) 1 else 0) {
-                    audioByTarget = it == 1
-                }
-                if (audioByTarget) {
-                    SizeField("目标体积 MB", targetSizeText) { targetSizeText = it }
-                    Summary("按时长反推码率，落在 64~320 kbps 之间（系统 AAC 编码器就吃这个范围）。")
+                if (audioTarget != AudioTarget.Flac) {
+                    Segmented("取法", listOf("跟随源码率", "按目标体积"), if (audioByTarget) 1 else 0) {
+                        audioByTarget = it == 1
+                    }
+                    if (audioByTarget) {
+                        SizeField("目标体积 MB", targetSizeText) { targetSizeText = it }
+                        Summary("按时长反推码率，落在 64~320 kbps 之间（系统 AAC 编码器就吃这个范围）。")
+                    }
+                } else {
+                    Summary("FLAC 是无损：按 16 位 PCM 原样编码，不反推码率，也不接受目标体积。")
                 }
                 if (kind == OperationKind.ExtractAudio) {
                     Summary("源音轨本来就是 AAC 时直接搬出来，不重编、无损；其它编码会解码重编。")
                 } else {
-                    Summary("WAV 是解码出来的无损裸数据，成品会比 M4A 大一大截。")
+                    Summary("WAV 是解码出来的无损裸数据；FLAC 也是无损，但会做一层无损压缩。")
                 }
-                Summary("系统没有 MP3 编码器，所以转不成 mp3 —— 只给 M4A 和 WAV 两个目标。")
+                Summary("系统没有 MP3 编码器，所以转不成 mp3 —— 只给 M4A、WAV 和 FLAC 三个目标。")
             }
             OperationKind.ConvertTextEncoding -> {
                 PickerRow("源编码", encodingOptions, textSource + 1) { textSource = it - 1 }
@@ -906,6 +911,18 @@ class Parameters(
                 Summary("要最外层是数组的 JSON。数组里是对象就当一行、键当列名（列取并集）；是数组就按位置摆。")
                 Summary("CSV 只有文字：数字、真假、null 过去之后全成字符串；嵌套的对象与数组会被压成一格 JSON 文本。")
                 Summary("转过去会丢什么在结果说明里逐条写出来，不假装是无损转换。")
+            }
+            OperationKind.SqlToCsv -> {
+                OutlinedTextField(
+                    value = sqlTableText,
+                    onValueChange = { sqlTableText = it },
+                    label = { Text("只导哪张表（留空=全部）") },
+                    supportingText = { Text("表名不区分大小写；每张表一份 CSV，列名按 CREATE TABLE") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Summary("只读解析 CREATE TABLE 与 INSERT ... VALUES；UPDATE、视图、存储过程不执行，也不猜。")
+                Summary("没有 INSERT 的表只出表头；字段里的逗号/引号/换行按 CSV 规则转义。")
             }
             OperationKind.CsvToJson -> {
                 Segmented("首行", listOf("当普通数据行", "当列名"), if (csvHeader) 1 else 0) { csvHeader = it == 1 }
@@ -1496,7 +1513,8 @@ class Parameters(
             (kind == OperationKind.CompressImage && targetSizeText.isNotBlank()) ||
             (kind == OperationKind.CompressVideo && videoByTarget) ||
             (kind == OperationKind.CompressPdf && pdfByTarget) ||
-            ((kind == OperationKind.ConvertAudio || kind == OperationKind.ExtractAudio) && audioByTarget)
+            ((kind == OperationKind.ConvertAudio || kind == OperationKind.ExtractAudio) &&
+                audioByTarget && audioTarget != AudioTarget.Flac)
         if (needsTarget && SizeInput.parse(targetSizeText) == null) return "目标体积写成 10 或 1.5MB 这样"
         if (kind == OperationKind.ExtractPdfPages && pageSpec.isBlank()) return "先写要取哪些页"
         if (kind == OperationKind.RemovePdfPages && pageSpec.isBlank()) return "先写要删哪些页"
@@ -1636,7 +1654,7 @@ class Parameters(
             )
             OperationKind.ExtractSubtitles -> Operation.ExtractSubtitles
             OperationKind.ConvertAudio, OperationKind.ExtractAudio -> Operation.AudioConvert(
-                audioTarget, if (audioByTarget) targetBytes else null,
+                audioTarget, if (audioByTarget && audioTarget != AudioTarget.Flac) targetBytes else null,
             )
             // 密码原样传，不做 trim：首尾空格可能就是用户密码的一部分
             OperationKind.EncryptPdf -> Operation.EncryptPdf(pdfUserPw, pdfOwnerPw, pdfAllowed)
@@ -1661,6 +1679,7 @@ class Parameters(
             )
             OperationKind.JsonToCsv -> Operation.JsonToCsv(csvDelimiter, csvEnding, csvQuoteAll)
             OperationKind.CsvToJson -> Operation.CsvToJson(csvHeader, csvInfer, jsonIndent.roundToInt())
+            OperationKind.SqlToCsv -> Operation.SqlToCsv(sqlTableText.trim())
             OperationKind.XmlToJson -> Operation.XmlToJson(jsonIndent.roundToInt())
             OperationKind.XmlToCsv -> Operation.XmlToCsv(csvDelimiter, csvEnding, csvQuoteAll)
             OperationKind.XmlToXlsx -> Operation.XmlToXlsx

@@ -530,6 +530,11 @@ sealed interface Operation {
     }
 
     /** CSV → JSON 数组。[inferTypes] 默认关：`007` 与 `1.50` 猜错就再也回不去了。 */
+    /** SQL dump 转 CSV：只读 CREATE/INSERT；[table] 留空=每张表都导，否则只导这一张。 */
+    data class SqlToCsv(val table: String = "") : Operation {
+        override val label get() = "SQL 转 CSV"
+    }
+
     data class CsvToJson(
         val header: Boolean = true,
         val inferTypes: Boolean = false,

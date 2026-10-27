@@ -27,8 +27,16 @@ class AudioPlanTest {
         assertFalse(AudioPlan.canPassthrough("audio/mpeg", AudioTarget.M4a))
         assertFalse(AudioPlan.canPassthrough("audio/flac", AudioTarget.M4a))
         assertFalse(AudioPlan.canPassthrough("audio/mp4a-latm", AudioTarget.Wav), "WAV 是无损 PCM，AAC 必须解码")
+        assertFalse(AudioPlan.canPassthrough("audio/mp4a-latm", AudioTarget.Flac), "FLAC 要重新编码，不能直通")
         assertFalse(AudioPlan.canPassthrough(null, AudioTarget.M4a))
         assertFalse(AudioPlan.canPassthrough("", AudioTarget.M4a))
+    }
+
+    @Test
+    fun `FLAC 输出换扩展名且不算直通`() {
+        assertEquals("song.flac", AudioPlan.outputName("song.mp3", AudioTarget.Flac, fromVideo = false))
+        assertEquals("clip_音频.flac", AudioPlan.outputName("clip.mp4", AudioTarget.Flac, fromVideo = true))
+        assertFalse(AudioPlan.canPassthrough("audio/mpeg", AudioTarget.Flac))
     }
 
     @Test

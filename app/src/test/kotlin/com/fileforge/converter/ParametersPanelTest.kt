@@ -1,5 +1,6 @@
 package com.fileforge.converter
 
+import com.fileforge.core.audio.AudioTarget
 import com.fileforge.core.model.FileKind
 import com.fileforge.core.ops.Operation
 import com.fileforge.core.ops.OperationKind
@@ -223,5 +224,25 @@ class ParametersPanelTest {
         assertTrue(OperationKind.PdfToXlsx in forPdf)
         assertTrue(OperationKind.PdfToCsv !in forImage)
         assertTrue(OperationKind.PdfToXlsx !in forVideo)
+    }
+
+    @Test
+    fun `FLAC 目标不接受目标体积`() {
+        val draft = Parameters(OperationKind.ConvertAudio, listOf(item("a.mp3", FileKind.Mp3))).apply {
+            audioTarget = AudioTarget.Flac
+            audioByTarget = true
+            targetSizeText = "不是体积"
+        }
+        assertNull(draft.validation(), "FLAC 不看目标体积")
+        assertEquals(Operation.AudioConvert(AudioTarget.Flac, null), draft.build())
+    }
+
+    @Test
+    fun `SQL 转 CSV 带上表名筛选`() {
+        val draft = Parameters(OperationKind.SqlToCsv, listOf(item("dump.sql", FileKind.Text))).apply {
+            sqlTableText = "users"
+        }
+        assertNull(draft.validation())
+        assertEquals(Operation.SqlToCsv("users"), draft.build())
     }
 }

@@ -31,6 +31,9 @@
 
 ## 已完成
 
+- [x] **FLAC 输出**：纯 JVM 流式编码（verbatim 子帧），ffmpeg 解码回来与源 PCM 逐字节相同；
+      M4A/WAV/FLAC 三目标 —— v0.65.0
+- [x] **SQL dump 转 CSV**：只读 CREATE TABLE + INSERT，每张表一份，表名筛选；core 解析器 + 引擎判据 —— v0.65.0
 - [x] **PDF 填表单**：读 AcroForm 字段名，按 `字段名=值` 填；可压平成静态或保留可编辑；
       真实文本/复选框夹具 + PyMuPDF 复核压平后的文字与勾选 —— v0.64.0
 - [x] **PDF 改纸张/缩放**：A4/A5/Letter，等比留白/裁边/拉伸；矢量缩放不转图片，旋转页按视觉方向；
