@@ -893,6 +893,11 @@ sealed interface Operation {
         override val label get() = "改成 ${paper.label}"
     }
 
+    /** 填 AcroForm：每行一个「字段名=值」；[flatten] 为真时填完压平成静态。 */
+    data class FillPdfForm(val spec: String, val flatten: Boolean = true) : Operation {
+        override val label get() = "填表单"
+    }
+
     /** 把页面里引用的位图导出；短边小于 [minEdge] 的跳过。 */
     data class ExtractPdfImages(
         val minEdge: Int = 0,

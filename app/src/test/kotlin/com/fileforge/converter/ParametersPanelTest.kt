@@ -73,6 +73,18 @@ class ParametersPanelTest {
     }
 
     @Test
+    fun `填表单拼出字段并拦截缺等号`() {
+        val draft = Parameters(OperationKind.FillPdfForm, listOf(item("a.pdf", FileKind.Pdf))).apply {
+            pdfFormSpec = "name=Alice;agree=true"
+        }
+        assertNull(draft.validation())
+        assertEquals(Operation.FillPdfForm("name=Alice;agree=true", true), draft.build())
+
+        draft.pdfFormSpec = "name"
+        assertTrue(draft.validation()!!.contains("字段名=值"), draft.validation())
+    }
+
+    @Test
     fun `图片水印没文字没 Logo 要拦下`() {
         val draft = Parameters(OperationKind.ImageWatermark, listOf(item("p.jpg", FileKind.Jpeg))).apply {
             imageWatermarkText = ""

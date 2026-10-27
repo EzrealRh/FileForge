@@ -74,6 +74,7 @@ import com.fileforge.core.text.TextEncoding
 import com.fileforge.core.pdf.PdfPermission
 import com.fileforge.core.pdf.PdfSecurity
 import com.fileforge.core.pdf.PageResizeMode
+import com.fileforge.core.pdf.PdfFormFills
 import com.fileforge.core.pdf.StampSpot
 import com.fileforge.core.util.SizeInput
 import com.fileforge.core.video.TrimPreview
@@ -170,7 +171,7 @@ fun OperationSheet(
                 Button(
                     onClick = { draft.build()?.let(onStart) },
                     enabled = problem == null,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).height(52.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).heightIn(min = 52.dp),
                 ) {
                     Text(problem ?: "开始${kind.label}")
                 }
@@ -230,6 +231,8 @@ class Parameters(
     var pdfCropMargin by mutableStateOf(24f)
     var pdfResizePaper by mutableStateOf(PdfPaper.A4)
     var pdfResizeMode by mutableStateOf(PageResizeMode.Contain)
+    var pdfFormSpec by mutableStateOf("")
+    var pdfFormFlatten by mutableStateOf(true)
     var pdfImageFormat by mutableStateOf(ImageFormat.Png)
     var pdfImageMinEdge by mutableStateOf(0f)
     var pdfEpubTitle by mutableStateOf("")
@@ -1176,6 +1179,22 @@ class Parameters(
                 PageSpecField("留空=所有页；也可只改几页，例：1,3-5", "内容矢量缩放，不转图片；横页配横纸")
                 Summary("按源页方向自动选横竖纸；表单与批注不跟着缩放，扫描图会按比例缩，字可能变糊。")
             }
+            OperationKind.FillPdfForm -> {
+                OutlinedTextField(
+                    value = pdfFormSpec,
+                    onValueChange = { pdfFormSpec = it },
+                    label = { Text("字段名=值，每行一个") },
+                    supportingText = { Text("复选框写 true/false；值里可以再带等号") },
+                    minLines = 3,
+                    maxLines = 6,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                PdfFormFields(items.firstOrNull { it.kind == FileKind.Pdf })
+                Segmented("填完", listOf("压平成静态", "保留可编辑"), if (pdfFormFlatten) 0 else 1) {
+                    pdfFormFlatten = it == 0
+                }
+                Summary("字段名区分大小写；填错会点名这份表单实际有哪些字段。压平后各阅读器都显示，不能再改。")
+            }
             OperationKind.ExtractPdfImages -> {
                 Segmented("导出格式", ImageFormat.entries.map { it.label }, pdfImageFormat.ordinal) {
                     pdfImageFormat = ImageFormat.entries[it]
@@ -1521,6 +1540,9 @@ class Parameters(
         if (kind == OperationKind.RotateImage && imageRotatePreset == 3 && imageRotateDegrees == 0f) {
             return "自己给角度时别写 0，那等于没转"
         }
+        if (kind == OperationKind.FillPdfForm) {
+            PdfFormFills.problem(pdfFormSpec)?.let { return it }
+        }
         if (startSecondText.isNotBlank() && startSecondText.toFloatOrNull() == null) return "开始秒数不是数字"
         if (durationSecondText.isNotBlank() && durationSecondText.toFloatOrNull() == null) return "取多少秒不是数字"
         return null
@@ -1686,6 +1708,7 @@ class Parameters(
             OperationKind.InsertBlankPages -> Operation.InsertBlankPages(pdfBlankSpec.trim())
             OperationKind.CropPdfPages -> Operation.CropPdfPages(pdfCropMargin.roundToInt())
             OperationKind.ResizePdfPages -> Operation.ResizePdfPages(pdfResizePaper, pdfResizeMode, pageSpec.trim())
+            OperationKind.FillPdfForm -> Operation.FillPdfForm(pdfFormSpec.trim(), pdfFormFlatten)
             OperationKind.ExtractPdfImages -> Operation.ExtractPdfImages(pdfImageMinEdge.roundToInt(), pdfImageFormat, 92)
             OperationKind.SplitPdfByOutline -> Operation.SplitPdfByOutline
             OperationKind.PdfToEpub -> Operation.PdfToEpub(pdfEpubTitle.trim(), pdfEpubAuthor.trim())
@@ -1852,6 +1875,35 @@ private fun SpecField(label: String, value: String, support: String, onChange: (
     )
 }
 
+/** 表单面板里先列出字段名：用户不用去别的阅读器里翻。只读块头与字段树，不渲染页面。 */
+@Composable
+private fun PdfFormFields(item: WorkItem?) {
+    if (item == null) return
+    var names by remember(item.file) { mutableStateOf<List<String>?>(null) }
+    LaunchedEffect(item.file) {
+        names = withContext(Dispatchers.IO) {
+            runCatching {
+                com.tom_roush.pdfbox.pdmodel.PDDocument.load(
+                    item.file,
+                    com.tom_roush.pdfbox.io.MemoryUsageSetting.setupTempFileOnly(),
+                ).use { doc ->
+                    val form = doc.documentCatalog.acroForm ?: return@use emptyList<String>()
+                    val out = ArrayList<String>()
+                    val iterator = form.fieldTree.iterator()
+                    while (iterator.hasNext()) out += iterator.next().fullyQualifiedName
+                    out
+                }
+            }.getOrNull()
+        }
+    }
+    val list = names ?: return
+    if (list.isEmpty()) {
+        Summary("这份 PDF 没读到可填写的表单字段")
+    } else {
+        Summary("字段：" + list.take(8).joinToString("、") + if (list.size > 8) " 等 ${list.size} 个" else "")
+    }
+}
+
 /**
  * 截取起点那一秒的画面：写好第一段就取一次，改数字时 300ms 防抖。
  * 走与「抽帧成图片」同一条解码路（含旋转），预览只解到 360px，不把整帧留在内存里。
@@ -1934,7 +1986,7 @@ private fun Summary(text: String) {
         text,
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
-        maxLines = 4,
+        maxLines = 6,
         overflow = TextOverflow.Ellipsis,
         modifier = Modifier.padding(top = 4.dp),
     )

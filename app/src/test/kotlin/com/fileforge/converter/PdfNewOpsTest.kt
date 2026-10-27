@@ -10,8 +10,11 @@ import com.fileforge.converter.data.WorkItem
 import com.fileforge.converter.data.Workspace
 import com.fileforge.converter.engine.PdfEngine
 import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.pdmodel.interactive.form.PDCheckBox
+import com.tom_roush.pdfbox.pdmodel.interactive.form.PDTextField
 import com.tom_roush.pdfbox.text.PDFTextStripper
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -99,5 +102,48 @@ class PdfNewOpsTest {
             assertEquals(90, page.rotation, "旋转角不能被改掉")
         }
         save(out.file, "landscape-a4.pdf")
+    }
+
+    private fun saveForm(out: File, name: String) {
+        val dir = File("build/pdf-form").apply { mkdirs() }
+        out.copyTo(File(dir, name), overwrite = true)
+    }
+
+    @Test
+    fun `填表单并压平，字段值进静态页面`() {
+        val out = engine.fillForm(
+            item("form.pdf"),
+            Operation.FillPdfForm("name=Alice;date=2026-10-27;agree=true", flatten = true),
+        )
+        PDDocument.load(out.file).use { doc ->
+            assertTrue(PDFTextStripper().getText(doc).contains("Alice"), "压平后文字层应能看到填的值")
+            val form = doc.documentCatalog.acroForm
+            val hasField = form != null && form.fieldTree.iterator().hasNext()
+            assertEquals(false, hasField, "压平后不应再留可编辑字段")
+        }
+        saveForm(out.file, "filled-flat.pdf")
+    }
+
+    @Test
+    fun `保留可编辑时字段值写回表单`() {
+        val out = engine.fillForm(
+            item("form.pdf"),
+            Operation.FillPdfForm("name=Bob;agree=true", flatten = false),
+        )
+        PDDocument.load(out.file).use { doc ->
+            val form = doc.documentCatalog.acroForm!!
+            assertEquals("Bob", (form.getField("name") as PDTextField).value)
+            assertTrue((form.getField("agree") as PDCheckBox).isChecked, "复选框要被勾上")
+        }
+        saveForm(out.file, "filled-editable.pdf")
+    }
+
+    @Test
+    fun `字段名写错要点名这份表单有什么`() {
+        val error = assertThrows(IllegalStateException::class.java) {
+            engine.fillForm(item("form.pdf"), Operation.FillPdfForm("nope=x", flatten = true))
+        }
+        assertTrue(error.message!!.contains("name"), error.message)
+        assertTrue(error.message!!.contains("agree"), error.message)
     }
 }

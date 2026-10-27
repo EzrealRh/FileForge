@@ -14,6 +14,7 @@ import com.fileforge.core.pdf.PageGroups
 import com.fileforge.core.pdf.PageNumberPlan
 import com.fileforge.core.pdf.PageRangeParser
 import com.fileforge.core.pdf.PageResizePlan
+import com.fileforge.core.pdf.PdfFormFills
 import com.fileforge.core.pdf.PdfCompressPlan
 import com.fileforge.core.pdf.PdfDoc
 import com.fileforge.core.pdf.PdfLine
@@ -60,6 +61,10 @@ import com.tom_roush.pdfbox.pdmodel.encryption.AccessPermission
 import com.tom_roush.pdfbox.pdmodel.encryption.InvalidPasswordException
 import com.tom_roush.pdfbox.pdmodel.encryption.StandardProtectionPolicy
 import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject
+import com.tom_roush.pdfbox.pdmodel.interactive.form.PDCheckBox
+import com.tom_roush.pdfbox.pdmodel.interactive.form.PDPushButton
+import com.tom_roush.pdfbox.pdmodel.interactive.form.PDTextField
+import com.tom_roush.pdfbox.pdmodel.interactive.form.PDField
 import com.tom_roush.pdfbox.text.PDFTextStripper
 import com.tom_roush.pdfbox.util.Matrix
 import com.fileforge.core.model.FileKind
@@ -1023,6 +1028,46 @@ class PdfEngine(private val context: Context, private val workspace: Workspace) 
                 OutputNaming.tagged(item.name, "裁边", "pdf"),
                 output,
                 "${document.numberOfPages} 页四边各收 $marginPt pt（内容不重排）",
+            )
+        } finally {
+            runCatching { document.close() }
+        }
+    }
+
+    /** 填 AcroForm：按字段名写值；可压平成静态，也可保留可编辑。 */
+    fun fillForm(item: WorkItem, operation: Operation.FillPdfForm): EngineOutput {
+        val document = loadForReading(item.file)
+        try {
+            val form = document.documentCatalog.acroForm
+                ?: error("这份 PDF 没有可填写的表单字段")
+            val fills = PdfFormFills.parse(operation.spec)
+            require(fills.isNotEmpty()) { "先写要填的字段，每行一个：字段名=值" }
+            val names = ArrayList<String>()
+            val iterator = form.fieldTree.iterator()
+            while (iterator.hasNext()) names += iterator.next().fullyQualifiedName
+            fills.forEach { fill ->
+                val field: PDField = form.getField(fill.name)
+                    ?: error("找不到字段「${fill.name}」；这份表单有：${names.joinToString("、").ifEmpty { "（没有字段）" }}")
+                when (field) {
+                    is PDTextField -> field.value = fill.value
+                    is PDCheckBox -> if (PdfFormFills.truthy(fill.value)) field.check() else field.unCheck()
+                    is PDPushButton -> error("字段「${fill.name}」是按钮，不能填")
+                    else -> field.setValue(fill.value)
+                }
+            }
+            if (operation.flatten) {
+                runCatching { form.flatten() }.getOrElse {
+                    throw IllegalStateException("填好了，但压平成静态失败：${it.message ?: it.javaClass.simpleName}", it)
+                }
+            } else {
+                form.setNeedAppearances(true)
+            }
+            val output = workspace.newStagingFile("pdf")
+            document.save(output)
+            return EngineOutput(
+                OutputNaming.tagged(item.name, "填表", "pdf"),
+                output,
+                "${fills.size} 个字段 · ${if (operation.flatten) "已压平成静态" else "保留可编辑"}",
             )
         } finally {
             runCatching { document.close() }
