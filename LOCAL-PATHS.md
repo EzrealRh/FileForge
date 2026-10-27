@@ -45,9 +45,9 @@
 
 | 路径 | 是什么 |
 | --- | --- |
-| `gateNN.sh` + `gateNN.log` | 发版闸门（串行跑全部判据与反例、重出包、重刷产物、复核）。当前是 `gate75.sh`（面向 0.64.0）→ `gate75.log`：990 步 0 红；上一轮 `gate74.sh` → `gate74.log`：988 步 0 红 |
+| `gateNN.sh` + `gateNN.log` | 发版闸门（串行跑全部判据与反例、重出包、重刷产物、复核）。当前是 `gate76.sh`（面向 0.65.0）→ `gate76.log`：992 步 0 红；上一轮 `gate75.sh` → `gate75.log`：990 步 0 红 |
 | `device_*.py` | 真机驱动：`device_image.py`（改图片方向这一族）、`device_extra.py`（BMP/TIFF 与 GIF/ICO）、`device_pdf.py` / `device_insert.py`（PDF 新操作）、`device_audio.py`（音量/降噪）、`device_eo.py`（EPUB / ODS 印成 PDF）、`device_xlsx.py`、`device_diag.py`、`device_sheet_list.py`、`device_epub_msg.py`；日志 `device-*.txt` |
-| `make_release.py`、`check_release.py` | 发 GitHub Release（带包与说明）与**发完后按 sha256 回读远端资产**；0.64 用 `make_release_0640.py` / `check_release_0640.py`（后者读 API digest + aapt2 包版本 + dex 文案，不下载整包） |
+| `make_release.py`、`check_release.py` | 发 GitHub Release（带包与说明）与**发完后按 sha256 回读远端资产**；0.65 用 `make_release_0650.py` / `check_release_0650.py`（后者读 API digest + aapt2 包版本 + dex 文案，不下载整包） |
 | `notes-05xx.md` | 每个版本的 Release 说明正文（发版脚本 `--notes-file` 指它） |
 | `pdfprobe/`、`imgprobe/` | 探针的编译产物与输出缓存（`PDFPROBE_OUT` / `IMGPROBE_OUT` 的默认值；闸门里显式传这两个） |
 | `pulled-eo/`、`pulled-image/`、`pulled-*/` | 从手机共享存储拉回来的产物，判据读的就是这些 |

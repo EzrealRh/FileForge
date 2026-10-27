@@ -4,6 +4,7 @@
 源与产物由 FlacEncoderTest 写到 core/build/flac/：
   source.wav / encoded.flac
 """
+import hashlib
 import os
 import subprocess
 import sys
@@ -46,6 +47,11 @@ def main():
     check("ffprobe 能读", probe.returncode == 0, probe.stderr.strip()[:120])
     check("采样率 48000", "sample_rate=48000" in probe.stdout)
     check("双声道", "channels=2" in probe.stdout)
+
+    raw = open(flac, "rb").read()
+    md5_in_file = raw[26:42].hex() if raw[:4] == b"fLaC" else ""
+    check("STREAMINFO 的 MD5 与源 PCM 一致", md5_in_file == hashlib.md5(src).hexdigest(),
+          "%s vs %s" % (md5_in_file, hashlib.md5(src).hexdigest()))
 
     decoded = subprocess.run(["ffmpeg", "-v", "error", "-i", flac, "-f", "s16le", "-acodec", "pcm_s16le", "-"],
                             capture_output=True)
