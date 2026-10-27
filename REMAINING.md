@@ -1,39 +1,44 @@
-# 还要做的（0.62 起）
+# 还要做的（0.63 起）
 
-当前状态：0.62.0 已发布（`https://github.com/EzrealRh/FileForge/releases/tag/v0.62.0`，asset `fileforge-v0.62.0-release.apk`，54,611,235 字节）；
-`gate73` 闸门 **986 步 0 红**；版本 0.62.0 / versionCode 78 已推送。
-**0.62 远端资产已核对**：GitHub API 的 `digest` 为
-`sha256:c7dcc650c7265448d92ce78ce3f8e0e8afd7a16477b89215f31d7408a5c95e32`，与本机 sha256 一致；
-asset 大小也一致，本机 aapt2 读出 `0.62.0 / 78`，release dex 含 WebP 清理文案（`check_release_0620.py` 退出 0）。
+当前状态：0.63.0 已发布（`https://github.com/EzrealRh/FileForge/releases/tag/v0.63.0`，asset `fileforge-v0.63.0-release.apk`，54,611,235 字节）；
+`gate74` 闸门 **988 步 0 红**；版本 0.63.0 / versionCode 79 已推送。
+**0.63 远端资产已核对**：GitHub API 的 `digest` 为
+`sha256:fc29ef1bba5593a0915aa25841463f30c16d98db5603461b39d142b0a5bc17df`，与本机 sha256 一致；
+asset 大小也一致，本机 aapt2 读出 `0.63.0 / 79`，release dex 含改纸张入口文案（`check_release_0630.py` 退出 0）。
 
 ## 已完成
 
+### 0.63.0 · PDF 改纸张/缩放
+
+- A4 / A5 / Letter，等比留白、等比裁边、拉伸铺满；可只改部分页；横页自动配横纸。
+- 内容矢量缩放不转图片；旋转 90 的页按视觉方向算矩阵，页框保持未旋转尺寸。
+- 判据：core `PageResizePlanTest` 7 例（A4→A5、Letter→A4、旋转 90、拉伸两轴对调、源左下角不在原点），core 951 例；
+  app `PdfNewOpsTest` 2 例 + 参数面板 1 例；`tools/verify_pdf_resize.py` 用 PyMuPDF 复核页框、文字层与 0.706 的缩放比例。
+- 表单/批注不跟着缩放，结果说明会点名数量。
+
 ### 0.62.0 · WebP 元数据清理
 
-- 详情读出 WebP 的 EXIF（机型、方向、时间等）；清理删掉 EXIF / XMP，重算 RIFF 总长度、清掉 VP8X 的对应标志位。
-- 画面块与 ICC 原字节保留；WebP 详情只读块头与 EXIF 载荷，不把整图搬进堆。
-- 判据：`ImageMetaTest` 3 例新增（段清单、随机读写报告、清理后画面块 sha 与标志位），core 944 例；
-  Pillow 复核像素逐点相同、EXIF 读不到、ICC 一字节没改、RIFF 长度与 VP8X 标志位正确。
+- 详情读 EXIF；清理删 EXIF / XMP，重算 RIFF 长度、清 VP8X 标志位；画面块与 ICC 原字节保留。
+- core 944 例时的 3 条新增判据；Pillow 逐点像素、ICC、RIFF 长度与标志位复核。
 
 ### 0.61.0 · 视频截取段预览
 
 - 写好第一段就显示起点附近的一帧，300ms 防抖；走与「抽帧成图片」同一条带旋转的解码路，预览 360px。
-- core `TrimPreviewTest` 2 例；真机预览与成片开头的一致性仍在 P1。
 
 ### 0.60.0 · 水印「左下」落位
 
-- 文字与 Logo 两处 `spotX` 修正；像素判据改前红（左边距 150px）、改后绿（13px）。
+- 文字与 Logo 两处 `spotX` 修正；像素判据改前红、改后绿。
 
 ### 0.59.0 · 水印多行文字
 
-- 图片 / GIF / 视频水印换行即分行，单处与平铺按整块对齐；core 4 例 + 参数面板 2 例 + 逐行数字带的像素判据。
+- 图片 / GIF / 视频水印换行即分行，单处与平铺按整块对齐。
 
 ## 重活期间的内存记录（本机 16 GB）
 
-- gate70 / gate71 / gate72 / gate73 都是串行跑：构建 2g / 4 workers / 不并行，模拟器全程没启动。
-- 四次闸门期间 crashwatch **没有 MEMHIGH**：峰值 61.9% / 63.1% / 78.9% / 78.8%，最低可用 1727 MB；
-  都在 85% / 800 MB 停下线以上。gate73 用时约 57 分钟。
-- gate 之外 10-25 10:18 出现过 82.7%，是 Brotato / powershell，不是构建或模拟器。
+- gate70–gate74 都是串行跑：构建 2g / 4 workers / 不并行，模拟器全程没启动。
+- 五次闸门期间 crashwatch **没有 MEMHIGH**：峰值 61.9% / 63.1% / 78.9% / 78.8% / 83.0%，最低可用 1723 MB；
+  gate74 峰值离 85% 停下线只差 2 个百分点，后续重活前先看 `watch.log`。
+- gate74 用时约 58 分钟（988 步，比上一轮多 2 步是新增的 `verify_pdf_resize.py` 跑了两遍）。
 
 ## P1（已有实现，还差真机/外挂路径）
 
@@ -46,16 +51,15 @@ asset 大小也一致，本机 aapt2 读出 `0.62.0 / 78`，release dex 含 WebP
 ## P2（平台或依赖限制）
 
 - 编码输出：AVIF / HEIC、MP3 / FLAC / Opus —— Android 公共 API 没有这些编码器；要么引 NDK 库，要么维持“只读/不写”。
-- PDF：改纸张/缩放、表单填写（读取/填写 AcroForm）。
+- PDF 表单填写（读取/填写 AcroForm）—— 下一批做。
 - 数据：SQL / Parquet。
 - 元数据清理扩展到 HEIC；图片加密（或明确不做）。
 
 ## 下一批（“全都做”的可行部分）
 
-- PDF 改纸张/缩放：内容矢量缩放，旋转页按视觉坐标处理；Robolectric + 真实 PDFBox 判页框与文字位置。
-- PDF 表单填写：读字段名、按 `名称=值` 填，填完压平成静态；判据用真实 AcroForm 夹具。
-- 上述两项完成后做 FLAC 输出（纯 JVM 编码器，ffmpeg 复核），再评估 Opus / SQL。
-- 全仓 bug 与布局复查：先查参数面板滚动、长文本溢出与小屏按钮可达性。
+- PDF 表单填写：读字段名、按 `名称=值` 填，填完压平成静态；真实 AcroForm 夹具 + PyMuPDF 复核。
+- FLAC 输出：纯 JVM 编码器（verbatim/fixed 子帧 + Rice 编码），ffmpeg 复核无损。
+- 全仓 bug 与布局复查：参数面板滚动、长文本溢出与小屏按钮可达性；先列证据再改。
 
 ## 每次重活的铁律（本机 16 GB）
 
@@ -67,5 +71,5 @@ asset 大小也一致，本机 aapt2 读出 `0.62.0 / 78`，release dex 含 WebP
 4. `gradle.properties` 里的 2g / 4 workers / 不并行不要覆盖。
 5. 发版/判据/模拟器不要与第二个会话或 Computer Use 同时跑。
 6. 推送 TLS 抖动时先试 `git -c http.version=HTTP/1.1 push origin HEAD`；Clash 7897 节点全部 502 时，
-   用控制管道 `\\.\pipe\verge-mihomo-production-<hash>` 只切运行时选中节点（不动分组/分流），
-   本机实测「🇩🇪 直连德国」可用；`api.github.com` 直连稳定。
+   用控制管道 `\\.\pipe\verge-mihomo-production-<hash>` 只切运行时选中节点（不动分组/分流）；
+   本机实测「🇩🇪 直连德国」可用，`api.github.com` 直连稳定。
